@@ -1,0 +1,8 @@
+{
+  "name": "KM RMP Portal Dev_V0.0.9",
+  "description": "ระบบบริหารจัดการและพัฒนาองค์ความรู้ (Knowledge Management) อย่างครบวงจร บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด (Royal Meiwa Pax Co., Ltd.) ประกอบด้วย Document Control, Onboarding Academy, Learning \u0026 Certification, Technical KB, และ Expert Yellow Pages",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
