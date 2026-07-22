@@ -96,7 +96,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const [newUser, setNewUser] = useState({
     name: '',
     employeeId: '',
-    department: 'ฝ่ายผลิต (Production)',
+    department: 'Select Department',
     position: 'Operator',
     role: 'Viewer' as Role,
     email: '',
@@ -330,12 +330,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             list.push({
               employeeId: empIdVal.toString().trim(),
               name: nameVal.toString().trim(),
-              department: deptVal ? deptVal.toString().trim() : 'ฝ่ายผลิต (Production)',
+              department: deptVal ? deptVal.toString().trim() : '',
               position: posVal ? posVal.toString().trim() : 'Operator',
               startDate: startDateFormatted,
-              level: lvlVal ? lvlVal.toString().trim() : 'Junior Staff',
-              email: emailVal ? emailVal.toString().trim() : `${empIdVal.toString().trim().toLowerCase()}@royalmeiwa.co.th`,
-              phone: phoneVal ? phoneVal.toString().trim() : '080-000-0000',
+              level: lvlVal ? lvlVal.toString().trim() : '',
+              email: emailVal ? emailVal.toString().trim() : `${empIdVal.toString().trim().toLowerCase()}@royalmeiwa.com`,
+              phone: phoneVal ? phoneVal.toString().trim() : '0xx-xxxxxxx',
               status: 'Imported'
             });
           }
@@ -402,14 +402,14 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   // Report Generator States
   const [reportType, setReportType] = useState<'INDIVIDUAL' | 'DEPARTMENT' | 'ALL' | 'SEARCH_LOGS'>('ALL');
   const [selectedRepUser, setSelectedRepUser] = useState<string>(users[0]?.id || '');
-  const [selectedRepDept, setSelectedRepDept] = useState<string>('ฝ่ายผลิต (Production)');
+  const [selectedRepDept, setSelectedRepDept] = useState<string>('Select Department');
 
   // Search log sub-tabs and resolver states
   const [searchReportTab, setSearchReportTab] = useState<'GAPS' | 'TOP_KEYWORDS' | 'RAW_LOGS'>('GAPS');
   const [resolvedGaps, setResolvedGaps] = useState<string[]>([]);
   const [assigningGap, setAssigningGap] = useState<string | null>(null);
   const [quickAnswerText, setQuickAnswerText] = useState('');
-  const [assignedExpert, setAssignedExpert] = useState('ช่างสมชาย (Senior Production Engineer)');
+  const [assignedExpert, setAssignedExpert] = useState('Select Employee');
 
   const departments = DEPARTMENTS;
 
@@ -419,7 +419,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       setSelectedRepUser(currentUser.id);
     } else if (currentUser.role === 'Editor') {
       setReportType('DEPARTMENT');
-      setSelectedRepDept(currentUser.department || 'ฝ่ายผลิต (Production)');
+      setSelectedRepDept(currentUser.department || 'Select Department');
       const deptUsers = users.filter(u => u.department === currentUser.department);
       if (deptUsers.length > 0) {
         setSelectedRepUser(deptUsers[0].id);
@@ -480,7 +480,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     setNewUser({
       name: '',
       employeeId: '',
-      department: 'ฝ่ายผลิต (Production)',
+      department: 'Select Department',
       position: 'Operator',
       role: 'Viewer',
       email: '',
@@ -986,9 +986,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                             onChange={(e) => handleRoleChange(u.id, e.target.value as Role)}
                             className="bg-white border border-slate-200 py-1.5 px-2 rounded-lg text-xs leading-none text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full cursor-pointer"
                           >
-                            <option value="Admin">🛡️ Admin (แอดมิน)</option>
-                            <option value="Editor">⚙️ Editor (ผู้ควบคุมข้อมูล)</option>
-                            <option value="Viewer">👀 Viewer (ผู้เข้าชมทั่วไป)</option>
+                            <option value="Admin">Admin</option>
+                            <option value="Editor">Editor</option>
+                            <option value="Viewer">Viewer</option>
                           </select>
                         </div>
                       ) : (
@@ -997,7 +997,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                           displayedRole === 'Editor' ? 'bg-indigo-50 text-[#15329c] border border-indigo-150' :
                           'bg-slate-100 text-slate-600 border border-slate-200'
                         }`}>
-                          {displayedRole === 'Admin' ? '🛡️ Admin' : displayedRole === 'Editor' ? '⚙️ Editor' : '👀 Viewer'}
+                          {displayedRole === 'Admin' ? 'Admin' : displayedRole === 'Editor' ? 'Editor' : 'Viewer'}
                           {currentUser.id === u.id && <span className="text-[7.5px] lowercase font-sans">(คุณเอง)</span>}
                         </span>
                       )}
@@ -2517,20 +2517,20 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   onChange={(e) => setNewUser({ ...newUser, role: e.target.value as Role })}
                   className="w-full bg-white border border-slate-200 p-2 rounded-lg text-xs"
                 >
-                  <option value="Viewer">👀 Viewer (ดูประวัติได้อย่างเจียมตัว)</option>
-                  <option value="Editor">⚙️ Editor (ผู้แก้ไขข้อมูลร่วมกัน)</option>
-                  <option value="Admin">🛡️ Admin (ผู้ควบคุมเบ็ดเสร็จ)</option>
+                  <option value="Viewer">Viewer</option>
+                  <option value="Editor">Editor</option>
+                  <option value="Admin">Admin</option>
                 </select>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 block">ที่อยู่อีเมลประจำโรงจัด:</label>
+                  <label className="text-[10px] font-bold text-slate-500 block">email:</label>
                   <input
                     type="email"
                     value={newUser.email}
                     onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                    placeholder="sommai@rmp.com"
+                    placeholder="sommai@royalmeiwa.com"
                     required
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-xs font-mono"
                   />
@@ -2576,7 +2576,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         className="hidden" 
                       />
                     </label>
-                    <p className="text-[9px] text-slate-400 mt-1">✓ อัปโหลดรูปถ่ายจริงเพื่อระบุตนตามเกณฑ์ระบบบริหาร</p>
+                    <p className="text-[9px] text-slate-400 mt-1">อัปโหลดรูปถ่ายจริง</p>
                   </div>
                 </div>
               </div>

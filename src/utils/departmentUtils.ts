@@ -12,56 +12,53 @@ export interface DepartmentStructure {
 export const DEPARTMENT_HIERARCHY: DepartmentStructure[] = [
   {
     name: 'Production (ผลิต)',
-    code: 'PROD',
+    code: 'PD',
     subDepartments: [
-      'Extrusion / Film Blowing (งานเป่าฟิล์ม)',
-      'Lamination (งานประกบฟิล์ม / กาว)',
-      'Slitting (งานผ่าม้วนฟิล์ม / สลิต)',
-      'Bag Making / Converting (งานแปรรูปขึ้นรูปถุง)',
-      'Engineering & Maintenance (วิศวกรรมและซ่อมบำรุงโรงงาน)'
+      'Production (ผลิต)',
+      'Printing /(งานพิมพ์สี)',
+      'Dry-Lamination (งานประกบฟิล์ม)',
+      'Powder Spray (งานพ่นฝุ่น)',
+      'Inspection & Slitting (งานตรวจสอบและผ่าม้วนฟิล์ม)',
+      'Bag-Making(งานขึ้นรูปถุง)',
     ]
   },
   {
     name: 'Quality (คุณภาพ)',
     code: 'QA',
     subDepartments: [
-      'Quality Control - Line Inspection (QC ประจำสายการผลิต)',
-      'Quality Assurance & System (QA ระบบคุณภาพและกฎหมาย)',
-      'QA Laboratory & Chemical (ห้องแล็บและทดสอบเคมีภัณฑ์)'
+      'Quality Control(QC)',
+      'Quality Assurance(QA)',
     ]
   },
   {
     name: 'Warehouse (คลังสินค้า)',
     code: 'WH',
     subDepartments: [
-      'Raw Materials Store (คลังเม็ดพลาสติกและเคมีภัณฑ์)',
-      'Finished Goods & Logistics (คลังสินค้าสำเร็จรูปและจัดส่ง)',
-      'Spare Parts Store (คลังอะไหล่และอุปกรณ์ช่าง)'
+      'Raw Materials Store (คลังวัตถุดิบ)',
+      'Finished Goods (คลังสินค้าสำเร็จรูป)',
     ]
   },
   {
-    name: 'Planning (วางแผน)',
-    code: 'PLAN',
+    name: 'Production Control (วางแผน)',
+    code: 'PC',
     subDepartments: [
       'Production Planning (วางแผนการผลิต)',
-      'Material Requirement Planning - MRP (วางแผนวัตถุดิบ)'
     ]
   },
   {
     name: 'Technical (เทคนิค)',
-    code: 'TECH',
+    code: 'TC',
     subDepartments: [
       'Research & Development (วิจัยและพัฒนาผลิตภัณฑ์ R&D)',
-      'Process Improvement / Kaizen (ปรับปรุงกระบวนการผลิต)'
     ]
   },
   {
     name: 'Engineering (วิศวกรรม)',
-    code: 'ENG',
+    code: 'EN',
     subDepartments: [
-      'Electrical & Automation (ระบบไฟฟ้าและอัตโนมัติ)',
+      'Electrical(ระบบไฟฟ้า)',
       'Mechanical Maintenance (ซ่อมบำรุงเครื่องจักรกล)',
-      'Utility & Facilities (ระบบสาธารณูปโภคโรงงาน)'
+      'Engineer (วิศวกร)',
     ]
   },
   {
@@ -73,9 +70,9 @@ export const DEPARTMENT_HIERARCHY: DepartmentStructure[] = [
   },
   {
     name: 'Safety (ความปลอดภัย)',
-    code: 'SHE',
+    code: 'QS',
     subDepartments: [
-      'Safety & Environmental (ความปลอดภัย จป. และสิ่งแวดล้อม)'
+      'Safety & Environmental (ความปลอดภัย จป. และสิ่งแวดล้อม)',
     ]
   },
   {
@@ -113,14 +110,15 @@ export const DEPARTMENT_HIERARCHY: DepartmentStructure[] = [
     name: 'Customer Service (บริการลูกค้า)',
     code: 'CS',
     subDepartments: [
-      'Customer Support & Order Processing (บริการและรับคำสั่งซื้อ)'
+      'Customer Support (บริการลูกค้าและแก้ไขปัญหา)',
     ]
   },
   {
     name: 'Information Technology (เทคโนโลยีสารสนเทศ)',
     code: 'IT',
     subDepartments: [
-      'IT Infrastructure & Systems (โครงสร้างพื้นฐานและซอฟต์แวร์)'
+      'IT Support (สนับสนุนด้านเทคโนโลยีสารสนเทศ)',
+      'Programming (พัฒนาโปรแกรมและระบบสารสนเทศ)'
     ]
   },
   {
