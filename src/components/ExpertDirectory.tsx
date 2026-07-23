@@ -201,7 +201,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
               Expert Directory & Yellow Pages (ทำเนียบค้นหาผู้เชี่ยวชาญ)
             </h2>
             <p className="text-xs text-slate-505 mt-1">
-              ต้องการแก้ไขวิกฤตสายพานหยุดเร่งด่วน? ค้นหาหัวข้อทักษะความชำนาญ ISO ตรวจสอบตารางเข้าเวรเวที และกดแชทส่งข้อความขอคำปรึกษาได้ทันที
+              ต้องการแก้ไขวิกฤตเร่งด่วน? ค้นหาหัวข้อทักษะความชำนาญ ISO ตรวจสอบตารางเข้าเวร และกดแชทส่งข้อความขอคำปรึกษาได้ทันที
             </p>
           </div>
 
@@ -583,17 +583,6 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                                 <span className="text-[9px] text-amber-600 font-semibold italic animate-pulse">
                                   ⌛ คำถามได้รับส่งแล้วและอยู่ระหว่างรอวิศวกรวิจารณ์...
                                 </span>
-
-                                {/* Simulated expert reply triggers for evaluation */}
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    onAddContactReply(req.id, `ได้รับเรื่องเรียบร้อยแล้วค่ะ แนะนำให้เปิดเครื่องบำรุงล้างไซโลดักฝุ่นตาม WI_MAINT_001 หน้า 3 ทันที และสามารถโทรคุยตรงที่หมายเลขต่อโรงสี 315 ได้เลยนะคะ`);
-                                  }}
-                                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2 py-0.5 rounded text-[8px] cursor-pointer"
-                                >
-                                  จำลองการสแกนตอบคำถามของวิศวกร
-                                </button>
                               </div>
                             )}
                           </div>

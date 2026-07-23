@@ -216,7 +216,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-bold text-slate-900">
-            Technical Knowledge Base (สารัตถะคลังความรู้เชิงช่างเทคนิค)
+            Technical Knowledge Base (คลังความรู้เชิงเทคนิค)
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             ดึง Tacit Knowledge (ความรู้ในหัวคนเก่ง) จากผู้เชี่ยวชาญ คั้นบันทึกเป็นสูตรถอดแกนแก้ไขอุปสรรค ลดปัญหาความชำนาญสูญหาย

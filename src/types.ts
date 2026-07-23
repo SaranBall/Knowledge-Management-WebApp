@@ -3,34 +3,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type Role = 'Admin' | 'Editor' | 'Viewer';
+export type Role = "Admin" | "Editor" | "Viewer";
 
-export type UserStatus = 'Active' | 'Suspended' | 'Terminated';
+export type UserStatus = "Active" | "Suspended" | "Terminated";
 
 export interface User {
   id: string;
   name: string;
   employeeId: string;
-  department: string;
-  position: string;
+  departmentId: string; // ← เปลี่ยนจาก department: string
+  position: string; // ← คงเดิม แยกขาดจาก department แน่นอน ไม่ให้ sub-dept มาทับอีก
   role: Role;
   avatarUrl?: string;
   email: string;
   phone: string;
   password?: string;
-  status?: UserStatus; // Atypical Role Lifecycles
-  startDate?: string; // วันเริ่มงาน (YYYY-MM-DD)
+  status?: UserStatus;
+  startDate?: string;
 }
 
 export interface SystemAuditLog {
   id: string;
-  action: string;      // e.g., 'APPROVE_MEMBER', 'DELETE_MEMBER', 'UPDATE_MEMBER', 'UPDATE_ROLE', 'SUSPEND_MEMBER', 'TERMINATE_MEMBER'
-  details: string;     // What was changed/created
+  action: string; // e.g., 'APPROVE_MEMBER', 'DELETE_MEMBER', 'UPDATE_MEMBER', 'UPDATE_ROLE', 'SUSPEND_MEMBER', 'TERMINATE_MEMBER'
+  details: string; // What was changed/created
   performedBy: string; // Admin info: "Name (EmployeeId)"
-  timestamp: string;   // ISO-8601/Human format
+  timestamp: string; // ISO-8601/Human format
 }
 
-export type DocType = 'QP' | 'WI' | 'FORM';
+export type DocType = "QP" | "WI" | "FORM";
 
 export interface DocumentItem {
   id: string;
@@ -41,11 +41,11 @@ export interface DocumentItem {
   owner: string;
   revision: number;
   effectiveDate: string;
-  status: 'Draft' | 'Pending Approval' | 'Published';
+  status: "Draft" | "Pending Approval" | "Published";
   approvedBy?: string;
   approvedAt?: string;
   fileUrl: string; // Mock file location/download link
-  fileType: 'PDF' | 'Excel' | 'Word' | 'Video';
+  fileType: "PDF" | "Excel" | "Word" | "Video";
   exampleText?: string;
   exampleImage?: string;
   exampleVideo?: string;
@@ -62,14 +62,14 @@ export interface Lesson {
   title: string;
   content: string; // Markdown or rich text
   durationMinutes: number;
-  mediaType?: 'PDF' | 'Image' | 'Slides' | 'Video' | 'Text';
+  mediaType?: "PDF" | "Image" | "Slides" | "Video" | "Text";
   mediaUrl?: string;
 }
 
 export interface QuizQuestion {
   id: string;
   question: string;
-  type: 'SingleChoice' | 'TrueFalse' | 'Matching' | 'Essay';
+  type: "SingleChoice" | "TrueFalse" | "Matching" | "Essay";
   options?: string[]; // For single choice
   pairs?: { left: string; right: string }[]; // For matching
   correctAnswer: string; // For single choice/true false
@@ -79,7 +79,7 @@ export interface Course {
   id: string;
   title: string;
   description: string;
-  type: 'Onboarding' | 'General';
+  type: "Onboarding" | "General";
   targetPositions: string[]; // Positions matching Competency Matrix (e.g. ["QC", "Warehouse Staff"])
   lessons: Lesson[];
   quiz: QuizQuestion[];
@@ -106,7 +106,7 @@ export interface UserCourseProgress {
   id: string;
   userId: string;
   courseId: string;
-  status: 'Assigned' | 'Learning' | 'Completed';
+  status: "Assigned" | "Learning" | "Completed";
   startDate?: string;
   completedDate?: string;
   score?: number;
@@ -114,24 +114,29 @@ export interface UserCourseProgress {
   totalStudyMinutes: number;
 }
 
-export type KBType = 'Troubleshooting' | 'Best Practice' | 'Lesson Learned' | 'Kaizen' | 'FAQ';
+export type KBType =
+  | "Troubleshooting"
+  | "Best Practice"
+  | "Lesson Learned"
+  | "Kaizen"
+  | "FAQ";
 
 export interface KBArticle {
   id: string;
   title: string;
   type: KBType;
-  problem: string;      // ปัญหา
-  cause?: string;       // สาเหตุ
-  solution: string;     // วิธีแก้ไข
-  prevention?: string;  // วิธีป้องกัน
-  relatedWIs: string[];  // Code of related WIs (e.g. ["WI-MAINT-001"])
+  problem: string; // ปัญหา
+  cause?: string; // สาเหตุ
+  solution: string; // วิธีแก้ไข
+  prevention?: string; // วิธีป้องกัน
+  relatedWIs: string[]; // Code of related WIs (e.g. ["WI-MAINT-001"])
   tags: string[];
   author: string;
   authorTitle: string;
   authorDept: string;
   views: number;
   likes: number;
-  status: 'Pending' | 'Approved';
+  status: "Pending" | "Approved";
   createdAt: string;
 }
 
@@ -157,7 +162,7 @@ export interface ContactRequest {
   expertName: string;
   topic: string;
   message: string;
-  status: 'Sent' | 'Replied';
+  status: "Sent" | "Replied";
   replyMessage?: string;
   createdAt: string;
 }
@@ -184,7 +189,7 @@ export interface CustomResource {
   id: string;
   title: string;
   content: string;
-  sourceType: 'Text' | 'URL' | 'Manual';
+  sourceType: "Text" | "URL" | "Manual";
   addedBy: string;
   createdAt: string;
 }
@@ -198,7 +203,7 @@ export interface EmployeeMaster {
   level: string;
   email: string;
   phone: string;
-  status: 'Imported' | 'Registered';
+  status: "Imported" | "Registered";
 }
 
 // --- Dynamic Competency & Skill Gap Tracking types ---
@@ -208,14 +213,14 @@ export interface UserCompetency {
   skillName: string;
   category: string;
   expectedLevel: number; // 1 to 4
-  actualLevel: number;   // 1 to 4
+  actualLevel: number; // 1 to 4
   description: string;
   linkedCourseId?: string;
   linkedDocId?: string;
 }
 
 // --- Certification & Retraining Cycle Alerts types ---
-export type CertStatus = 'Valid' | 'ExpiringSoon' | 'Expired';
+export type CertStatus = "Valid" | "ExpiringSoon" | "Expired";
 
 export interface UserCertificate {
   id: string;
@@ -236,7 +241,13 @@ export interface KMContributionLog {
   userId: string;
   userName: string;
   points: number;
-  activityType: 'KB_CONTRIBUTION' | 'KAIZEN_SUBMIT' | 'COURSE_PERFECT' | 'COURSE_PASS' | 'QR_ATTENDANCE' | 'EXPERT_REPLY';
+  activityType:
+    | "KB_CONTRIBUTION"
+    | "KAIZEN_SUBMIT"
+    | "COURSE_PERFECT"
+    | "COURSE_PASS"
+    | "QR_ATTENDANCE"
+    | "EXPERT_REPLY";
   description: string;
   timestamp: string;
 }
@@ -249,6 +260,3 @@ export interface UserKMPoints {
   points: number;
   level: number; // 1 to 5 based on points
 }
-
-
-

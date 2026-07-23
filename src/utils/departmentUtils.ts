@@ -3,159 +3,220 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface DepartmentStructure {
-  name: string;
-  code: string;
-  subDepartments: string[];
+// โครงสร้างนี้จำลองหน้าตาตาราง `departments` ใน DB ล่วงหน้า
+// ตอนย้ายไป Postgres จริง แค่ INSERT ตาม array นี้ตรงๆ ไม่ต้องออกแบบใหม่
+export interface Department {
+  id: string; // จะกลายเป็น PK ตอนย้าย DB
+  parentId: string | null; // NULL = main department, มีค่า = sub-department (สังกัดใต้แผนกผลิต)
+  name: string; // ชื่อแสดงผล
+  code: string; // รหัสสั้นจากระบบ HR จริงของบริษัท ใช้เทียบ logic แทน string match
 }
 
-export const DEPARTMENT_HIERARCHY: DepartmentStructure[] = [
+export const DEPARTMENTS_FLAT: Department[] = [
+  // ── Main Departments (14) ──
+  { id: "d-hr", parentId: null, name: "ทรัพยากรมนุษย์", code: "HR" },
+  { id: "d-cs", parentId: null, name: "Customer Service", code: "CS" },
+  { id: "d-af", parentId: null, name: "บัญชีการเงิน", code: "AF" },
+  { id: "d-pm", parentId: null, name: "จัดซื้อ", code: "PM" },
+  { id: "d-qs", parentId: null, name: "ระบบคุณภาพและความปลอดภัย", code: "QS" },
+  { id: "d-fc", parentId: null, name: "สำนักผู้อำนวยการฝ่ายผลิต", code: "FC" },
+  { id: "d-qa", parentId: null, name: "ประกันและควบคุมคุณภาพ", code: "QA" },
+  { id: "d-wh", parentId: null, name: "คลังสินค้า", code: "WH" },
+  { id: "d-en", parentId: null, name: "วิศวกรรม", code: "EN" },
+  { id: "d-sm", parentId: null, name: "ขายและการตลาด", code: "SM" },
+  { id: "d-tc", parentId: null, name: "เทคนิค", code: "TC" },
+  { id: "d-pc", parentId: null, name: "วางแผนและควบคุมการผลิต", code: "PC" },
+  { id: "d-pd", parentId: null, name: "ฝ่ายผลิต", code: "PD" },
+  { id: "d-it", parentId: null, name: "เทคโนโลยีสารสนเทศ", code: "IT" },
+
+  // ── Sub-departments ใต้ PD (ฝ่ายผลิต) — สังกัดสายบังคับบัญชาเดียวกัน ──
   {
-    name: 'Production (ผลิต)',
-    code: 'PD',
-    subDepartments: [
-      'Production (ผลิต)',
-      'Printing /(งานพิมพ์สี)',
-      'Dry-Lamination (งานประกบฟิล์ม)',
-      'Powder Spray (งานพ่นฝุ่น)',
-      'Inspection & Slitting (งานตรวจสอบและผ่าม้วนฟิล์ม)',
-      'Bag-Making(งานขึ้นรูปถุง)',
-    ]
+    id: "d-pd-dl",
+    parentId: "d-pd",
+    name: "Dry-Lamination (งานประกบฟิล์ม)",
+    code: "DL",
   },
   {
-    name: 'Quality (คุณภาพ)',
-    code: 'QA',
-    subDepartments: [
-      'Quality Control(QC)',
-      'Quality Assurance(QA)',
-    ]
+    id: "d-pd-bm",
+    parentId: "d-pd",
+    name: "Bag-Making (งานขึ้นรูปถุง)",
+    code: "BM",
   },
   {
-    name: 'Warehouse (คลังสินค้า)',
-    code: 'WH',
-    subDepartments: [
-      'Raw Materials Store (คลังวัตถุดิบ)',
-      'Finished Goods (คลังสินค้าสำเร็จรูป)',
-    ]
+    id: "d-pd-sl",
+    parentId: "d-pd",
+    name: "Slitting (งานตัดม้วน)",
+    code: "SL",
+  },
+  { id: "d-pd-pt", parentId: "d-pd", name: "Printing (งานพิมพ์)", code: "PT" },
+  {
+    id: "d-pd-in",
+    parentId: "d-pd",
+    name: "Inspection (งานตรวจสอบ)",
+    code: "IN",
   },
   {
-    name: 'Production Control (วางแผน)',
-    code: 'PC',
-    subDepartments: [
-      'Production Planning (วางแผนการผลิต)',
-    ]
+    id: "d-pd-sp",
+    parentId: "d-pd",
+    name: "Spray Powder (งานพ่นฝุ่น)",
+    code: "SP",
   },
-  {
-    name: 'Technical (เทคนิค)',
-    code: 'TC',
-    subDepartments: [
-      'Research & Development (วิจัยและพัฒนาผลิตภัณฑ์ R&D)',
-    ]
-  },
-  {
-    name: 'Engineering (วิศวกรรม)',
-    code: 'EN',
-    subDepartments: [
-      'Electrical(ระบบไฟฟ้า)',
-      'Mechanical Maintenance (ซ่อมบำรุงเครื่องจักรกล)',
-      'Engineer (วิศวกร)',
-    ]
-  },
-  {
-    name: 'Document Control (ควบคุมเอกสาร)',
-    code: 'DCC',
-    subDepartments: [
-      'ISO Systems & DCC (ระบบมาตรฐานและศูนย์ควบคุมเอกสาร)'
-    ]
-  },
-  {
-    name: 'Safety (ความปลอดภัย)',
-    code: 'QS',
-    subDepartments: [
-      'Safety & Environmental (ความปลอดภัย จป. และสิ่งแวดล้อม)',
-    ]
-  },
-  {
-    name: 'Human Resources (บุคคล)',
-    code: 'HR',
-    subDepartments: [
-      'HR Development & Training (พัฒนาบุคลากรและฝึกอบรม)',
-      'Employee Relations & Welfare (แรงงานสัมพันธ์และสวัสดิการ)'
-    ]
-  },
-  {
-    name: 'Accounting (บัญชี)',
-    code: 'ACC',
-    subDepartments: [
-      'Cost Accounting & Inventory (บัญชีต้นทุนและสต็อก)',
-      'General Accounting & Finance (บัญชีทั่วไปและการเงิน)'
-    ]
-  },
-  {
-    name: 'Purchasing (จัดซื้อ)',
-    code: 'PUR',
-    subDepartments: [
-      'Local & Overseas Purchasing (จัดซื้อในและต่างประเทศ)'
-    ]
-  },
-  {
-    name: 'Sales & Marketing (ขายและการตลาด)',
-    code: 'SALES',
-    subDepartments: [
-      'Domestic Sales (ขายในประเทศ)',
-      'Export & International (ขายต่างประเทศ)'
-    ]
-  },
-  {
-    name: 'Customer Service (บริการลูกค้า)',
-    code: 'CS',
-    subDepartments: [
-      'Customer Support (บริการลูกค้าและแก้ไขปัญหา)',
-    ]
-  },
-  {
-    name: 'Information Technology (เทคโนโลยีสารสนเทศ)',
-    code: 'IT',
-    subDepartments: [
-      'IT Support (สนับสนุนด้านเทคโนโลยีสารสนเทศ)',
-      'Programming (พัฒนาโปรแกรมและระบบสารสนเทศ)'
-    ]
-  },
-  {
-    name: 'Executive (ผู้บริหาร)',
-    code: 'EXEC',
-    subDepartments: [
-      'Executive Office (สำนักผู้บริหารและกรรมการ)'
-    ]
-  }
 ];
 
-export const DEPARTMENTS = DEPARTMENT_HIERARCHY.map(d => d.name);
+// ─────────────────────────────────────────
+// Positions — เก็บแยกจาก department name ตามที่ควรเป็น (ไม่ฝัง code ในชื่อ)
+// key = department id, value = รายชื่อตำแหน่งในแผนกนั้น
+// ─────────────────────────────────────────
+export const POSITIONS_BY_DEPARTMENT: Record<string, string[]> = {
+  "d-hr": [
+    "ผู้จัดการฝ่ายทรัพยากรมนุษย์",
+    "หัวหน้าแผนกทรัพยากรมนุษย์",
+    "เจ้าหน้าที่สรรหา",
+    "เจ้าหน้าที่เงินเดือน",
+    "เจ้าหน้าที่ธุรการ",
+    "เจ้าหน้าที่พัฒนาบุคลากร",
+    "เจ้าหน้าที่แรงงานสัมพันธ์",
+    "พนักงานขับรถ",
+    "พ่อบ้านแม่บ้าน",
+    "ยามรักษาการณ์ภายใน",
+    "เลขานุการ",
+    "หัวหน้าหน่วยยานยนต์",
+    "ผู้ช่วยหัวหน้าแผนกธุรการ",
+  ],
+  "d-cs": ["Customer Service"],
+  "d-af": [
+    "ผู้อำนวยการฝ่ายบัญชีการเงิน",
+    "ผู้จัดการฝ่ายบัญชี",
+    "หัวหน้าแผนกบัญชี",
+    "พนักงานการเงิน",
+    "Messenger",
+    "พนักงานบัญชี-เจ้าหนี้",
+    "พนักงานบัญชี-ลูกหนี้",
+    "พนักงานบัญชี-ต้นทุนการผลิต",
+  ],
+  "d-pm": [
+    "ผู้จัดการฝ่ายจัดซื้อ",
+    "หัวหน้าแผนกจัดซื้อ",
+    "ผู้ช่วยหัวหน้าแผนกจัดซื้อ",
+    "เจ้าหน้าที่จัดซื้อ",
+  ],
+  "d-qs": [
+    "ตัวแทนฝ่ายบริหารคุณภาพ",
+    "เจ้าหน้าที่คุมเอกสาร",
+    "เจ้าหน้าที่ความปลอดภัยวิชาชีพ",
+  ],
+  "d-fc": [
+    "COO", // คงไว้ตามที่ยืนยัน — ตำแหน่งผู้อำนวยการฝ่ายผลิต
+  ],
+  "d-qa": [
+    "ผู้ช่วย/ผู้จัดการฝ่ายประกันและควบคุมคุณภาพ", // คงรูปแบบเดิมตามที่ยืนยัน (ตำแหน่งเดียว เรียกได้ 2 ชื่อ)
+    "หัวหน้าแผนกประกันและควบคุมคุณภาพ",
+    "เจ้าหน้าที่ประกันคุณภาพ",
+    "พนักงานควบคุมและประกันคุณภาพ",
+  ],
+  "d-wh": [
+    "หัวหน้าแผนกคลังสินค้า",
+    "เจ้าหน้าที่คลังสินค้า",
+    "พนักงานคลังสินค้า",
+  ],
+  "d-en": ["Engineer", "Electrical Technician", "Mechanical Technician"],
+  "d-sm": ["Sales Executive", "Sales", "Sales Admin Supervisor"],
+  "d-tc": ["ผู้ช่วยผู้จัดการฝ่ายเทคนิค", "เจ้าหน้าที่เทคนิค"],
+  "d-pc": [
+    "ผู้จัดการฝ่ายวางแผนและควบคุมการผลิต",
+    "ผู้ช่วยหัวหน้าแผนกวางแผนและควบคุมการผลิต",
+    "เจ้าหน้าที่วางแผนและควบคุมการผลิต-Document",
+    "เจ้าหน้าที่วางแผนและควบคุมการผลิต-Cylinder",
+    "เจ้าหน้าที่วางแผนและควบคุมการผลิต-Process Control",
+  ],
+  "d-pd": [
+    "ผู้จัดการฝ่ายผลิต",
+    "ผู้ช่วยผู้จัดการฝ่ายผลิต",
+    "Translator",
+    "เจ้าหน้าที่ Document",
+    "เจ้าหน้าที่ Support",
+    "วิศวกรฝ่ายผลิต",
+  ],
+  "d-pd-dl": ["หัวหน้าทีม", "ช่าง", "พนักงาน"],
+  "d-pd-bm": [
+    "หัวหน้าทีม",
+    "รองหัวหน้าทีม",
+    "พนักงานตัดมุม",
+    "พนักงานควบคุมเครื่อง",
+    "พนักงานคัดซอง",
+    "พนักงาน QC Line",
+  ],
+  "d-pd-sl": ["ช่าง", "พนักงาน"],
+  "d-pd-pt": ["หัวหน้าทีม", "ช่าง", "พนักงาน"],
+  "d-pd-in": ["ช่าง Inspection", "พนักงาน Inspection"],
+  "d-pd-sp": ["ช่าง Spray Powder", "พนักงาน Spray Powder"],
+  "d-it": ["เจ้าหน้าที่ IT Support", "เจ้าหน้าที่ Programmer"],
+};
 
-/**
- * Returns the list of all standard main departments.
- */
-export function getDepartments(): string[] {
-  return DEPARTMENTS;
+// ─────────────────────────────────────────
+// Helper functions — ใช้แทน string matching (.includes()) ทั้งหมดที่เคยมี
+// ─────────────────────────────────────────
+
+/** คืนเฉพาะ main department (parentId === null) */
+export function getMainDepartments(): Department[] {
+  return DEPARTMENTS_FLAT.filter((d) => d.parentId === null);
 }
 
-/**
- * Returns sub-departments given a main department name.
- */
-export function getSubDepartments(mainDept: string): string[] {
-  if (!mainDept) return [];
-  const found = DEPARTMENT_HIERARCHY.find(
-    d => d.name.toLowerCase().includes(mainDept.toLowerCase()) || mainDept.toLowerCase().includes(d.name.toLowerCase())
+/** คืน sub-department ทั้งหมดของ main dept ที่ระบุ (รับได้ทั้ง id หรือ code) */
+export function getSubDepartments(mainDeptIdOrCode: string): Department[] {
+  const main = DEPARTMENTS_FLAT.find(
+    (d) => d.id === mainDeptIdOrCode || d.code === mainDeptIdOrCode,
   );
-  return found ? found.subDepartments : [];
+  if (!main) return [];
+  return DEPARTMENTS_FLAT.filter((d) => d.parentId === main.id);
+}
+
+/** หา department object จาก id */
+export function getDepartmentById(id: string): Department | undefined {
+  return DEPARTMENTS_FLAT.find((d) => d.id === id);
+}
+
+/** หา department object จาก code (เช่น 'PD', 'DL') */
+export function getDepartmentByCode(code: string): Department | undefined {
+  return DEPARTMENTS_FLAT.find((d) => d.code === code);
 }
 
 /**
- * Returns a short name or clean slug for the department, removing descriptions/Thai translations.
- * e.g., "Executive (ผู้บริหาร)" -> "Executive"
+ * คืน main department ของ department ใดๆ (ถ้าเป็น main dept อยู่แล้วคืนตัวเอง)
+ * เช่น getMainDepartmentOf('d-pd-dl') → คืน object ของ 'd-pd' (ฝ่ายผลิต)
  */
-export function getCleanDepartmentName(dept: string): string {
-  if (!dept) return '';
-  return dept.split(' (')[0].trim();
+export function getMainDepartmentOf(deptId: string): Department | undefined {
+  const dept = getDepartmentById(deptId);
+  if (!dept) return undefined;
+  if (dept.parentId === null) return dept;
+  return getDepartmentById(dept.parentId);
 }
 
+/**
+ * เช็คว่า department A อยู่ในสายเดียวกับ department B หรือไม่
+ * (ใช้แทนการ .includes() เทียบชื่อไทย/อังกฤษแบบ fuzzy ที่เคยมีใน DocumentList.tsx)
+ * เช่น isSameDepartmentBranch('d-pd-dl', 'd-pd-bm') → true (ทั้งคู่อยู่ใต้ PD)
+ */
+export function isSameDepartmentBranch(
+  deptIdA: string,
+  deptIdB: string,
+): boolean {
+  if (deptIdA === deptIdB) return true;
+  const mainA = getMainDepartmentOf(deptIdA);
+  const mainB = getMainDepartmentOf(deptIdB);
+  return !!mainA && !!mainB && mainA.id === mainB.id;
+}
+
+/** คืนรายชื่อตำแหน่งทั้งหมดของแผนกที่ระบุ (สำหรับ dropdown position ตอนเพิ่ม/แก้พนักงาน) */
+export function getPositionsForDepartment(departmentId: string): string[] {
+  return POSITIONS_BY_DEPARTMENT[departmentId] || [];
+}
+
+/** flat list ของทุกแผนก (main + sub) เอาไว้ทำ dropdown แบบเลือกได้ทุกระดับในช่องเดียว */
+export function getAllDepartmentsFlat(): Department[] {
+  return DEPARTMENTS_FLAT;
+}
+
+// เก็บไว้ให้ backward compatible ชั่วคราวระหว่าง migrate โค้ดจุดอื่น
+// (จะลบทิ้งหลังแก้ครบทุกจุดที่ import DEPARTMENTS แบบเดิม)
+export const DEPARTMENTS = getMainDepartments().map((d) => d.name);

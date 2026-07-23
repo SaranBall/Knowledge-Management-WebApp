@@ -785,7 +785,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         const isPassed = progressObj?.status === 'Completed' || (examObj && examObj.pass);
         const scoreVal = examObj?.score ?? progressObj?.score ?? '85';
         const title = courseObj ? courseObj.title : 'หลักสูตรมาตรฐานโรงงาน';
-        const passingScore = courseObj ? courseObj.passingScore : 80;
+        const passingScore = courseObj ? courseObj.minPassScore : 80;
 
         return [
           u.employeeId,
@@ -908,7 +908,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 cursor-pointer transition w-full sm:w-auto justify-center"
               >
                 <Plus className="w-4 h-4" />
-                เพิ่มพนักงานพับลิชรายบุคคล
+                เพิ่มพนักงานรายบุคคล
               </button>
             ) : (
               <span className="text-[10.5px] font-mono italic text-slate-400">เฉพาะแอดมินกำหนดสิทธิ์และเพิ่มสมาชิกเท่านั้น</span>
@@ -2465,12 +2465,13 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
               <div className="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-600 block">สังกัดแผนกหลัก (Main Department):</label>
+                    <label className="text-[10px] font-bold text-slate-600 block">แผนก (Department):</label>
                     <select
                       value={newUser.department}
                       onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
                       className="w-full bg-white border border-slate-200 p-2 rounded-lg text-xs focus:ring-1 focus:ring-[#15329c]"
                     >
+                      <option value="">-- เลือกแผนก --</option>
                       {departments.map((d, i) => (
                         <option key={i} value={d}>{d}</option>
                       ))}
@@ -2501,7 +2502,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       }}
                       className="w-full bg-indigo-50/60 border border-indigo-200 p-2 rounded-lg text-xs font-semibold text-indigo-900 focus:ring-1 focus:ring-[#15329c]"
                     >
-                      <option value="">-- เลือกแผนกย่อยเพื่อเติมตำแหน่งอัตโนมัติ --</option>
+                      <option value="">-- เลือกสังกัด --</option>
                       {getSubDepartments(newUser.department).map((sub, idx) => (
                         <option key={idx} value={sub}>{sub}</option>
                       ))}
