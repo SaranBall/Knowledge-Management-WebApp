@@ -37,7 +37,7 @@ export interface DocumentItem {
   title: string;
   description: string;
   type: DocType;
-  department: string;
+  departmentId: string;
   owner: string;
   revision: number;
   effectiveDate: string;
@@ -144,7 +144,7 @@ export interface Expert {
   id: string;
   name: string;
   position: string;
-  department: string;
+  departmentId: string;
   skills: string[]; // List of expertise keywords e.g. ["Injection", "HACCP"]
   experienceYears: number;
   phone: string;
@@ -197,7 +197,7 @@ export interface CustomResource {
 export interface EmployeeMaster {
   employeeId: string;
   name: string;
-  department: string;
+  departmentId: string;
   position: string;
   startDate: string;
   level: string;
@@ -256,7 +256,7 @@ export interface UserKMPoints {
   userId: string;
   userName: string;
   employeeId: string;
-  department: string;
+  departmentId: string;
   points: number;
   level: number; // 1 to 5 based on points
 }
