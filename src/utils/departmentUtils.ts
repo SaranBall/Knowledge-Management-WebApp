@@ -14,20 +14,35 @@ export interface Department {
 
 export const DEPARTMENTS_FLAT: Department[] = [
   // ── Main Departments (14) ──
-  { id: "d-hr", parentId: null, name: "ทรัพยากรมนุษย์", code: "HR" },
+  { id: "d-hr", parentId: null, name: "Human Resources", code: "HR" },
   { id: "d-cs", parentId: null, name: "Customer Service", code: "CS" },
-  { id: "d-af", parentId: null, name: "บัญชีการเงิน", code: "AF" },
-  { id: "d-pm", parentId: null, name: "จัดซื้อ", code: "PM" },
-  { id: "d-qs", parentId: null, name: "ระบบคุณภาพและความปลอดภัย", code: "QS" },
-  { id: "d-fc", parentId: null, name: "สำนักผู้อำนวยการฝ่ายผลิต", code: "FC" },
-  { id: "d-qa", parentId: null, name: "ประกันและควบคุมคุณภาพ", code: "QA" },
-  { id: "d-wh", parentId: null, name: "คลังสินค้า", code: "WH" },
-  { id: "d-en", parentId: null, name: "วิศวกรรม", code: "EN" },
-  { id: "d-sm", parentId: null, name: "ขายและการตลาด", code: "SM" },
-  { id: "d-tc", parentId: null, name: "เทคนิค", code: "TC" },
-  { id: "d-pc", parentId: null, name: "วางแผนและควบคุมการผลิต", code: "PC" },
-  { id: "d-pd", parentId: null, name: "ฝ่ายผลิต", code: "PD" },
-  { id: "d-it", parentId: null, name: "เทคโนโลยีสารสนเทศ", code: "IT" },
+  { id: "d-af", parentId: null, name: "Accounting & Finance", code: "AF" },
+  { id: "d-pm", parentId: null, name: "Procurement", code: "PM" },
+  { id: "d-qs", parentId: null, name: "Quality & Safety Systems", code: "QS" },
+  {
+    id: "d-fc",
+    parentId: null,
+    name: "Production Management Office",
+    code: "FC",
+  },
+  {
+    id: "d-qa",
+    parentId: null,
+    name: "Insurance & Quality Control",
+    code: "QA",
+  },
+  { id: "d-wh", parentId: null, name: "Warehouse", code: "WH" },
+  { id: "d-en", parentId: null, name: "Engineering", code: "EN" },
+  { id: "d-sm", parentId: null, name: "Sales & Marketing", code: "SM" },
+  { id: "d-tc", parentId: null, name: "Technical", code: "TC" },
+  {
+    id: "d-pc",
+    parentId: null,
+    name: "Planning & Production Control",
+    code: "PC",
+  },
+  { id: "d-pd", parentId: null, name: "Production", code: "PD" },
+  { id: "d-it", parentId: null, name: "Information Technology", code: "IT" },
 
   // ── Sub-departments ใต้ PD (ฝ่ายผลิต) — สังกัดสายบังคับบัญชาเดียวกัน ──
   {
@@ -58,8 +73,8 @@ export const DEPARTMENTS_FLAT: Department[] = [
   {
     id: "d-pd-sp",
     parentId: "d-pd",
-    name: "Spray Powder (งานพ่นฝุ่น)",
-    code: "SP",
+    name: "Powder Spray (งานพ่นฝุ่น)",
+    code: "PS",
   },
 ];
 

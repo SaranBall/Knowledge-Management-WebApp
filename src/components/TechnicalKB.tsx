@@ -219,7 +219,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
             Technical Knowledge Base (คลังความรู้เชิงเทคนิค)
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            ดึง Tacit Knowledge (ความรู้ในหัวคนเก่ง) จากผู้เชี่ยวชาญ คั้นบันทึกเป็นสูตรถอดแกนแก้ไขอุปสรรค ลดปัญหาความชำนาญสูญหาย
+            ดึง Tacit Knowledge (ความรู้ในหัวคนเก่ง) จากผู้เชี่ยวชาญ บันทึกเป็นสูตรถอดวิธีแก้ไขอุปสรรค ลดปัญหาความชำนาญสูญหาย
           </p>
         </div>
 
@@ -243,7 +243,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 cursor-pointer transition self-start md:self-auto shadow-sm"
             >
               <Plus className="w-4 h-4" />
-              สัมภาษณ์/เพิ่มองค์ความรู้เทคนิค
+              สัมภาษณ์/เพิ่มองค์ความรู้ทางเทคนิค
             </button>
           )}
         </div>

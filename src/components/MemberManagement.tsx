@@ -26,7 +26,7 @@ export const calculateTenure = (startDateStr?: string): string => {
   
   const diffTime = now.getTime() - start.getTime();
   if (diffTime < 0) {
-    return 'ยังไม่เริ่มงาน (อนาคต)';
+    return 'ยังไม่เริ่มงาน';
   }
   
   let diffYears = now.getFullYear() - start.getFullYear();
@@ -93,17 +93,17 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   
   // New User Form State
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [newUser, setNewUser] = useState({
-    name: '',
-    employeeId: '',
-    department: 'Select Department',
-    position: 'Operator',
-    role: 'Viewer' as Role,
-    email: '',
-    phone: '',
-    startDate: new Date().toISOString().split('T')[0], // default to today
-    avatarUrl: '',
-  });
+const [newUser, setNewUser] = useState({
+  name: '',
+  employeeId: '',
+  departmentId: 'd-hr', // ← เปลี่ยนจาก department: 'Select Department'
+  position: '',
+  role: 'Viewer' as Role,
+  email: '',
+  phone: '',
+  startDate: new Date().toISOString().split('T')[0],
+  avatarUrl: '',
+});
 
   // --- REAL IMPORT PARSER STATES ---
   const [parserLoading, setParserLoading] = useState(false);
@@ -118,7 +118,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     id: string;
     name: string;
     employeeId: string;
-    department: string;
+    departmentId: string;
     position: string;
     role: Role;
     email: string;
@@ -132,7 +132,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const startEditing = (u: User) => {
     // SECURITY BLOCK: Members cannot edit their own data
     if (u.id === currentUser.id) {
-      alert('🔒 ข้อกำหนดมาตรฐาน ISO & ความปลอดภัยบุคคล: ไม่อนุญาตให้ท่านแก้ไขสิทธ์หรือรายละเอียดในบัญชีของตนเองได้โดยตรง โปรดแจ้งแอดมินหรือบุคลากรท่านอื่นเป็นผู้ดำเนินการแทน');
+      alert('ข้อกำหนดมาตรฐาน ISO & ความปลอดภัยบุคคล: ไม่อนุญาตให้ท่านแก้ไขสิทธ์หรือรายละเอียดในบัญชีของตนเองได้โดยตรง โปรดแจ้งแอดมินหรือบุคลากรท่านอื่นเป็นผู้ดำเนินการแทน');
       return;
     }
     setEditingUser(u);
@@ -140,7 +140,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       id: u.id,
       name: u.name,
       employeeId: u.employeeId,
-      department: u.department,
+      departmentId: u.departmentId,
       position: u.position,
       role: u.role,
       email: u.email,
@@ -175,7 +175,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         id: editForm.id,
         name: editForm.name,
         employeeId: editForm.employeeId,
-        department: editForm.department,
+        departmentId: editForm.departmentId,
         position: editForm.position,
         role: editForm.role,
         email: editForm.email,
@@ -190,7 +190,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       onUpdateUserRole(editForm.id, editForm.role);
     }
 
-    alert('🎉 บันทึกการเปลี่ยนแปลงรายละเอียดสมาชิกสำเร็จ!');
+    alert('🎉 บันทึกการเปลี่ยนแปลงรายละเอียดพนักงานสำเร็จ!');
     setEditingUser(null);
     setEditForm(null);
   };
@@ -211,18 +211,6 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       try {
         const base64 = await toBase64(file);
         setNewUser(prev => ({ ...prev, avatarUrl: base64 }));
-      } catch (err) {
-        console.error("Error reading image:", err);
-      }
-    }
-  };
-
-  const handleEditUserAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const base64 = await toBase64(file);
-        setEditForm(prev => prev ? ({ ...prev, avatarUrl: base64 }) : null);
       } catch (err) {
         console.error("Error reading image:", err);
       }
@@ -331,10 +319,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
               employeeId: empIdVal.toString().trim(),
               name: nameVal.toString().trim(),
               department: deptVal ? deptVal.toString().trim() : '',
-              position: posVal ? posVal.toString().trim() : 'Operator',
+              position: posVal ? posVal.toString().trim() : '',
               startDate: startDateFormatted,
               level: lvlVal ? lvlVal.toString().trim() : '',
-              email: emailVal ? emailVal.toString().trim() : `${empIdVal.toString().trim().toLowerCase()}@royalmeiwa.com`,
+              email: emailVal ? emailVal.toString().trim() : `${nameVal.toString().trim().toLowerCase()}@royalmeiwa.com`,
               phone: phoneVal ? phoneVal.toString().trim() : '0xx-xxxxxxx',
               status: 'Imported'
             });
@@ -465,7 +453,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       id: `usr-${Date.now()}`,
       name: newUser.name,
       employeeId: newUser.employeeId,
-      department: newUser.department,
+      departmentId: newUser.departmentId,
       position: newUser.position,
       role: newUser.role,
       avatarUrl: newUser.avatarUrl || `https://images.unsplash.com/photo-1535713875002?w=120`, // fallback if they somehow bypass
@@ -480,7 +468,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     setNewUser({
       name: '',
       employeeId: '',
-      department: 'Select Department',
+      departmentId: 'Select Department',
       position: 'Operator',
       role: 'Viewer',
       email: '',
@@ -762,14 +750,14 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       
       const headers = [
         'รหัสพนักงาน (Employee ID)',
-        'ชื่อ-นามสกุลจริง (Full Name)',
-        'สังกัดฝ่าย/แผนก (Department)',
+        'ชื่อ-นามสกุล (Full Name)',
+        'แผนก (Department)',
         'ตำแหน่งงาน (Position)',
         'รหัสหลักสูตร (Course ID)',
         'ชื่อหลักสูตร (Course Title)',
-        'คะแนนสอบเกณฑ์ (Required Passing %)',
-        'คะแนนทำได้จริง (Actual Score %)',
-        'ผลการประเมินสอบผ่าน (Exam Passed?)',
+        'เกณฑ์คะแนนสอบ (Required Passing %)',
+        'คะแนนที่ทำได้ (Actual Score %)',
+        'ผลการประเมินสอบผ่าน (Exam Passed)',
         'สถานะการฝึกอบรม (Training Status)'
       ];
 
@@ -2467,14 +2455,24 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold text-slate-600 block">แผนก (Department):</label>
                     <select
-                      value={newUser.department}
-                      onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
+                      value={newUser.departmentId}
+                      onChange={(e) => setNewUser({ ...newUser, departmentId: e.target.value })}
                       className="w-full bg-white border border-slate-200 p-2 rounded-lg text-xs focus:ring-1 focus:ring-[#15329c]"
                     >
-                      <option value="">-- เลือกแผนก --</option>
-                      {departments.map((d, i) => (
-                        <option key={i} value={d}>{d}</option>
-                      ))}
+                      {getMainDepartments().map((dept) => {
+                        const subs = getSubDepartments(dept.id);
+                        if (subs.length ===0) {
+                          return <option key={dept.id} value={dept.id}>{dept.name} ({dept.code})</option>;
+                        }
+                        return (
+                          <optgroup key={dept.id} label={`${dept.name} (${dept.code})`}>
+                            <option value={dept.id}>- {dept.name}</option>
+                            {subs.map(sub => (
+                              <option key={sub.id} value={sub.id}>-- {sub.name} ({sub.code})</option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
                     </select>
                   </div>
 
@@ -2484,31 +2482,22 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       type="text"
                       value={newUser.position}
                       onChange={(e) => setNewUser({ ...newUser, position: e.target.value })}
-                      placeholder="เช่น Operator/Engineer"
+                      placeholder={
+                        getPositionsForDepartment(newUser.departmentId)[0]
+                        ?`เช่น "${getPositionsForDepartment(newUser.departmentId)[0]}"`
+                        : 'เช่น เจ้าหน้าที่...'
+                      }
                       required
                       className="w-full bg-white border border-slate-200 p-2 rounded-lg text-xs focus:ring-1 focus:ring-[#15329c]"
                     />
+                    {getPositionsForDepartment(newUser.departmentId).length > 0 && (
+                      <p className="text-[9.5px] text-slate-400 mt-1">
+                        ตัวอย่างตำแหน่งที่แนะนำ: {getPositionsForDepartment(newUser.departmentId).slice(0, 4).join(', ')}
+                        {getPositionsForDepartment(newUser.departmentId).length > 4 ? '...' : ''}
+                      </p>
+                    )}
                   </div>
                 </div>
-
-                {getSubDepartments(newUser.department).length > 0 && (
-                  <div className="space-y-1 pt-1 border-t border-slate-200">
-                    <label className="text-[10px] font-bold text-indigo-700 block">เลือกแผนกย่อย (Sub-Department):</label>
-                    <select
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          setNewUser({ ...newUser, position: e.target.value });
-                        }
-                      }}
-                      className="w-full bg-indigo-50/60 border border-indigo-200 p-2 rounded-lg text-xs font-semibold text-indigo-900 focus:ring-1 focus:ring-[#15329c]"
-                    >
-                      <option value="">-- เลือกสังกัด --</option>
-                      {getSubDepartments(newUser.department).map((sub, idx) => (
-                        <option key={idx} value={sub}>{sub}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
               </div>
 
               <div className="space-y-1">
