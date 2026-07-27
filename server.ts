@@ -51,7 +51,7 @@ async function startServer() {
   let db_contact_requests: ContactRequest[] = [...INITIAL_CONTACT_REQUESTS];
   let db_custom_resources: CustomResource[] = [];
   let db_user_competencies: UserCompetency[] = INITIAL_USERS.flatMap(u => 
-    getInitialCompetencies(u.id, u.department, u.position)
+    getInitialCompetencies(u.id, u.departmentId, u.position)
   );
   let db_user_certificates: UserCertificate[] = INITIAL_USERS.flatMap(u => 
     getInitialCertificates(u.id, u.employeeId)
@@ -164,7 +164,7 @@ async function startServer() {
           id: d.id,
           title: `[เอกสารระบบ ${d.type}] ${d.title} (Rev.${d.revision})`,
           type: `เอกสารมาตรฐาน ${d.type}`,
-          category: d.department,
+          category: d.departmentId || d.department || '',
           content: d.exampleText || d.description
         })),
         ...kbList.filter((k: any) => k.status === 'Approved').map((k: any) => ({
@@ -178,7 +178,7 @@ async function startServer() {
           id: `${c.id}-${l.id}`,
           title: `[สอนงาน Onboarding] ${c.title} -> ${l.title}`,
           type: "บทเรียนฝึกอบรม",
-          category: c.department,
+          category: c.departmentId || c.department || '',
           content: l.content
         }))),
         ...customResList.map((cs: any) => ({
@@ -194,7 +194,7 @@ async function startServer() {
       const rmpSystemInstruction = `You are "RMP AI Knowledge Assistant", a state-of-the-art secure semantic RAG system developed for Royal Meiwa Pax Co., Ltd. (บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด).
 Your ultimate mission is to resolve technical questions from operators & engineers while preserving 100% security against hallucinations and preventing industrial machinery accidents (melted barrels, rolls, electric shocks, or manufacturing fires).
 
-User Information: Name: "${currentUser?.name || 'Guest User'}", Department: "${currentUser?.department || 'Production'}". Always greet or reference them politely in Thai.
+User Information: Name: "${currentUser?.name || 'Guest User'}", Department: "${currentUser?.departmentId || currentUser?.department || 'Production'}". Always greet or reference them politely in Thai.
 
 🛡️ ABSOLUTE ANTI-HALLUCINATION & ANTI-SLOP GUARDRAILS:
 1. Ground your answers ONLY on the real-world RMP technical context passed below.
@@ -365,7 +365,7 @@ CRITICAL INSTRUCTIONS:
 
       // Serialize available courses & WIs
       const simpleCourses = (courses || []).map((c: any) => ({ id: c.id, title: c.title, targetPositions: c.targetPositions }));
-      const simpleWIs = (documents || []).map((d: any) => ({ id: d.id, title: d.title, type: d.type, department: d.department }));
+      const simpleWIs = (documents || []).map((d: any) => ({ id: d.id, title: d.title, type: d.type, department: d.departmentId || d.department || '' }));
 
       const systemInstruction = `You are "RMP AI Career Advisor", an intelligent and compliance-focused training roadmap generator for Royal Meiwa Pax Co., Ltd.
 Your job is to recommend a highly personalized career progression roadmap based on current employee profile and target career goals.
@@ -373,7 +373,7 @@ Your job is to recommend a highly personalized career progression roadmap based 
 User Profile:
 - Name: "${currentUser.name}"
 - Position: "${currentUser.position}"
-- Department: "${currentUser.department}"
+- Department: "${currentUser.departmentId || currentUser.department || ''}"
 - Date Started: "${currentUser.startDate || 'Unknown'}"
 
 Current Competencies:

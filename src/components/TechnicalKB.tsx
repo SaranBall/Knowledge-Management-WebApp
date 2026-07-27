@@ -10,6 +10,7 @@ import {
   Lightbulb
 } from 'lucide-react';
 import { KBArticle, KBType, User, DocumentItem, Expert } from '../types';
+import { getDepartmentById } from '../utils/departmentUtils';
 
 interface TechnicalKBProps {
   currentUser: User;
@@ -93,7 +94,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
       tags: newArt.tags ? newArt.tags.split(',').map(s => s.trim()) : [newArt.type],
       author: currentUser.name,
       authorTitle: currentUser.position,
-      authorDept: currentUser.department,
+      authorDept: getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId,
       views: 0,
       likes: 0,
       status: currentUser.role === 'Admin' ? 'Approved' : 'Pending', // Pending for Editor uploads, auto-approve for Admin
@@ -134,7 +135,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
       tags: proposalData.tags ? proposalData.tags.split(',').map(s => s.trim()) : [proposalData.type, 'Proposal'],
       author: currentUser.name,
       authorTitle: currentUser.position,
-      authorDept: currentUser.department,
+      authorDept: getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId,
       views: 0,
       likes: 0,
       status: 'Pending', // ALWAYS Pending
@@ -887,7 +888,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
               {/* Readonly Proposed By metadata block */}
               <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-150 text-[10px] text-slate-500 flex items-center justify-between">
                 <span>👤 ผู้เสนอข้อมูล: <strong>{currentUser.name}</strong></span>
-                <span>สังกัดฝ่าย: <strong>{currentUser.department || 'ไม่ระบุ'}</strong></span>
+                <span>สังกัดฝ่าย: <strong>{getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId || 'ไม่ระบุ'}</strong></span>
                 <span>บทบาท: <strong>{currentUser.role}</strong></span>
               </div>
 

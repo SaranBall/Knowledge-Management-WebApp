@@ -9,7 +9,7 @@ import {
   UserCheck, Users, MessageSquare, CheckCircle, ExternalLink, Edit, Trash2, Plus, Upload, User as UserIcon
 } from 'lucide-react';
 import { Expert, User, ContactRequest } from '../types';
-import { DEPARTMENTS } from '../utils/departmentUtils';
+import { DEPARTMENTS, getDepartmentById, getAllDepartmentsFlat } from '../utils/departmentUtils';
 
 interface ExpertDirectoryProps {
   currentUser: User;
@@ -56,7 +56,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
   const [newExpert, setNewExpert] = useState({
     name: '',
     position: '',
-    department: 'ฝ่ายผลิต (Production)',
+    departmentId: 'd-pd',
     skills: '',
     phone: '',
     email: '',
@@ -97,14 +97,16 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
     // Dept filter
     if (selectedDept !== 'ALL') {
       const cleanSelected = selectedDept.split(' (')[0].toLowerCase();
-      const cleanExpDept = exp.department.toLowerCase();
+      const expDeptName = getDepartmentById(exp.departmentId)?.name || exp.departmentId || '';
+      const cleanExpDept = expDeptName.toLowerCase();
       if (!cleanExpDept.includes(cleanSelected) && !cleanSelected.includes(cleanExpDept)) {
         return false;
       }
     }
 
     // Keyword search
-    const matchStr = `${exp.name} ${exp.position} ${exp.department} ${exp.skills.join(' ')}`.toLowerCase();
+    const expDeptName = getDepartmentById(exp.departmentId)?.name || exp.departmentId || '';
+    const matchStr = `${exp.name} ${exp.position} ${expDeptName} ${exp.skills.join(' ')}`.toLowerCase();
     if (searchQuery && !matchStr.includes(searchQuery.toLowerCase())) return false;
 
     return true;
@@ -118,7 +120,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
       id: `cr-${Date.now()}`,
       userId: currentUser.id,
       userName: currentUser.name,
-      userDept: currentUser.department,
+      userDept: currentUser.departmentId,
       expertId: exp.id,
       expertName: exp.name,
       topic: contactTopic,
@@ -148,7 +150,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
       id: `exp-${Date.now()}`,
       name: newExpert.name,
       position: newExpert.position,
-      department: newExpert.department,
+      departmentId: newExpert.departmentId,
       skills: newExpert.skills.split(',').map(s => s.trim()).filter(Boolean),
       phone: newExpert.phone || '02-1234567',
       email: newExpert.email || 'info@royalmeiwa.co.th',
@@ -348,7 +350,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                     {selectedExpert.name}
                   </h3>
                   <p className="text-slate-300 font-mono text-xs mt-0.5">
-                    {selectedExpert.position} • {selectedExpert.department}
+                    {selectedExpert.position} • {getDepartmentById(selectedExpert.departmentId)?.name || selectedExpert.departmentId}
                   </p>
                 </div>
               </div>
@@ -646,12 +648,12 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                   <label className="font-semibold text-slate-600 block">ฝ่ายสังกัดแผนก:</label>
                   <select
                     id="add-expert-dept"
-                    value={newExpert.department}
-                    onChange={(e) => setNewExpert({ ...newExpert, department: e.target.value })}
+                    value={newExpert.departmentId}
+                    onChange={(e) => setNewExpert({ ...newExpert, departmentId: e.target.value })}
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700"
                   >
-                    {DEPARTMENTS.map((d, i) => (
-                      <option key={i} value={d}>{d}</option>
+                    {getAllDepartmentsFlat().map((dept) => (
+                      <option key={dept.id} value={dept.id}>{dept.name} ({dept.code})</option>
                     ))}
                   </select>
                 </div>
@@ -862,12 +864,12 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                   <label className="font-semibold text-slate-600 block">แผนกเจ้าของงาน:</label>
                   <select
                     id="edit-expert-dept"
-                    value={editingExpert.department}
-                    onChange={(e) => setEditingExpert({ ...editingExpert, department: e.target.value })}
+                    value={editingExpert?.departmentId || ''}
+                    onChange={(e) => setEditingExpert({ ...editingExpert, departmentId: e.target.value })}
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700"
                   >
-                    {DEPARTMENTS.map((d, i) => (
-                      <option key={i} value={d}>{d}</option>
+                    {getAllDepartmentsFlat().map((dept) => (
+                      <option key={dept.id} value={dept.id}>{dept.name} ({dept.code})</option>
                     ))}
                   </select>
                 </div>

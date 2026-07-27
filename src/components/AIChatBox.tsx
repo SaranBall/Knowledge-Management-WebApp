@@ -31,6 +31,7 @@ import {
   Course,
   CustomResource,
 } from "../types";
+import { getDepartmentById } from "../utils/departmentUtils";
 
 interface AIChatBoxProps {
   currentUser: User;
@@ -97,7 +98,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
         {
           id: "welcome-msg",
           sender: "bot",
-          text: `สวัสดีครับคุณ **${currentUser.name}** ฝ่าย **${currentUser.department}** 🙏 \n\nผมคือ **RMP AI Smart Knowledge Assistant** ยินดีต้อนรับสู่ระบบสืบค้นอัจฉริยะ (RAG System) มีหน้าที่ตอบคำถามเกณฑ์มาตรฐานเชิงลึก จากเฉพาะคลังข้อมูลของ **บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด** เท่านั้น\n\n💡 **กติกาความปลอดภัยสูงสุด (Strict RAG Guidance):** \nเพื่อป้องกันความคลาดเคลื่อน ข้อมูลทั้งหมดจะถูกอ้างอิงและพับลิชมาจากเฉพาะไฟล์ฉบับอนุมัติในระบบ (เช่น QP, WI, แบบฟอร์ม, และองค์ความรู้เชิงช่าง Kaizen) เท่านั้น ห้ามละเมิดไปดึงคำตอบจากอินเทอร์เน็ตภายนอกเด็ดขาด ครับ! \n\nท่านสามารถลองเลือกหัวข้อแนะนำ หรือป้อนคำถามช่างที่ต้องการสืบค้นด้านล่างนี้ได้เลยครับ`,
+          text: `สวัสดีครับคุณ **${currentUser.name}** ฝ่าย **${getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId}** 🙏 \n\nผมคือ **RMP AI Smart Knowledge Assistant** ยินดีต้อนรับสู่ระบบสืบค้นอัจฉริยะ (RAG System) มีหน้าที่ตอบคำถามเกณฑ์มาตรฐานเชิงลึก จากเฉพาะคลังข้อมูลของ **บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด** เท่านั้น\n\n💡 **กติกาความปลอดภัยสูงสุด (Strict RAG Guidance):** \nเพื่อป้องกันความคลาดเคลื่อน ข้อมูลทั้งหมดจะถูกอ้างอิงและพับลิชมาจากเฉพาะไฟล์ฉบับอนุมัติในระบบ (เช่น QP, WI, แบบฟอร์ม, และองค์ความรู้เชิงช่าง Kaizen) เท่านั้น ห้ามละเมิดไปดึงคำตอบจากอินเทอร์เน็ตภายนอกเด็ดขาด ครับ! \n\nท่านสามารถลองเลือกหัวข้อแนะนำ หรือป้อนคำถามช่างที่ต้องการสืบค้นด้านล่างนี้ได้เลยครับ`,
           timestamp: new Date().toLocaleTimeString("th-TH", {
             hour: "2-digit",
             minute: "2-digit",
@@ -202,14 +203,15 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
     // Index & Score Documents
     documents.forEach((doc) => {
       if (doc.status !== "Published") return;
-      const textToSearch = `${doc.title} ${doc.description} ${doc.exampleText || ""} ${doc.department} ${doc.type}`;
+      const deptName = getDepartmentById(doc.departmentId)?.name || doc.departmentId || "";
+      const textToSearch = `${doc.title} ${doc.description} ${doc.exampleText || ""} ${deptName} ${doc.type}`;
       const score = calculateScore(textToSearch, q);
       if (score > 0) {
         matches.push({
           id: doc.id,
           title: `${doc.type}: ${doc.title} (Rev.${doc.revision})`,
           type: `เอกสารระบบ ${doc.type}`,
-          content: `แผนกที่รับผิดชอบ: ${doc.department}\n\nรายละเอียด: ${doc.description}\n\nข้อกำหนดการปฏิบัติงาน (WI/QP):\n${doc.exampleText || "โปรดดูข้อมูลประกอบเพิ่มเติมในเอกสารฉบับเต็ม"}`,
+          content: `แผนกที่รับผิดชอบ: ${deptName}\n\nรายละเอียด: ${doc.description}\n\nข้อกำหนดการปฏิบัติงาน (WI/QP):\n${doc.exampleText || "โปรดดูข้อมูลประกอบเพิ่มเติมในเอกสารฉบับเต็ม"}`,
           score,
         });
       }

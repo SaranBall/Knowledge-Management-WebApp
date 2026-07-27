@@ -15,6 +15,7 @@ import { getUserBadges } from '../utils/badgeUtils';
 import { BadgePill, UserBadgesGrid } from './BadgeDisplay';
 import { BadgeCertificateModal } from './BadgeCertificateModal';
 import { calculateLeaderboard, calculateRemainingDays, ANCHOR_DATE } from '../utils/gamificationUtils';
+import { getDepartmentById } from '../utils/departmentUtils';
 
 // Interface for offline scanning sessions
 export interface OfflineTrainingSession {
@@ -243,7 +244,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
             name: currentUser.name,
             employeeId: currentUser.employeeId,
             position: currentUser.position,
-            department: currentUser.department,
+            department: getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId,
             role: currentUser.role,
           },
           targetGoal: aiTargetGoal,
@@ -394,7 +395,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
         userId: currentUser.id,
         userName: currentUser.name,
         employeeId: currentUser.employeeId,
-        department: currentUser.department,
+        department: getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId,
         position: currentUser.position,
         sessionId: session.id,
         sessionName: session.sessionName,
@@ -1020,7 +1021,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   รหัสพนักงาน: {currentUser.employeeId} | รหัสบทรุ่น: {currentUser.role}
                 </p>
                 <p className="text-[11px] text-slate-655 font-bold mt-0.5">
-                  🏢 แผนกคลังสินค้าประตูดำ: {currentUser.department} ({currentUser.position})
+                  🏢 แผนกคลังสินค้าประตูดำ: {getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId} ({currentUser.position})
                 </p>
               </div>
             </div>
@@ -1269,7 +1270,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       {currentUser.name}
                     </p>
                     <p className="text-[10px] text-slate-450 mt-1 font-mono">
-                      ตำแหน่ง: {currentUser.position} | ฝ่ายวิเคราะห์: {currentUser.department}
+                      ตำแหน่ง: {currentUser.position} | ฝ่ายวิเคราะห์: {getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId}
                     </p>
                   </div>
 
@@ -1414,7 +1415,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 แผนผังประเมินทักษะพนักงานรายบุคคล (Skills Alignment)
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                เปรียบเทียบขีดความสามารถปัจจุบันของคุณกับระดับความรู้รับเป้าในตำแหน่ง <strong className="text-[#15329c] font-black">{currentUser.position}</strong> (แผนก {currentUser.department})
+                เปรียบเทียบขีดความสามารถปัจจุบันของคุณกับระดับความรู้รับเป้าในตำแหน่ง <strong className="text-[#15329c] font-black">{currentUser.position}</strong> (แผนก {getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId})
               </p>
             </div>
             
@@ -1638,7 +1639,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
               <div className="space-y-1">
                 <label className="text-[10.5px] font-bold text-slate-400 uppercase block">บทบาทงานปัจจุบัน:</label>
                 <div className="p-3 bg-slate-50 border border-slate-150 rounded-xl text-xs font-bold text-slate-700">
-                  {currentUser.position} (แผนก {currentUser.department})
+                  {currentUser.position} (แผนก {getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId})
                 </div>
               </div>
 
@@ -1924,7 +1925,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="font-extrabold text-slate-800 text-[12px]">{log.userName}</span>
                           <span className="font-mono text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded">{log.employeeId}</span>
-                          <span className="text-[10px] text-indigo-705 font-bold bg-indigo-50 px-1.5 py-0.2 rounded">{log.department}</span>
+                          <span className="text-[10px] text-indigo-705 font-bold bg-indigo-50 px-1.5 py-0.2 rounded">{getDepartmentById(log.department)?.name || log.department}</span>
                         </div>
                         <p className="text-slate-750 font-semibold mt-1 text-[11px] truncate">
                           📍 {log.sessionName}
@@ -2139,7 +2140,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         {currentUser.name}
                       </p>
                       <p className="text-[10px] text-slate-450 mt-1 font-mono">
-                        ตำแหน่ง: {currentUser.position} | ฝ่ายวิเคราะห์: {currentUser.department}
+                        ตำแหน่ง: {currentUser.position} | ฝ่ายวิเคราะห์: {getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId}
                       </p>
                     </div>
 

@@ -18,6 +18,7 @@ import {
 } from './types';
 
 import { api } from './services/api';
+import { getDepartmentById } from './utils/departmentUtils';
 
 // Import initial dataset
 import { 
@@ -74,7 +75,7 @@ export default function App() {
 
   // --- Competency, Certification Expire Alerts, and Gamification States ---
   const [userCompetencies, setUserCompetencies] = useState<UserCompetency[]>(() => {
-    return INITIAL_USERS.flatMap(u => getInitialCompetencies(u.id, u.department, u.position));
+    return INITIAL_USERS.flatMap(u => getInitialCompetencies(u.id, u.departmentId, u.position));
   });
 
   const [userCertificates, setUserCertificates] = useState<UserCertificate[]>(() => {
@@ -221,7 +222,7 @@ export default function App() {
   const handleAddUser = async (user: UserType) => {
     const newUser = { ...user, status: user.status || 'Active' };
     setUsers((prev) => [...prev, newUser]);
-    addAuditLog('APPROVE_MEMBER', `อนุมัติพนักงานใหม่และให้สิทธิ์เข้าใช้ระบบ: ${user.name} (${user.employeeId}) แผนก ${user.department} สิทธิ์ ${user.role}`);
+    addAuditLog('APPROVE_MEMBER', `อนุมัติพนักงานใหม่และให้สิทธิ์เข้าใช้ระบบ: ${user.name} (${user.employeeId}) แผนก ${user.departmentId} สิทธิ์ ${user.role}`);
     try {
       await api.createUser(newUser);
     } catch (e) {
@@ -236,7 +237,7 @@ export default function App() {
     if (prevUsr) {
       if (prevUsr.name !== updatedUsr.name) changes.push(`ชื่อ: ${prevUsr.name} -> ${updatedUsr.name}`);
       if (prevUsr.role !== updatedUsr.role) changes.push(`สิทธิ์: ${prevUsr.role} -> ${updatedUsr.role}`);
-      if (prevUsr.department !== updatedUsr.department) changes.push(`แผนก: ${prevUsr.department} -> ${updatedUsr.department}`);
+      if (prevUsr.departmentId !== updatedUsr.departmentId) changes.push(`แผนก: ${prevUsr.departmentId} -> ${updatedUsr.departmentId}`);
       if (prevUsr.position !== updatedUsr.position) changes.push(`ตำแหน่ง: ${prevUsr.position} -> ${updatedUsr.position}`);
       if (prevUsr.status !== updatedUsr.status) changes.push(`สถานะ: ${prevUsr.status || 'Active'} -> ${updatedUsr.status || 'Active'}`);
     }
@@ -716,7 +717,7 @@ export default function App() {
       id: `usr-${Date.now()}`,
       name: matchedEmployee.name,
       employeeId: matchedEmployee.employeeId,
-      department: matchedEmployee.department,
+      departmentId: matchedEmployee.departmentId,
       position: matchedEmployee.position,
       role: assignedRole,
       email: matchedEmployee.email,
@@ -730,7 +731,7 @@ export default function App() {
     setUsers((prev) => [...prev, newUserObj]);
 
     // Provision competencies & certificates automatically upon register
-    const newComp = getInitialCompetencies(newUserObj.id, newUserObj.department, newUserObj.position);
+    const newComp = getInitialCompetencies(newUserObj.id, newUserObj.departmentId, newUserObj.position);
     setUserCompetencies(prev => [...prev, ...newComp]);
 
     const newCerts = getInitialCertificates(newUserObj.id, newUserObj.employeeId);
@@ -1125,7 +1126,7 @@ export default function App() {
                         </div>
                         <div className="grid grid-cols-3">
                           <span className="text-slate-400 font-medium">สังกัดฝ่าย/แผนก:</span>
-                          <span className="col-span-2 text-slate-800 font-semibold">{matchedEmployee.department}</span>
+                          <span className="col-span-2 text-slate-800 font-semibold">{getDepartmentById(matchedEmployee.departmentId)?.name || matchedEmployee.departmentId}</span>
                         </div>
                         <div className="grid grid-cols-3">
                           <span className="text-slate-400 font-medium">ตำแหน่งวิชาชีพ:</span>
@@ -1307,7 +1308,7 @@ export default function App() {
 
               {/* Standard privilege matrix note */}
               <div className="text-[8.5px] text-slate-550 leading-normal border-t border-[#e1ded5]/80 pt-2 flex items-center justify-between">
-                <span>ฝ่าย: <strong className="text-slate-700">{currentUser.department.split(' ')[0]}</strong></span>
+                <span>ฝ่าย: <strong className="text-slate-700">{(getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId || '').split(' ')[0]}</strong></span>
                 <span className="font-mono text-[#e51a24]/80 text-[7px] tracking-widest font-bold">日本製 5S</span>
               </div>
             </div>

@@ -10,7 +10,7 @@ import {
   Lock, ShieldAlert, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, X
 } from 'lucide-react';
 import { DocumentItem, DocType, User, RatingAndComment } from '../types';
-import { DEPARTMENTS } from '../utils/departmentUtils';
+import { DEPARTMENTS, getDepartmentById, getAllDepartmentsFlat } from '../utils/departmentUtils';
 import * as XLSX from 'xlsx';
 
 interface DocumentListProps {
@@ -252,7 +252,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     title: '',
     description: '',
     type: 'QP' as DocType,
-    department: 'ฝ่ายผลิต (Production)',
+    departmentId: 'd-pd',
     owner: currentUser.name,
     revision: 1,
     effectiveDate: new Date().toISOString().split('T')[0],
@@ -377,7 +377,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     // Dept filter
     if (deptFilter !== 'ALL') {
       const cleanSelected = deptFilter.split(' (')[0].toLowerCase();
-      const cleanDocDept = doc.department.toLowerCase();
+      const docDeptName = getDepartmentById(doc.departmentId)?.name || doc.departmentId || '';
+      const cleanDocDept = docDeptName.toLowerCase();
       
       let matched = cleanDocDept.includes(cleanSelected) || cleanSelected.includes(cleanDocDept);
       
@@ -395,7 +396,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       if (!matched) return false;
     }
     // Search query matches: title, description, department or index codes
-    const matchString = `${doc.title} ${doc.description} ${doc.department} ${doc.type}`.toLowerCase();
+    const docDeptName = getDepartmentById(doc.departmentId)?.name || doc.departmentId || '';
+    const matchString = `${doc.title} ${doc.description} ${docDeptName} ${doc.type}`.toLowerCase();
     if (searchQuery && !matchString.includes(searchQuery.toLowerCase())) return false;
     
     // Viewer can only see "Published"
@@ -414,7 +416,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       title: newDoc.title,
       description: newDoc.description,
       type: newDoc.type,
-      department: newDoc.department,
+      departmentId: newDoc.departmentId,
       owner: currentUser.name,
       revision: Number(newDoc.revision),
       effectiveDate: newDoc.effectiveDate,
@@ -624,7 +626,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                         {doc.title}
                       </h4>
                       <p className="text-slate-400 text-[10px] mt-1 truncate">
-                        ผู้ตรวจ: {doc.owner} | แผนก: {doc.department}
+                        ผู้ตรวจ: {doc.owner} | แผนก: {getDepartmentById(doc.departmentId)?.name || doc.departmentId}
                       </p>
                     </div>
 
@@ -985,12 +987,12 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   <label className="font-semibold text-slate-600 block">แผนกเจ้าของงาน: (Department)</label>
                   <select
                     id="upload-doc-dept"
-                    value={newDoc.department}
-                    onChange={(e) => setNewDoc({ ...newDoc, department: e.target.value })}
+                    value={newDoc.departmentId}
+                    onChange={(e) => setNewDoc({ ...newDoc, departmentId: e.target.value })}
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700 text-xs"
                   >
-                    {DEPARTMENTS.map((d, i) => (
-                      <option key={i} value={d}>{d}</option>
+                    {getAllDepartmentsFlat().map((dept) => (
+                      <option key={dept.id} value={dept.id}>{dept.name} ({dept.code})</option>
                     ))}
                   </select>
                 </div>
@@ -1271,12 +1273,12 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   <label className="font-semibold text-slate-600 block">แผนกเจ้าของงาน:</label>
                   <select
                     id="edit-doc-dept"
-                    value={editingDoc.department}
-                    onChange={(e) => setEditingDoc({ ...editingDoc, department: e.target.value })}
+                    value={editingDoc?.departmentId || ''}
+                    onChange={(e) => setEditingDoc({ ...editingDoc, departmentId: e.target.value })}
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700 text-xs"
                   >
-                    {DEPARTMENTS.map((d, i) => (
-                      <option key={i} value={d}>{d}</option>
+                    {getAllDepartmentsFlat().map((dept) => (
+                      <option key={dept.id} value={dept.id}>{dept.name} ({dept.code})</option>
                     ))}
                   </select>
                 </div>
@@ -1507,7 +1509,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">แผนกควบคุม:</span>
-                      <span className="text-white">{selectedDoc.department.split(' (')[0]}</span>
+                      <span className="text-white">{(getDepartmentById(selectedDoc.departmentId)?.name || selectedDoc.departmentId || '').split(' (')[0]}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">วันที่บังคับใช้:</span>
