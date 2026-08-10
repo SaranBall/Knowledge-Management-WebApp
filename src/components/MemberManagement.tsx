@@ -1016,7 +1016,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         return [
           u.employeeId,
           u.name,
-          u.department,
+          getDepartmentById(u.departmentId)?.name || 'ไม่ระบุแผนก',
           u.position,
           courseId,
           title,
@@ -2787,7 +2787,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   <div className="space-y-2">
                     <textarea
                       id="tabular-paste-textarea"
-                      placeholder="วางข้อมูลพนักงานที้นี้...&#10;ตัวอย่าง:&#10;RMP-5021,ช่างทิวา เก่งงาน,ฝ่ายผลิต (Production),Blow Molding Assistant,Junior Staff,2026-06-15,thiwa.k@royalmeiwa.co.th,099-888-7777"
+                      placeholder="วางข้อมูลพนักงานที้นี้...&#10;ตัวอย่าง:&#10;SM520,ทิวา เก่งงาน,d-pd,หัวหน้าทีม,2026-06-15,thiwa@royalmeiwa.com,099-888-7777"
                       rows={4}
                       className="w-full bg-white border border-slate-300 p-2.5 rounded-xl text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#15329c]"
                     />

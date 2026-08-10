@@ -442,8 +442,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     setNewDoc({
       title: '',
       description: '',
-      type: 'QP',
-      department: 'ฝ่ายผลิต (Production)',
+      type: '>Select Type<',
+      department: '>Select Department<',
       owner: currentUser.name,
       revision: 1,
       effectiveDate: new Date().toISOString().split('T')[0],

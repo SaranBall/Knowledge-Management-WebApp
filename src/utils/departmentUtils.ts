@@ -19,14 +19,12 @@ export const DEPARTMENTS_FLAT: Department[] = [
   { id: "d-af", parentId: null, name: "Accounting & Finance", code: "AF" },
   { id: "d-pm", parentId: null, name: "Procurement", code: "PM" },
   { id: "d-qs", parentId: null, name: "Quality & Safety Systems", code: "QS" },
-  {
-    id: "d-fc",
+  { id: "d-fc",
     parentId: null,
     name: "Production Management Office",
     code: "FC",
   },
-  {
-    id: "d-qa",
+  { id: "d-qa",
     parentId: null,
     name: "Insurance & Quality Control",
     code: "QA",
@@ -35,8 +33,7 @@ export const DEPARTMENTS_FLAT: Department[] = [
   { id: "d-en", parentId: null, name: "Engineering", code: "EN" },
   { id: "d-sm", parentId: null, name: "Sales & Marketing", code: "SM" },
   { id: "d-tc", parentId: null, name: "Technical", code: "TC" },
-  {
-    id: "d-pc",
+  { id: "d-pc",
     parentId: null,
     name: "Planning & Production Control",
     code: "PC",

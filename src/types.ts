@@ -11,8 +11,8 @@ export interface User {
   id: string;
   name: string;
   employeeId: string;
-  departmentId: string; // ← เปลี่ยนจาก department: string
-  position: string; // ← คงเดิม แยกขาดจาก department แน่นอน ไม่ให้ sub-dept มาทับอีก
+  departmentId: string;
+  position: string;
   role: Role;
   avatarUrl?: string;
   email: string;
@@ -24,9 +24,9 @@ export interface User {
 
 export interface SystemAuditLog {
   id: string;
-  action: string; // e.g., 'APPROVE_MEMBER', 'DELETE_MEMBER', 'UPDATE_MEMBER', 'UPDATE_ROLE', 'SUSPEND_MEMBER', 'TERMINATE_MEMBER'
-  details: string; // What was changed/created
-  performedBy: string; // Admin info: "Name (EmployeeId)"
+  action: string;
+  details: string;
+  performedBy: string;
   timestamp: string; // ISO-8601/Human format
 }
 

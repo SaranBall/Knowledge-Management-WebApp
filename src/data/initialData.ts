@@ -8,16 +8,16 @@ import { User, DocumentItem, Course, KBArticle, Expert, SearchLog, UserCoursePro
 export const INITIAL_USERS: User[] = [
   {
     id: 'u-1',
-    name: 'สิริมา แสงสะอาด (คุณก้อย)',
-    employeeId: 'RMP-2041',
-    department: 'ผู้บริหาร / แผนกความยั่งยืน',
-    position: 'Managing Director / Executive',
+    name: 'ศรัณย์ โตพิสิฐ (บอล)',
+    employeeId: 'SM319',
+    departmentId: 'd-it',
+    position: 'เจ้าหน้าที่ Programmer',
     role: 'Admin',
-    email: 'sirima.rmp@royalmeiwa.co.th',
-    phone: '02-749-4100 ต่อ 101',
-    avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150',
-    password: '204100',
-    startDate: '2020-03-12'
+    email: 'saran@royalmeiwa.com',
+    phone: '02-749-4100 ต่อ 2111',
+    avatarUrl: 'https://randomuser.me/api/portraits/men/1.jpg',
+    password: '120246',
+    startDate: '2026-04-01'
   } as User
 ];
 
@@ -39,16 +39,4 @@ export const INITIAL_SEARCH_LOGS: SearchLog[] = [];
 
 export const INITIAL_CONTACT_REQUESTS: ContactRequest[] = [];
 
-export const INITIAL_EMPLOYEE_MASTER: EmployeeMaster[] = [
-  {
-    employeeId: 'RMP-2041',
-    name: 'สิริมา แสงสะอาด (คุณก้อย)',
-    department: 'ผู้บริหาร / แผนกความยั่งยืน',
-    position: 'Managing Director / Executive',
-    startDate: '2020-03-12',
-    level: 'Management',
-    email: 'sirima.rmp@royalmeiwa.co.th',
-    phone: '02-749-4100 ต่อ 101',
-    status: 'Imported'
-  }
-];
+export const INITIAL_EMPLOYEE_MASTER: EmployeeMaster[] = [];
