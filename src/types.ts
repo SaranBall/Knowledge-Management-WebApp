@@ -204,6 +204,7 @@ export interface EmployeeMaster {
   email: string;
   phone: string;
   status: "Imported" | "Registered";
+  isDeptResolved?: boolean; // true if departmentId matches known department, false if unresolved
 }
 
 // --- Dynamic Competency & Skill Gap Tracking types ---

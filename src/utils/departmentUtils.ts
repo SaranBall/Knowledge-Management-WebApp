@@ -171,7 +171,7 @@ export const POSITIONS_BY_DEPARTMENT: Record<string, string[]> = {
 
 /** คืนเฉพาะ main department (parentId === null) */
 export function getMainDepartments(): Department[] {
-  return DEPARTMENTS_FLAT.filter((d) => d.parentId === null);
+  return DEPARTMENTS_FLAT.filter((d) => d.parentId === null).sort((a, b) => a.name.localeCompare(b.name, "th"));
 }
 
 /** คืน sub-department ทั้งหมดของ main dept ที่ระบุ (รับได้ทั้ง id หรือ code) */
@@ -180,7 +180,7 @@ export function getSubDepartments(mainDeptIdOrCode: string): Department[] {
     (d) => d.id === mainDeptIdOrCode || d.code === mainDeptIdOrCode,
   );
   if (!main) return [];
-  return DEPARTMENTS_FLAT.filter((d) => d.parentId === main.id);
+  return DEPARTMENTS_FLAT.filter((d) => d.parentId === main.id).sort((a, b) => a.name.localeCompare(b.name, "th"));
 }
 
 /** หา department object จาก id */
@@ -226,7 +226,7 @@ export function getPositionsForDepartment(departmentId: string): string[] {
 
 /** flat list ของทุกแผนก (main + sub) เอาไว้ทำ dropdown แบบเลือกได้ทุกระดับในช่องเดียว */
 export function getAllDepartmentsFlat(): Department[] {
-  return DEPARTMENTS_FLAT;
+  return [...DEPARTMENTS_FLAT].sort((a, b) => a.name.localeCompare(b.name, "th"));
 }
 
 // เก็บไว้ให้ backward compatible ชั่วคราวระหว่าง migrate โค้ดจุดอื่น

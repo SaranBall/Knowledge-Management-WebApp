@@ -98,7 +98,7 @@ export function calculateLeaderboard(logs: KMContributionLog[], users: any[] = [
       userId: u.id,
       userName: u.name,
       employeeId: u.employeeId,
-      departmentId: u.departmentId || 'd-hr',
+      departmentId: u.departmentId || 'Select Department',
       points: totalPoints,
       level
     };

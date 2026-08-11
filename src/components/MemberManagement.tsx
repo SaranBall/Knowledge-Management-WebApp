@@ -54,6 +54,7 @@ import {
   getDepartmentById,
   getPositionsForDepartment,
   getMainDepartmentOf,
+  getDepartmentByCode,
 } from "../utils/departmentUtils";
 
 export const calculateTenure = (startDateStr?: string): string => {
@@ -137,7 +138,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const [newUser, setNewUser] = useState({
     name: "",
     employeeId: "",
-    departmentId: "d-hr", // ← เปลี่ยนจาก department: 'Select Department'
+    departmentId: "Select Department", // ← เปลี่ยนจาก department: 'Select Department'
     position: "",
     role: "Viewer" as Role,
     email: "",
@@ -390,6 +391,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
               mapping.department !== undefined
                 ? row[mapping.department]
                 : row[2];
+            const rawDept = deptVal ? deptVal.toString().trim() : "";
+            const matchedDept = getDepartmentByCode(rawDept.toUpperCase());
             const posVal =
               mapping.position !== undefined ? row[mapping.position] : row[3];
             const startVal =
@@ -430,7 +433,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             list.push({
               employeeId: empIdVal.toString().trim(),
               name: nameVal.toString().trim(),
-              departmentId: deptVal ? deptVal.toString().trim() : "",
+              departmentId: matchedDept ? matchedDept.id : rawDept,
               position: posVal ? posVal.toString().trim() : "",
               startDate: startDateFormatted,
               level: lvlVal ? lvlVal.toString().trim() : "",
@@ -439,6 +442,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 : `${nameVal.toString().trim().toLowerCase()}@royalmeiwa.com`,
               phone: phoneVal ? phoneVal.toString().trim() : "0xx-xxxxxxx",
               status: "Imported",
+              isDeptResolved: !!matchedDept, // true if departmentId matches known department, false if unresolved
             });
           }
 
@@ -526,7 +530,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     users[0]?.id || "",
   );
   const [selectedRepDeptId, setSelectedRepDeptId] =
-    useState<string>("d-hr");
+    useState<string>("Select Department");
 
   // Search log sub-tabs and resolver states
   const [searchReportTab, setSearchReportTab] = useState<
@@ -543,7 +547,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       setSelectedRepUser(currentUser.id);
     } else if (currentUser.role === "Editor") {
       setReportType("DEPARTMENT");
-      setSelectedRepDeptId(currentUser.departmentId || "d-hr");
+      setSelectedRepDeptId(currentUser.departmentId || "Select Department");
       const deptUsers = users.filter(
         (u) => u.departmentId === currentUser.departmentId,
       );
@@ -2968,10 +2972,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                             const isDuplicate = employeeMaster.some(
                               (exist) => exist.employeeId === emp.employeeId,
                             );
+                            const isDeptUnresolved = emp.isDeptResolved === false;
                             return (
                               <tr
                                 key={i}
-                                className={`hover:bg-slate-50/50 ${isDuplicate ? "bg-amber-50/30" : ""}`}
+                                className={`hover:bg-slate-50/50 ${isDuplicate ? "bg-amber-50/30" : isDeptUnresolved ? "bg-rose-50/40" : ""}`}
                               >
                                 <td className="p-3 font-mono font-bold text-[#15329c]">
                                   {emp.employeeId}
@@ -2985,7 +2990,14 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                   {emp.name}
                                 </td>
                                 <td className="p-3 text-slate-600">
-                                  {emp.department}
+                                  <span className={isDeptUnresolved ? "text-rose-700 font-bold" : ""}>
+                                    {emp.departmentId}
+                                  </span>
+                                  {isDeptUnresolved && (
+                                    <span className="ml-1.5 text-[9px] bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded font-sans font-bold">
+                                      ⚠ ไม่พบรหัสแผนก
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="p-3 text-slate-600">
                                   {emp.position}
@@ -3142,7 +3154,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                               {emp.name}
                             </td>
                             <td className="p-3 text-slate-650 font-semibold">
-                              {emp.department}
+                              {emp.departmentId}
                             </td>
                             <td className="p-3 text-slate-500 font-medium">
                               {emp.position}
@@ -3208,7 +3220,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                         id: `usr-${Date.now()}`,
                                         name: emp.name,
                                         employeeId: emp.employeeId,
-                                        departmentId: "d-hr", // ⚠️ ชั่วคราว — emp.department เป็น free-text จากไฟล์นำเข้า แมปอัตโนมัติไม่ได้ ควรทำ modal ให้เลือกแผนกจริงก่อน (แนะนำทำต่อ)
+                                        departmentId: "ระบุแผนก", // ⚠️ ชั่วคราว — emp.department เป็น free-text จากไฟล์นำเข้า แมปอัตโนมัติไม่ได้ ควรทำ modal ให้เลือกแผนกจริงก่อน (แนะนำทำต่อ)
                                         position: emp.position,
                                         role: assignedRole,
                                         email:
