@@ -42,7 +42,7 @@ import {
   CertStatus,
 } from "./types";
 
-import { api } from "./services/api";
+import { api, setAuthToken } from "./services/api";
 import { getDepartmentById } from "./utils/departmentUtils";
 
 // Import initial dataset
@@ -906,7 +906,7 @@ export default function App() {
 
     // Persist registration details to backend REST API
     try {
-      await api.createUser(newUserObj);
+      await api.register(newUserObj);
       await api.saveCompetencies(newComp);
       await api.saveCertificates(newCerts);
       await api.updateEmployeeMaster(updatedEmpMaster);
@@ -951,8 +951,9 @@ export default function App() {
     }
 
     try {
-      const loggedInUser = await api.login(trimedId, trimedPass);
-      setCurrentUser(loggedInUser);
+      const { user, token } = await api.login(trimmedId, trimmedPass);
+      setAuthToken(token);
+      setCurrentUser(user);
       setIsLogged(true);
       setLoginEmployeeId("");
       setLoginPassword("");
@@ -966,6 +967,7 @@ export default function App() {
   const handleLogout = () => {
     setIsLogged(false);
     setCurrentUser(null);
+    setAuthToken(null);
   };
 
   // --- RENDERING CONFIGS ---
@@ -1149,7 +1151,8 @@ export default function App() {
                   </span>
                   <p className="text-[9.5px] text-slate-600 leading-normal">
                     ตามข้อกำหนดมาตรฐานสากล ISO9001
-                    <br />พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
+                    <br />
+                    พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
                   </p>
                 </div>
               </div>

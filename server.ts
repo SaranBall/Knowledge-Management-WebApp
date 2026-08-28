@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 import {
   INITIAL_USERS,
@@ -60,9 +61,81 @@ function sanitizeUser<T extends { password?: string }>(user: T) {
   return rest;
 }
 
+// ============================================================
+// --- AUTH: JWT setup + middleware ---
+// ============================================================
+
+const JWT_SECRET = process.env.JWT_SECRET || "";
+if (!JWT_SECRET) {
+  console.error(
+    "❌ FATAL: JWT_SECRET is not set in environment variables. Server will not start.",
+  );
+  process.exit(1);
+}
+
+interface AuthPayload {
+  id: string;
+  employeeId: string;
+  role: string;
+}
+
+// ขยาย express Request ให้เก็บ user ที่ decode แล้วจาก token
+declare global {
+  namespace Express {
+    interface Request {
+      authUser?: AuthPayload;
+    }
+  }
+}
+
+function signToken(payload: AuthPayload): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "8h" });
+}
+
+// ต้อง login (มี token ที่ถูกต้อง) ถึงจะเข้าถึง endpoint นี้ได้
+function requireAuth(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith("Bearer ")) {
+    return res
+      .status(401)
+      .json({ error: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบก่อนใช้งาน" });
+  }
+  const token = header.slice("Bearer ".length);
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as AuthPayload;
+    req.authUser = decoded;
+    next();
+  } catch {
+    return res.status(401).json({
+      error: "INVALID_TOKEN",
+      message: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่",
+    });
+  }
+}
+
+// ต้องมี role ที่กำหนดเท่านั้นถึงจะผ่าน (ใช้ต่อจาก requireAuth เสมอ)
+function requireRole(...allowedRoles: string[]) {
+  return (
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    if (!req.authUser || !allowedRoles.includes(req.authUser.role)) {
+      return res
+        .status(403)
+        .json({ error: "FORBIDDEN", message: "คุณไม่มีสิทธิ์ดำเนินการนี้" });
+    }
+    next();
+  };
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
   let db_users: UserType[] = await Promise.all(
@@ -98,10 +171,116 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // --- Secure File Upload API Endpoint & Store ---
+  // ============================================================
+  // --- AUTH ENDPOINTS (ไม่ต้อง requireAuth เพราะเป็นทางเข้าระบบ) ---
+  // ============================================================
+
+  // Login: ตรวจ employeeId + password ที่ server แล้วออก JWT กลับไป
+  app.post("/api/login", async (req, res) => {
+    try {
+      const { employeeId, password } = req.body;
+      if (!employeeId || !password) {
+        return res.status(400).json({
+          error: "MISSING_FIELDS",
+          message: "กรุณากรอกรหัสพนักงานและรหัสผ่าน",
+        });
+      }
+
+      const user = db_users.find(
+        (u) => u.employeeId.toLowerCase() === String(employeeId).toLowerCase(),
+      );
+      if (!user) {
+        return res.status(401).json({
+          error: "INVALID_CREDENTIALS",
+          message: "ไม่พบรหัสพนักงานนี้ในระบบ",
+        });
+      }
+      if (user.status === "Suspended") {
+        return res
+          .status(403)
+          .json({ error: "SUSPENDED", message: "บัญชีถูกระงับสิทธิ์ชั่วคราว" });
+      }
+      if (user.status === "Terminated") {
+        return res
+          .status(403)
+          .json({ error: "TERMINATED", message: "บัญชีถูกยกเลิกการใช้งาน" });
+      }
+
+      const isValid = user.password
+        ? await bcrypt.compare(password, user.password)
+        : false;
+      if (!isValid) {
+        return res.status(401).json({
+          error: "INVALID_CREDENTIALS",
+          message: "รหัสผ่านไม่ถูกต้อง",
+        });
+      }
+
+      const token = signToken({
+        id: user.id,
+        employeeId: user.employeeId,
+        role: user.role,
+      });
+
+      res.json({ user: sanitizeUser(user), token });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Self-registration: สมัครเองด้วยรหัสพนักงานที่มีอยู่ใน Employee Master เท่านั้น
+  // แยกจาก /api/users (ซึ่งตอนนี้สงวนไว้ให้ Admin จัดการคนอื่นเท่านั้น)
+  app.post("/api/register", async (req, res) => {
+    try {
+      const newUser = { ...req.body };
+      if (!newUser.employeeId || !newUser.password) {
+        return res.status(400).json({
+          error: "MISSING_FIELDS",
+          message: "ข้อมูลลงทะเบียนไม่ครบถ้วน",
+        });
+      }
+
+      const employeeRecord = db_employee_master.find(
+        (e) => e.employeeId.toLowerCase() === newUser.employeeId?.toLowerCase(),
+      );
+      if (!employeeRecord) {
+        return res.status(400).json({
+          error: "NOT_FOUND",
+          message: "ไม่พบรหัสพนักงานนี้ในฐานข้อมูลกลาง",
+        });
+      }
+      if (
+        db_users.some(
+          (u) =>
+            u.employeeId.toLowerCase() === newUser.employeeId.toLowerCase(),
+        )
+      ) {
+        return res.status(409).json({
+          error: "DUPLICATE",
+          message: "รหัสพนักงานนี้ลงทะเบียนแล้ว",
+        });
+      }
+      if (newUser.password) {
+        newUser.password = await bcrypt.hash(newUser.password, SALT_ROUNDS);
+      }
+      if (!newUser.id) newUser.id = `usr-${Date.now()}`;
+      db_users.push(newUser);
+
+      const token = jwt.sign(
+        { id: newUser.id, employeeId: newUser.employeeId, role: newUser.role },
+        JWT_SECRET,
+        { expiresIn: "8h" },
+      );
+      res.json({ user: sanitizeUser(newUser), token });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Secure File Upload API Endpoint & Store (ต้อง login ก่อนอัปโหลด) ---
   const uploadedFiles = new Map<string, { buffer: Buffer; mimeType: string }>();
 
-  app.post("/api/upload", (req, res) => {
+  app.post("/api/upload", requireAuth, (req, res) => {
     try {
       const { filename, fileData, mimeType } = req.body;
       if (!filename || !fileData) {
@@ -140,8 +319,8 @@ async function startServer() {
     }
   });
 
-  // Serve the uploaded files
-  app.get("/uploads/:filename", (req, res) => {
+  // Serve the uploaded files (ไฟล์ที่อัปโหลดแล้ว อ่านได้เมื่อ login เท่านั้น)
+  app.get("/uploads/:filename", requireAuth, (req, res) => {
     const filename = req.params.filename;
     if (uploadedFiles.has(filename)) {
       const file = uploadedFiles.get(filename)!;
@@ -160,8 +339,8 @@ async function startServer() {
     res.status(404).send("File not found");
   });
 
-  // --- Secure Server-side Semantic RAG API Endpoint ---
-  app.post("/api/chat", async (req, res) => {
+  // --- Secure Server-side Semantic RAG API Endpoint (ต้อง login) ---
+  app.post("/api/chat", requireAuth, async (req, res) => {
     try {
       const {
         query,
@@ -255,7 +434,6 @@ async function startServer() {
         })),
       ];
 
-      // Call Gemini model Gemini-3.5-flash with rigorous instructions to avoid hallucinations and resolve synonyms (Semantic Semantic Resolution)
       const rmpSystemInstruction = `You are "RMP AI Knowledge Assistant", a state-of-the-art secure semantic RAG system developed for Royal Meiwa Pax Co., Ltd. (บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด).
 Your ultimate mission is to resolve technical questions from operators & engineers while preserving 100% security against hallucinations and preventing industrial machinery accidents (melted barrels, rolls, electric shocks, or manufacturing fires).
 
@@ -286,7 +464,6 @@ You must return your response conforming to the JSON schema specified in respons
   ]
 }`;
 
-      // Call Gemini 3.5 Flash
       const response = await ai.models.generateContent({
         model: "gemini-3.5-flash",
         contents: [
@@ -339,26 +516,29 @@ You must return your response conforming to the JSON schema specified in respons
     }
   });
 
-  // --- AI Intelligent Document Parser (for PDF & scanned roster images) ---
-  app.post("/api/parse-document", async (req, res) => {
-    try {
-      const { base64Data, fileType, fileName } = req.body;
-      if (!base64Data || !fileType) {
-        return res
-          .status(400)
-          .json({ error: "base64Data and fileType are required" });
-      }
+  // --- AI Intelligent Document Parser (for PDF & scanned roster images) — Admin/Editor เท่านั้น ---
+  app.post(
+    "/api/parse-document",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    async (req, res) => {
+      try {
+        const { base64Data, fileType, fileName } = req.body;
+        if (!base64Data || !fileType) {
+          return res
+            .status(400)
+            .json({ error: "base64Data and fileType are required" });
+        }
 
-      // Prepare contents for Gemini API
-      const contents = [
-        {
-          inlineData: {
-            data: base64Data,
-            mimeType: fileType,
+        const contents = [
+          {
+            inlineData: {
+              data: base64Data,
+              mimeType: fileType,
+            },
           },
-        },
-        {
-          text: `You are an expert HR Data Structurer and OCR extraction system for Royal Meiwa Pax Co., Ltd.
+          {
+            text: `You are an expert HR Data Structurer and OCR extraction system for Royal Meiwa Pax Co., Ltd.
 Analyze this uploaded file ("${fileName || "document"}") and extract all employee records.
 
 CRITICAL INSTRUCTIONS:
@@ -374,67 +554,68 @@ CRITICAL INSTRUCTIONS:
    - phone: Thai phone number format (e.g., 08X-XXX-XXXX).
 3. Do not invent unrelated data, but make sure all 9 fields of the EmployeeMaster interface are correctly populated.
 4. Output must be in JSON matching the specified responseSchema. No external text wrapper.`,
-        },
-      ];
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: contents,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              success: { type: Type.BOOLEAN },
-              employees: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    employeeId: { type: Type.STRING },
-                    name: { type: Type.STRING },
-                    department: { type: Type.STRING },
-                    position: { type: Type.STRING },
-                    startDate: { type: Type.STRING },
-                    level: { type: Type.STRING },
-                    email: { type: Type.STRING },
-                    phone: { type: Type.STRING },
-                    status: { type: Type.STRING },
-                  },
-                  required: [
-                    "employeeId",
-                    "name",
-                    "department",
-                    "position",
-                    "startDate",
-                    "level",
-                    "email",
-                    "phone",
-                    "status",
-                  ],
-                },
-              },
-              message: { type: Type.STRING },
-            },
-            required: ["success", "employees"],
           },
-        },
-      });
+        ];
 
-      const responseString = response.text || "{}";
-      const parsedData = JSON.parse(responseString.trim());
-      res.json(parsedData);
-    } catch (error: any) {
-      console.error("AI Document Parse Error:", error);
-      res.status(500).json({
-        error: "AI Parser Error",
-        message: error.message || "Failed to parse document with AI.",
-      });
-    }
-  });
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: contents,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                success: { type: Type.BOOLEAN },
+                employees: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      employeeId: { type: Type.STRING },
+                      name: { type: Type.STRING },
+                      department: { type: Type.STRING },
+                      position: { type: Type.STRING },
+                      startDate: { type: Type.STRING },
+                      level: { type: Type.STRING },
+                      email: { type: Type.STRING },
+                      phone: { type: Type.STRING },
+                      status: { type: Type.STRING },
+                    },
+                    required: [
+                      "employeeId",
+                      "name",
+                      "department",
+                      "position",
+                      "startDate",
+                      "level",
+                      "email",
+                      "phone",
+                      "status",
+                    ],
+                  },
+                },
+                message: { type: Type.STRING },
+              },
+              required: ["success", "employees"],
+            },
+          },
+        });
 
-  // --- AI Personalized Career Learning Path Advisor ---
-  app.post("/api/personalized-path", async (req, res) => {
+        const responseString = response.text || "{}";
+        const parsedData = JSON.parse(responseString.trim());
+        res.json(parsedData);
+      } catch (error: any) {
+        console.error("AI Document Parse Error:", error);
+        res.status(500).json({
+          error: "AI Parser Error",
+          message: error.message || "Failed to parse document with AI.",
+        });
+      }
+    },
+  );
+
+  // --- AI Personalized Career Learning Path Advisor (ต้อง login) ---
+  app.post("/api/personalized-path", requireAuth, async (req, res) => {
     try {
       const currentUser = req.body.currentUser;
       const careerGoal = req.body.careerGoal || req.body.targetGoal;
@@ -449,7 +630,6 @@ CRITICAL INSTRUCTIONS:
         });
       }
 
-      // Serialize available courses & WIs
       const simpleCourses = (courses || []).map((c: any) => ({
         id: c.id,
         title: c.title,
@@ -579,206 +759,208 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     }
   });
 
-  // --- RESTful API endpoints for persistent database integration ---
+  // ============================================================
+  // --- RESTful API endpoints ---
+  // ทุก GET ต้อง requireAuth (อ่านได้เมื่อ login แล้วเท่านั้น)
+  // ทุก POST/PUT/DELETE ต้อง requireAuth + requireRole ตามความเหมาะสม
+  // ============================================================
 
-  // Users APIs
-  app.get("/api/users", (req, res) => {
+  // Users APIs — จัดการได้เฉพาะ Admin เท่านั้น (สมัครเองใช้ /api/register แทน)
+  app.get("/api/users", requireAuth, (req, res) => {
     res.json(db_users.map(sanitizeUser));
   });
-  app.post("/api/users", async (req, res) => {
-    try {
-      const newUser = { ...req.body };
-      if (!newUser.id) newUser.id = `user-${Date.now()}`;
-      if (newUser.password) {
-        newUser.password = await bcrypt.hash(newUser.password, SALT_ROUNDS);
+  app.post(
+    "/api/users",
+    requireAuth,
+    requireRole("Admin"),
+    async (req, res) => {
+      try {
+        const newUser = { ...req.body };
+        if (!newUser.id) newUser.id = `usr-${Date.now()}`;
+        if (newUser.password) {
+          newUser.password = await bcrypt.hash(newUser.password, SALT_ROUNDS);
+        }
+        db_users.push(newUser);
+        res.json(sanitizeUser(newUser));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_users.push(newUser);
-      res.json(sanitizeUser(newUser));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.put("/api/users/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const updatedUser = { ...req.body };
-      if (updatedUser.password) {
-        updatedUser.password = await bcrypt.hash(
-          updatedUser.password,
-          SALT_ROUNDS,
+    },
+  );
+  app.put(
+    "/api/users/:id",
+    requireAuth,
+    requireRole("Admin"),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedUser = { ...req.body };
+        if (updatedUser.password) {
+          updatedUser.password = await bcrypt.hash(
+            updatedUser.password,
+            SALT_ROUNDS,
+          );
+        } else {
+          delete updatedUser.password;
+        }
+        db_users = db_users.map((u) =>
+          u.id === id ? { ...u, ...updatedUser } : u,
         );
-      } else {
-        delete updatedUser.password;
+        const saved = db_users.find((u) => u.id === id);
+        res.json(saved ? sanitizeUser(saved) : null);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_users = db_users.map((u) =>
-        u.id === id ? { ...u, ...updatedUser } : u,
-      );
-      const saved = db_users.find((u) => u.id === id);
-      res.json(saved ? sanitizeUser(saved) : null);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.delete("/api/users/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      db_users = db_users.filter((u) => u.id !== id);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  //Login API
-  app.post("/api/login", async (req, res) => {
-    try {
-      const { employeeId, password } = req.body;
-      if (!employeeId || !password) {
-        return res
-          .status(400)
-          .json({
-            error: "MISSING_FIELDS",
-            message: "กรุณากรอกรหัสพนักงานและรหัสผ่าน",
-          });
+    },
+  );
+  app.delete(
+    "/api/users/:id",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        db_users = db_users.filter((u) => u.id !== id);
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-
-      const user = db_users.find(
-        (u) => u.employeeId.toLowerCase() === String(employeeId).toLowerCase(),
-      );
-      if (!user) {
-        return res
-          .status(401)
-          .json({
-            error: "INVALID_CREDENTIALS",
-            message: "ไม่พบรหัสพนักงานนี้ในระบบ",
-          });
-      }
-      if (user.status === "Suspended") {
-        return res
-          .status(403)
-          .json({ error: "SUSPENDED", message: "บัญชีถูกระงับสิทธิ์ชั่วคราว" });
-      }
-      if (user.status === "Terminated") {
-        return res
-          .status(403)
-          .json({ error: "TERMINATED", message: "บัญชีถูกยกเลิกการใช้งาน" });
-      }
-
-      const isValid = user.password
-        ? await bcrypt.compare(password, user.password)
-        : false;
-      if (!isValid) {
-        return res
-          .status(401)
-          .json({
-            error: "INVALID_CREDENTIALS",
-            message: "รหัสผ่านไม่ถูกต้อง",
-          });
-      }
-
-      res.json(sanitizeUser(user));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
 
   // Documents APIs
-  app.get("/api/documents", (req, res) => {
+  app.get("/api/documents", requireAuth, (req, res) => {
     res.json(db_documents);
   });
-  app.post("/api/documents", (req, res) => {
-    try {
-      const newDoc = req.body;
-      if (!newDoc.id) {
-        newDoc.id = `doc-${Date.now()}`;
+  app.post(
+    "/api/documents",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const newDoc = req.body;
+        if (!newDoc.id) {
+          newDoc.id = `doc-${Date.now()}`;
+        }
+        db_documents.unshift(newDoc);
+        res.json(newDoc);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_documents.unshift(newDoc);
-      res.json(newDoc);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.put("/api/documents/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      const updatedDoc = req.body;
-      db_documents = db_documents.map((d) => (d.id === id ? updatedDoc : d));
-      res.json(updatedDoc);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.delete("/api/documents/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      db_documents = db_documents.filter((d) => d.id !== id);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.post("/api/documents/:id/approve", (req, res) => {
-    try {
-      const { id } = req.params;
-      const { approverName } = req.body;
-      db_documents = db_documents.map((doc) =>
-        doc.id === id
-          ? {
-              ...doc,
-              status: "Published",
-              approvedBy: approverName,
-              approvedAt: new Date().toISOString(),
-            }
-          : doc,
-      );
-      const updated = db_documents.find((doc) => doc.id === id);
-      res.json(updated);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
+  app.put(
+    "/api/documents/:id",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedDoc = req.body;
+        db_documents = db_documents.map((d) => (d.id === id ? updatedDoc : d));
+        res.json(updatedDoc);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+  app.delete(
+    "/api/documents/:id",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        db_documents = db_documents.filter((d) => d.id !== id);
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+  app.post(
+    "/api/documents/:id/approve",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        const { approverName } = req.body;
+        db_documents = db_documents.map((doc) =>
+          doc.id === id
+            ? {
+                ...doc,
+                status: "Published",
+                approvedBy: approverName,
+                approvedAt: new Date().toISOString(),
+              }
+            : doc,
+        );
+        const updated = db_documents.find((doc) => doc.id === id);
+        res.json(updated);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
 
   // Courses APIs
-  app.get("/api/courses", (req, res) => {
+  app.get("/api/courses", requireAuth, (req, res) => {
     res.json(db_courses);
   });
-  app.post("/api/courses", (req, res) => {
-    try {
-      const newCourse = req.body;
-      if (!newCourse.id) {
-        newCourse.id = `c-${Date.now()}`;
+  app.post(
+    "/api/courses",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const newCourse = req.body;
+        if (!newCourse.id) {
+          newCourse.id = `c-${Date.now()}`;
+        }
+        db_courses.unshift(newCourse);
+        res.json(newCourse);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_courses.unshift(newCourse);
-      res.json(newCourse);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.put("/api/courses/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      const updatedCourse = req.body;
-      db_courses = db_courses.map((c) => (c.id === id ? updatedCourse : c));
-      res.json(updatedCourse);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.delete("/api/courses/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      db_courses = db_courses.filter((c) => c.id !== id);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
+  app.put(
+    "/api/courses/:id",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedCourse = req.body;
+        db_courses = db_courses.map((c) => (c.id === id ? updatedCourse : c));
+        res.json(updatedCourse);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+  app.delete(
+    "/api/courses/:id",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        db_courses = db_courses.filter((c) => c.id !== id);
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
 
   // KB Articles APIs
-  app.get("/api/kb_articles", (req, res) => {
+  app.get("/api/kb_articles", requireAuth, (req, res) => {
     res.json(db_kb_articles);
   });
-  app.post("/api/kb_articles", (req, res) => {
+  app.post("/api/kb_articles", requireAuth, (req, res) => {
+    // ทุก role ที่ login แล้วเสนอความรู้/ร่างบทความได้ (workflow อนุมัติควบคุมที่ /approve)
     try {
       const newArt = req.body;
       if (!newArt.id) {
@@ -790,40 +972,55 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       res.status(500).json({ error: err.message });
     }
   });
-  app.put("/api/kb_articles/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      const updatedArt = req.body;
-      db_kb_articles = db_kb_articles.map((art) =>
-        art.id === id ? updatedArt : art,
-      );
-      res.json(updatedArt);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.delete("/api/kb_articles/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      db_kb_articles = db_kb_articles.filter((art) => art.id !== id);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.post("/api/kb_articles/:id/approve", (req, res) => {
-    try {
-      const { id } = req.params;
-      db_kb_articles = db_kb_articles.map((art) =>
-        art.id === id ? { ...art, status: "Approved" } : art,
-      );
-      const updated = db_kb_articles.find((art) => art.id === id);
-      res.json(updated);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.post("/api/kb_articles/:id/like", (req, res) => {
+  app.put(
+    "/api/kb_articles/:id",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedArt = req.body;
+        db_kb_articles = db_kb_articles.map((art) =>
+          art.id === id ? updatedArt : art,
+        );
+        res.json(updatedArt);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+  app.delete(
+    "/api/kb_articles/:id",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        db_kb_articles = db_kb_articles.filter((art) => art.id !== id);
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+  app.post(
+    "/api/kb_articles/:id/approve",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        db_kb_articles = db_kb_articles.map((art) =>
+          art.id === id ? { ...art, status: "Approved" } : art,
+        );
+        const updated = db_kb_articles.find((art) => art.id === id);
+        res.json(updated);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+  app.post("/api/kb_articles/:id/like", requireAuth, (req, res) => {
     try {
       const { id } = req.params;
       db_kb_articles = db_kb_articles.map((art) =>
@@ -836,11 +1033,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     }
   });
 
-  // Experts APIs
-  app.get("/api/experts", (req, res) => {
+  // Experts APIs — จัดการได้เฉพาะ Admin
+  app.get("/api/experts", requireAuth, (req, res) => {
     res.json(db_experts);
   });
-  app.post("/api/experts", (req, res) => {
+  app.post("/api/experts", requireAuth, requireRole("Admin"), (req, res) => {
     try {
       const newExpert = req.body;
       if (!newExpert.id) {
@@ -852,7 +1049,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       res.status(500).json({ error: err.message });
     }
   });
-  app.put("/api/experts/:id", (req, res) => {
+  app.put("/api/experts/:id", requireAuth, requireRole("Admin"), (req, res) => {
     try {
       const { id } = req.params;
       const updatedExpert = req.body;
@@ -862,21 +1059,26 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       res.status(500).json({ error: err.message });
     }
   });
-  app.delete("/api/experts/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      db_experts = db_experts.filter((e) => e.id !== id);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  app.delete(
+    "/api/experts/:id",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        db_experts = db_experts.filter((e) => e.id !== id);
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
 
-  // Ratings APIs
-  app.get("/api/ratings", (req, res) => {
+  // Ratings APIs — เขียนได้ทุก login
+  app.get("/api/ratings", requireAuth, (req, res) => {
     res.json(db_ratings);
   });
-  app.post("/api/ratings", (req, res) => {
+  app.post("/api/ratings", requireAuth, (req, res) => {
     try {
       const rating = req.body;
       if (!rating.id) {
@@ -889,11 +1091,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     }
   });
 
-  // User Progress APIs
-  app.get("/api/user_progress", (req, res) => {
+  // User Progress APIs — เขียนได้ทุก login (เป็นข้อมูลของตัวเอง)
+  app.get("/api/user_progress", requireAuth, (req, res) => {
     res.json(db_user_progress);
   });
-  app.post("/api/user_progress", (req, res) => {
+  app.post("/api/user_progress", requireAuth, (req, res) => {
     try {
       const prog = req.body;
       if (!prog.id) {
@@ -914,10 +1116,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // Exam Results APIs
-  app.get("/api/exam_results", (req, res) => {
+  app.get("/api/exam_results", requireAuth, (req, res) => {
     res.json(db_exam_results);
   });
-  app.post("/api/exam_results", (req, res) => {
+  app.post("/api/exam_results", requireAuth, (req, res) => {
     try {
       const result = req.body;
       if (!result.id) {
@@ -931,10 +1133,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // Search Logs APIs
-  app.get("/api/search_logs", (req, res) => {
+  app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {
     res.json(db_search_logs);
   });
-  app.post("/api/search_logs", (req, res) => {
+  app.post("/api/search_logs", requireAuth, (req, res) => {
     try {
       const log = req.body;
       if (!log.id) {
@@ -948,10 +1150,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // Contact Requests APIs
-  app.get("/api/contact_requests", (req, res) => {
+  app.get("/api/contact_requests", requireAuth, (req, res) => {
     res.json(db_contact_requests);
   });
-  app.post("/api/contact_requests", (req, res) => {
+  app.post("/api/contact_requests", requireAuth, (req, res) => {
     try {
       const contactReq = req.body;
       if (!contactReq.id) {
@@ -963,57 +1165,72 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       res.status(500).json({ error: err.message });
     }
   });
-  app.post("/api/contact_requests/:id/reply", (req, res) => {
-    try {
-      const { id } = req.params;
-      const { replyMessage } = req.body;
-      db_contact_requests = db_contact_requests.map((req) =>
-        req.id === id
-          ? {
-              ...req,
-              status: "Replied",
-              replyMessage,
-            }
-          : req,
-      );
-      const updated = db_contact_requests.find((req) => req.id === id);
-      res.json(updated);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  app.post(
+    "/api/contact_requests/:id/reply",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        const { replyMessage } = req.body;
+        db_contact_requests = db_contact_requests.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                status: "Replied",
+                replyMessage,
+              }
+            : r,
+        );
+        const updated = db_contact_requests.find((r) => r.id === id);
+        res.json(updated);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
 
-  // Custom Resources APIs
-  app.get("/api/custom_resources", (req, res) => {
+  // Custom Resources APIs — เพิ่ม/ลบได้เฉพาะ Admin (ตรงกับ UI ที่ล็อกไว้แล้ว)
+  app.get("/api/custom_resources", requireAuth, (req, res) => {
     res.json(db_custom_resources);
   });
-  app.post("/api/custom_resources", (req, res) => {
-    try {
-      const resItem = req.body;
-      if (!resItem.id) {
-        resItem.id = `res-${Date.now()}`;
+  app.post(
+    "/api/custom_resources",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const resItem = req.body;
+        if (!resItem.id) {
+          resItem.id = `res-${Date.now()}`;
+        }
+        db_custom_resources.unshift(resItem);
+        res.json(resItem);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_custom_resources.unshift(resItem);
-      res.json(resItem);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.delete("/api/custom_resources/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      db_custom_resources = db_custom_resources.filter((r) => r.id !== id);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
+  app.delete(
+    "/api/custom_resources/:id",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        db_custom_resources = db_custom_resources.filter((r) => r.id !== id);
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
 
   // Competencies APIs
-  app.get("/api/user_competencies", (req, res) => {
+  app.get("/api/user_competencies", requireAuth, (req, res) => {
     res.json(db_user_competencies);
   });
-  app.post("/api/user_competencies", (req, res) => {
+  app.post("/api/user_competencies", requireAuth, (req, res) => {
     try {
       const { competencies } = req.body;
       if (Array.isArray(competencies)) {
@@ -1035,10 +1252,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // Certificates APIs
-  app.get("/api/user_certificates", (req, res) => {
+  app.get("/api/user_certificates", requireAuth, (req, res) => {
     res.json(db_user_certificates);
   });
-  app.post("/api/user_certificates", (req, res) => {
+  app.post("/api/user_certificates", requireAuth, (req, res) => {
     try {
       const { certificates } = req.body;
       if (Array.isArray(certificates)) {
@@ -1058,10 +1275,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // KM Contribution Logs APIs
-  app.get("/api/km_contribution_logs", (req, res) => {
+  app.get("/api/km_contribution_logs", requireAuth, (req, res) => {
     res.json(db_km_contribution_logs);
   });
-  app.post("/api/km_contribution_logs", (req, res) => {
+  app.post("/api/km_contribution_logs", requireAuth, (req, res) => {
     try {
       const log = req.body;
       if (!log.id) {
@@ -1074,38 +1291,58 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     }
   });
 
-  // Employee Master APIs
-  app.get("/api/employee_master", (req, res) => {
-    res.json(db_employee_master);
-  });
-  app.post("/api/employee_master", (req, res) => {
-    try {
-      const { employeeMaster } = req.body;
-      if (Array.isArray(employeeMaster)) {
-        db_employee_master = employeeMaster;
-      }
+  // Employee Master APIs — เฉพาะ Admin/Editor เห็นและจัดการได้ (ตรงกับ UI)
+  app.get(
+    "/api/employee_master",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
       res.json(db_employee_master);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // System Audit Logs APIs
-  app.get("/api/system_audit_logs", (req, res) => {
-    res.json(db_system_audit_logs);
-  });
-  app.post("/api/system_audit_logs", (req, res) => {
-    try {
-      const log = req.body;
-      if (!log.id) {
-        log.id = `log-${Date.now()}`;
+    },
+  );
+  app.post(
+    "/api/employee_master",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const { employeeMaster } = req.body;
+        if (Array.isArray(employeeMaster)) {
+          db_employee_master = employeeMaster;
+        }
+        res.json(db_employee_master);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_system_audit_logs.unshift(log);
-      res.json(log);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
+
+  // System Audit Logs APIs — อ่าน/เขียนเฉพาะ Admin
+  app.get(
+    "/api/system_audit_logs",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      res.json(db_system_audit_logs);
+    },
+  );
+  app.post(
+    "/api/system_audit_logs",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const log = req.body;
+        if (!log.id) {
+          log.id = `log-${Date.now()}`;
+        }
+        db_system_audit_logs.unshift(log);
+        res.json(log);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
 
   // --- Serve Frontend Application seamlessly ---
   if (process.env.NODE_ENV !== "production") {
