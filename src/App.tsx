@@ -343,7 +343,8 @@ export default function App() {
     );
     // Sync current session details on identical ID
     if (currentUser && currentUser.id === updatedUsr.id) {
-      setCurrentUser({ ...currentUser, ...updatedUsr });
+      const { password: _plainPin, ...safeUser } = updatedUsr;
+      setCurrentUser({ ...currentUser, ...safeUser });
     }
     addAuditLog(
       "UPDATE_MEMBER",
@@ -913,6 +914,10 @@ export default function App() {
       console.error("Failed to persist registration details to server:", e);
     }
 
+    const { password: _plainPin, ...safeUser } = newUserObj;
+    setCurrentUser(safeUser as UserType);
+    setIsLogged(true);
+
     // Auto login
     setCurrentUser(newUserObj);
     setIsLogged(true);
@@ -933,60 +938,32 @@ export default function App() {
     e.preventDefault();
     setLoginError("");
 
-    const trimmedId = loginEmployeeId.trim();
-    const trimmedPass = loginPassword.trim();
+    const trimedId = loginEmployeeId.trim();
+    const trimedPass = loginPassword.trim();
 
-    if (!trimmedId) {
+    if (!trimedId) {
       setLoginError("กรุณากรอกรหัสพนักงาน");
       return;
     }
-    if (!trimmedPass) {
+    if (!trimedPass) {
       setLoginError("กรุณากรอกรหัสผ่าน 6 หลัก");
       return;
     }
-    if (trimmedPass.length !== 6 || !/^\d+$/.test(trimmedPass)) {
+    if (trimedPass.length !== 6 || !/^\d+$/.test(trimedPass)) {
       setLoginError("รหัสผ่าน PIN ความปลอดภัย ต้องประกอบด้วยตัวเลข 6 หลัก");
       return;
     }
 
-    const user = users.find(
-      (u) => u.employeeId.toLowerCase() === trimmedId.toLowerCase(),
-    );
-    if (!user) {
-      setLoginError(
-        "ไม่พบรหัสพนักงานนี้ในระเบียนผู้ใช้งาน กรุณาลงทะเบียนพนักงานก่อนเข้าใช้",
-      );
-      return;
+    try {
+      const loggedInUser = await api.login(trimedId, trimedPass);
+      setCurrentUser(loggedInUser);
+      setIsLogged(true);
+      setLoginEmployeeId("");
+      setLoginPassword("");
+      setMobileMenuOpen(false);
+    } catch (error: any) {
+      setLoginError("รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง");
     }
-
-    // Check life-cycle status constraints
-    if (user.status === "Suspended") {
-      setLoginError(
-        "❌ บัญชีผู้ใช้นี้ถูกระงับสิทธิ์ชั่วคราว (Suspended) โปรดติดต่อแผนกสารสนเทศหรือแอดมิน",
-      );
-      return;
-    }
-    if (user.status === "Terminated") {
-      setLoginError(
-        "❌ บัญชีผู้ใช้นี้ถูกยกเลิกการใช้งานประวัติสมาชิกเนื่องจากพ้นสภาพ (Terminated) เพื่อการตรวจสอบย้อนหลัง",
-      );
-      return;
-    }
-
-    // Validate Password PIN
-    const requiredPassword = user.password || "123456";
-    if (trimmedPass !== requiredPassword) {
-      setLoginError("รหัสผ่าน PIN 6 หลัก ไม่ถูกต้อง กรุณากรอกใหม่อีกครั้ง");
-      return;
-    }
-
-    // Logic for successful manual login
-    setCurrentUser(user);
-    setIsLogged(true);
-    setLoginEmployeeId("");
-    setLoginPassword("");
-    setLoginError("");
-    setMobileMenuOpen(false);
   };
 
   // Logout/Switch simulation
@@ -1169,85 +1146,7 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* 3. SIMULATOR ID LIST WITH PREFILL INFO AND REGISTER BTN */}
-                {/* 3. SIMULATOR ID LIST — เฉพาะ dev เท่านั้น */}
-                {import.meta.env.DEV && (
-                  <div className="space-y-3">
-                    <div className="flex items-center my-1">
-                      <div className="flex-1 border-t border-slate-250" />
-                      <span className="px-3 text-[9px] text-slate-450 font-bold uppercase tracking-widest">
-                        หรือเข้าสู่ระบบอย่างง่ายสำหรับการทดสอบ
-                      </span>
-                      <div className="flex-1 border-t border-slate-250" />
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-1">
-                      {users.map((u) => {
-                        let badgeCol =
-                          "bg-green-500/10 text-green-700 border border-green-500/20";
-                        if (u.role === "Admin")
-                          badgeCol =
-                            "bg-rose-500/10 text-rose-700 border border-rose-500/20";
-                        if (u.role === "Editor")
-                          badgeCol =
-                            "bg-amber-500/10 text-amber-700 border border-amber-500/20";
-
-                        const displayPIN = u.password || "123456";
-
-                        return (
-                          <button
-                            key={u.id}
-                            type="button"
-                            id={`login-as-${u.id}`}
-                            onClick={() => {
-                              setLoginEmployeeId(u.employeeId);
-                              setLoginPassword(displayPIN);
-                              setLoginError("");
-                              const mockUserObj = u;
-                              setTimeout(() => {
-                                setCurrentUser(mockUserObj);
-                                setIsLogged(true);
-                                setLoginEmployeeId("");
-                                setLoginPassword("");
-                              }, 120);
-                            }}
-                            className="w-full p-2 bg-slate-50/70 hover:bg-[#15329c]/5 border border-slate-200 hover:border-[#15329c]/40 rounded-xl flex items-center gap-2.5 transition cursor-pointer text-left group"
-                          >
-                            <img
-                              src={
-                                u.avatarUrl ||
-                                "https://images.unsplash.com/photo-1535713875002?w=80"
-                              }
-                              alt={u.name}
-                              referrerPolicy="no-referrer"
-                              className="w-7.5 h-7.5 rounded-full object-cover border border-slate-200 shrink-0"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-[11px] flex items-center gap-1.5 justify-between leading-none">
-                                <span className="truncate text-slate-800">
-                                  {u.name}
-                                </span>
-                                <span
-                                  className={`text-[7px] font-mono font-bold px-1 py-0.2 rounded uppercase shrink-0 ${badgeCol}`}
-                                >
-                                  {u.role}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between mt-1">
-                                <span className="block text-[8px] text-slate-500 truncate leading-none">
-                                  ID: {u.employeeId} • {u.position}
-                                </span>
-                                <span className="bg-amber-100 text-amber-800 border border-amber-200 font-mono text-[7px] font-black px-1.5 py-0.1 rounded shrink-0">
-                                  🔑 PIN: {displayPIN}
-                                </span>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                {/* 3.REGISTER BTN */}
                 <div className="p-3 bg-indigo-50/70 rounded-2xl border border-indigo-100 text-left space-y-1">
                   <span className="text-[10px] font-bold text-indigo-950 uppercase block tracking-wider">
                     🛎️ กำหนดความปลอดภัยสองปัจจัย
@@ -1255,8 +1154,6 @@ export default function App() {
                   <p className="text-[9.5px] text-slate-600 leading-normal">
                     ตามข้อกำหนดมาตรฐานสากล ISO9001
                     พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
-                    ท่านสามารถกำหนดขึ้นได้เองเมื่อเปิดบัญชีพนักงานใหม่
-                    หรือกดเลือกผู้ใช้เพื่อสาธิตความพร้อมค่ะ
                   </p>
                 </div>
               </div>

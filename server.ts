@@ -3,23 +3,42 @@ import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
+import bcrypt from "bcryptjs";
 
-import { 
-  INITIAL_USERS, INITIAL_DOCUMENTS, INITIAL_COURSES, 
-  INITIAL_KB_ARTICLES, INITIAL_EXPERTS, INITIAL_RATINGS, 
-  INITIAL_USER_PROGRESS, INITIAL_EXAM_RESULTS, INITIAL_SEARCH_LOGS, 
-  INITIAL_CONTACT_REQUESTS, INITIAL_EMPLOYEE_MASTER 
+import {
+  INITIAL_USERS,
+  INITIAL_DOCUMENTS,
+  INITIAL_COURSES,
+  INITIAL_KB_ARTICLES,
+  INITIAL_EXPERTS,
+  INITIAL_RATINGS,
+  INITIAL_USER_PROGRESS,
+  INITIAL_EXAM_RESULTS,
+  INITIAL_SEARCH_LOGS,
+  INITIAL_CONTACT_REQUESTS,
+  INITIAL_EMPLOYEE_MASTER,
 } from "./src/data/initialData";
-import { 
-  getInitialCompetencies, 
-  getInitialCertificates, 
-  getInitialKMContributionLogs 
+import {
+  getInitialCompetencies,
+  getInitialCertificates,
+  getInitialKMContributionLogs,
 } from "./src/utils/gamificationUtils";
-import { 
-  User as UserType, DocumentItem, Course, 
-  KBArticle, Expert, SearchLog, UserCourseProgress, 
-  RatingAndComment, ContactRequest, CustomResource, EmployeeMaster,
-  SystemAuditLog, UserCompetency, UserCertificate, KMContributionLog
+import {
+  User as UserType,
+  DocumentItem,
+  Course,
+  KBArticle,
+  Expert,
+  SearchLog,
+  UserCourseProgress,
+  RatingAndComment,
+  ContactRequest,
+  CustomResource,
+  EmployeeMaster,
+  SystemAuditLog,
+  UserCompetency,
+  UserCertificate,
+  KMContributionLog,
 } from "./src/types";
 
 dotenv.config();
@@ -29,17 +48,31 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
   httpOptions: {
     headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
+      "User-Agent": "aistudio-build",
+    },
+  },
 });
+
+const SALT_ROUNDS = 10;
+
+function sanitizeUser<T extends { password?: string }>(user: T) {
+  const { password, ...rest } = user;
+  return rest;
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
-  let db_users: UserType[] = [...INITIAL_USERS];
+  let db_users: UserType[] = await Promise.all(
+    INITIAL_USERS.map(async (u) => ({
+      ...u,
+      password: u.password
+        ? await bcrypt.hash(u.password, SALT_ROUNDS)
+        : undefined,
+    })),
+  );
   let db_documents: DocumentItem[] = [...INITIAL_DOCUMENTS];
   let db_courses: Course[] = [...INITIAL_COURSES];
   let db_kb_articles: KBArticle[] = [...INITIAL_KB_ARTICLES];
@@ -50,19 +83,20 @@ async function startServer() {
   let db_search_logs: SearchLog[] = [...INITIAL_SEARCH_LOGS];
   let db_contact_requests: ContactRequest[] = [...INITIAL_CONTACT_REQUESTS];
   let db_custom_resources: CustomResource[] = [];
-  let db_user_competencies: UserCompetency[] = INITIAL_USERS.flatMap(u => 
-    getInitialCompetencies(u.id, u.departmentId, u.position)
+  let db_user_competencies: UserCompetency[] = INITIAL_USERS.flatMap((u) =>
+    getInitialCompetencies(u.id, u.departmentId, u.position),
   );
-  let db_user_certificates: UserCertificate[] = INITIAL_USERS.flatMap(u => 
-    getInitialCertificates(u.id, u.employeeId)
+  let db_user_certificates: UserCertificate[] = INITIAL_USERS.flatMap((u) =>
+    getInitialCertificates(u.id, u.employeeId),
   );
-  let db_km_contribution_logs: KMContributionLog[] = getInitialKMContributionLogs();
+  let db_km_contribution_logs: KMContributionLog[] =
+    getInitialKMContributionLogs();
   let db_employee_master: EmployeeMaster[] = [...INITIAL_EMPLOYEE_MASTER];
   let db_system_audit_logs: SystemAuditLog[] = [];
 
   // Add JSON parsing middleware up to 50MB to handle document corpus payloads and file uploads safely
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // --- Secure File Upload API Endpoint & Store ---
   const uploadedFiles = new Map<string, { buffer: Buffer; mimeType: string }>();
@@ -71,19 +105,24 @@ async function startServer() {
     try {
       const { filename, fileData, mimeType } = req.body;
       if (!filename || !fileData) {
-        return res.status(400).json({ error: "filename and fileData are required" });
+        return res
+          .status(400)
+          .json({ error: "filename and fileData are required" });
       }
       const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, "_");
-      const buffer = Buffer.from(fileData, 'base64');
-      uploadedFiles.set(cleanName, { buffer, mimeType: mimeType || 'application/octet-stream' });
-      
+      const buffer = Buffer.from(fileData, "base64");
+      uploadedFiles.set(cleanName, {
+        buffer,
+        mimeType: mimeType || "application/octet-stream",
+      });
+
       // Also try to write to filesystem (in public/uploads and dist/uploads) for persistence if possible
-      const fs = require('fs');
+      const fs = require("fs");
       const uploadsDirs = [
-        path.join(process.cwd(), 'public', 'uploads'),
-        path.join(process.cwd(), 'dist', 'uploads')
+        path.join(process.cwd(), "public", "uploads"),
+        path.join(process.cwd(), "dist", "uploads"),
       ];
-      uploadsDirs.forEach(dir => {
+      uploadsDirs.forEach((dir) => {
         try {
           if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
@@ -106,13 +145,13 @@ async function startServer() {
     const filename = req.params.filename;
     if (uploadedFiles.has(filename)) {
       const file = uploadedFiles.get(filename)!;
-      res.setHeader('Content-Type', file.mimeType);
+      res.setHeader("Content-Type", file.mimeType);
       return res.send(file.buffer);
     }
     // Try to read from filesystem
-    const fs = require('fs');
-    const filePath = path.join(process.cwd(), 'public', 'uploads', filename);
-    const distFilePath = path.join(process.cwd(), 'dist', 'uploads', filename);
+    const fs = require("fs");
+    const filePath = path.join(process.cwd(), "public", "uploads", filename);
+    const distFilePath = path.join(process.cwd(), "dist", "uploads", filename);
     if (fs.existsSync(filePath)) {
       return res.sendFile(filePath);
     } else if (fs.existsSync(distFilePath)) {
@@ -124,7 +163,14 @@ async function startServer() {
   // --- Secure Server-side Semantic RAG API Endpoint ---
   app.post("/api/chat", async (req, res) => {
     try {
-      const { query, currentUser, documents, kbArticles, courses, customResources } = req.body;
+      const {
+        query,
+        currentUser,
+        documents,
+        kbArticles,
+        courses,
+        customResources,
+      } = req.body;
 
       if (!query) {
         return res.status(400).json({ error: "Query is required" });
@@ -132,69 +178,88 @@ async function startServer() {
 
       // Exact match override for the infographic vacuum test query
       const lowerQuery = query.toLowerCase().trim();
-      if (lowerQuery.includes("vacuum") || lowerQuery.includes("วิธีตรวจสูญญากาศ") || lowerQuery.includes("ตรวจวัดสูญญากาศ")) {
+      if (
+        lowerQuery.includes("vacuum") ||
+        lowerQuery.includes("วิธีตรวจสูญญากาศ") ||
+        lowerQuery.includes("ตรวจวัดสูญญากาศ")
+      ) {
         return res.json({
           responseText: `### 📋 รายงานการสืบค้นมาตรฐานปฏิบัติงาน (Verified QP/WI)\n\nระบบตรวจพบข้อปฏิบัติมาตรฐานในเอกสารฉบับอนุมัติพับลิช **"SOP-QC-024 Vacuum Test"** และคู่มือการปฏิบัติงาน **"WI-QC-024 วิธีตรวจ Vacuum"** ซึ่งสรุปแนวทางการทำงานอย่างมีประสิทธิภาพเพื่อลดปัญหาของเสียในขั้นตอนการแพ็กเกจ มีขั้นตอนดังต่อไปนี้ครับ:\n\n#### ✅ ขั้นตอนการตรวจ Vacuum:\n1. **เตรียมเครื่องมือวัด Vacuum** — จัดเตรียมตัวเครื่องปั๊มและชุดเกจแรงดันสุญญากาศให้อยู่ในสภาพพร้อมตรวจวัดร้อยละร้อย\n2. **ตรวจสอบสภาพกระป๋อง** — สังเกตตัวบรรจุภัณฑ์หรือฝากระป๋องภายนอกให้เรียบร้อย ไม่บุบเบี้ยวจนทำให้ขอบรั่วซึม\n3. **วางหัววัดบนกระป๋อง** — วางตัวกระป๋องตั้งฉากบนแป้นรับและปรับเลื่อนชุดหัววัดกดลงบนเป้าตรวจจับอย่างแนบแน่น\n4. **อ่านค่าและบันทึกผล** — เจาะจุดวัดและบันทึกสถิติแรงดันอย่างรวดเร็ว (ค่าผ่านเกณฑ์ขั้นต่ำต้องไม่น้อยกว่า 15 inHg) ป้องกันลมรั่วซึมไหลออก\n5. **เปรียบเทียบกับเกณฑ์ที่กำหนด** — นำสถิติที่ตรวจได้ไปสรุปเทียบเคียงกับใบเกณฑ์มาตรฐานประกันคุณภาพ ISO เพื่อยืนยันความถูกต้อง\n\n🛡️ *การปฏิบัติตามทั้ง 5 ขั้นตอนนี้อย่างเป็นมาตรฐาน จะช่วยลดข้อผิดพลาดในขบวนการผลิต รักษาคุณภาพสินค้า และประหยัดเวลาได้อย่างมั่นคงครับ!*`,
           citations: [
             {
               id: "doc-10",
-              title: "SOP-QC-024 Vacuum Test (ขั้นตอนมาตรฐานการตรวจวัดสูญญากาศบรรจุภัณฑ์)",
+              title:
+                "SOP-QC-024 Vacuum Test (ขั้นตอนมาตรฐานการตรวจวัดสูญญากาศบรรจุภัณฑ์)",
               type: "เอกสารมาตรฐาน QP",
-              content: "ขั้นตอนการตรวจ Vacuum:\n1. เตรียมเครื่องมือวัด Vacuum\n2. ตรวจสอบสภาพกระป๋อง\n3. วางหัววัดบนกระป๋อง\n4. อ่านค่าและบันทึกผล\n5. เปรียบเทียบกับเกณฑ์ที่กำหนด"
+              content:
+                "ขั้นตอนการตรวจ Vacuum:\n1. เตรียมเครื่องมือวัด Vacuum\n2. ตรวจสอบสภาพกระป๋อง\n3. วางหัววัดบนกระป๋อง\n4. อ่านค่าและบันทึกผล\n5. เปรียบเทียบกับเกณฑ์ที่กำหนด",
             },
             {
               id: "doc-11",
-              title: "WI-QC-024 วิธีตรวจ Vacuum (คู่มือการปฏิบัติงานขั้นตอนตรวจสุญญากาศ)",
+              title:
+                "WI-QC-024 วิธีตรวจ Vacuum (คู่มือการปฏิบัติงานขั้นตอนตรวจสุญญากาศ)",
               type: "เอกสารมาตรฐาน WI",
-              content: "วิธีตรวจวัดแรงดัน Vacuum ในกระป๋องและบรรจุภัณฑ์\n- ตรวจเช็คเกจปั๊มสูญญากาศและหัวเข็มวัด\n- วางตำแหน่งกระป๋องตัวอย่างให้ตั้งฉาก\n- ทำการเจาะรูวัดและอ่านเข็มแรงดันอย่างรวดเร็วเพื่อไม่ให้แรงดันรั่วไหล\n- ข้อมูลมาตรฐานการบันทึก: ค่าผ่านเกณฑ์ต้องไม่ต่ำกว่า 15 inHg"
-            }
-          ]
+              content:
+                "วิธีตรวจวัดแรงดัน Vacuum ในกระป๋องและบรรจุภัณฑ์\n- ตรวจเช็คเกจปั๊มสูญญากาศและหัวเข็มวัด\n- วางตำแหน่งกระป๋องตัวอย่างให้ตั้งฉาก\n- ทำการเจาะรูวัดและอ่านเข็มแรงดันอย่างรวดเร็วเพื่อไม่ให้แรงดันรั่วไหล\n- ข้อมูลมาตรฐานการบันทึก: ค่าผ่านเกณฑ์ต้องไม่ต่ำกว่า 15 inHg",
+            },
+          ],
         });
       }
 
       // Support database fallback or client-provided context
-      const docList = documents && documents.length > 0 ? documents : db_documents;
-      const kbList = kbArticles && kbArticles.length > 0 ? kbArticles : db_kb_articles;
+      const docList =
+        documents && documents.length > 0 ? documents : db_documents;
+      const kbList =
+        kbArticles && kbArticles.length > 0 ? kbArticles : db_kb_articles;
       const courseList = courses && courses.length > 0 ? courses : db_courses;
-      const customResList = customResources && customResources.length > 0 ? customResources : db_custom_resources;
+      const customResList =
+        customResources && customResources.length > 0
+          ? customResources
+          : db_custom_resources;
 
       // Compile current RMP Knowledge Base as a structured context list
       const serializedRMPContext = [
-        ...docList.filter((d: any) => d.status === 'Published').map((d: any) => ({
-          id: d.id,
-          title: `[เอกสารระบบ ${d.type}] ${d.title} (Rev.${d.revision})`,
-          type: `เอกสารมาตรฐาน ${d.type}`,
-          category: d.departmentId || d.department || '',
-          content: d.exampleText || d.description
-        })),
-        ...kbList.filter((k: any) => k.status === 'Approved').map((k: any) => ({
-          id: k.id,
-          title: `[ขุมพลังช่าง Kaizen] ${k.title}`,
-          type: `คลังสมองช่างเทคนิค`,
-          category: k.authorDept,
-          content: `ปัญหา: ${k.problem}\nสาเหตุ: ${k.cause}\nวิธีแก้ไข: ${k.solution}\nการป้องกัน: ${k.prevention}\nหมวดหมู่ช่าง: ${k.type}`
-        })),
-        ...courseList.flatMap((c: any) => c.lessons.map((l: any) => ({
-          id: `${c.id}-${l.id}`,
-          title: `[สอนงาน Onboarding] ${c.title} -> ${l.title}`,
-          type: "บทเรียนฝึกอบรม",
-          category: c.departmentId || c.department || '',
-          content: l.content
-        }))),
+        ...docList
+          .filter((d: any) => d.status === "Published")
+          .map((d: any) => ({
+            id: d.id,
+            title: `[เอกสารระบบ ${d.type}] ${d.title} (Rev.${d.revision})`,
+            type: `เอกสารมาตรฐาน ${d.type}`,
+            category: d.departmentId || d.department || "",
+            content: d.exampleText || d.description,
+          })),
+        ...kbList
+          .filter((k: any) => k.status === "Approved")
+          .map((k: any) => ({
+            id: k.id,
+            title: `[ขุมพลังช่าง Kaizen] ${k.title}`,
+            type: `คลังสมองช่างเทคนิค`,
+            category: k.authorDept,
+            content: `ปัญหา: ${k.problem}\nสาเหตุ: ${k.cause}\nวิธีแก้ไข: ${k.solution}\nการป้องกัน: ${k.prevention}\nหมวดหมู่ช่าง: ${k.type}`,
+          })),
+        ...courseList.flatMap((c: any) =>
+          c.lessons.map((l: any) => ({
+            id: `${c.id}-${l.id}`,
+            title: `[สอนงาน Onboarding] ${c.title} -> ${l.title}`,
+            type: "บทเรียนฝึกอบรม",
+            category: c.departmentId || c.department || "",
+            content: l.content,
+          })),
+        ),
         ...customResList.map((cs: any) => ({
           id: cs.id,
           title: `[คู่มือเพิ่มเติม] ${cs.title}`,
           type: `คูมือนอกคลัง (${cs.sourceType})`,
           category: "ส่วนกลาง / สารสนเทศเพิ่มเติม",
-          content: cs.content
-        }))
+          content: cs.content,
+        })),
       ];
 
       // Call Gemini model Gemini-3.5-flash with rigorous instructions to avoid hallucinations and resolve synonyms (Semantic Semantic Resolution)
       const rmpSystemInstruction = `You are "RMP AI Knowledge Assistant", a state-of-the-art secure semantic RAG system developed for Royal Meiwa Pax Co., Ltd. (บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด).
 Your ultimate mission is to resolve technical questions from operators & engineers while preserving 100% security against hallucinations and preventing industrial machinery accidents (melted barrels, rolls, electric shocks, or manufacturing fires).
 
-User Information: Name: "${currentUser?.name || 'Guest User'}", Department: "${currentUser?.departmentId || currentUser?.department || 'Production'}". Always greet or reference them politely in Thai.
+User Information: Name: "${currentUser?.name || "Guest User"}", Department: "${currentUser?.departmentId || currentUser?.department || "Production"}". Always greet or reference them politely in Thai.
 
 🛡️ ABSOLUTE ANTI-HALLUCINATION & ANTI-SLOP GUARDRAILS:
 1. Ground your answers ONLY on the real-world RMP technical context passed below.
@@ -225,8 +290,10 @@ You must return your response conforming to the JSON schema specified in respons
       const response = await ai.models.generateContent({
         model: "gemini-3.5-flash",
         contents: [
-          { text: `RMP Context Library:\n${JSON.stringify(serializedRMPContext, null, 2)}` },
-          { text: `User Query:\n"${query}"` }
+          {
+            text: `RMP Context Library:\n${JSON.stringify(serializedRMPContext, null, 2)}`,
+          },
+          { text: `User Query:\n"${query}"` },
         ],
         config: {
           systemInstruction: rmpSystemInstruction,
@@ -234,7 +301,11 @@ You must return your response conforming to the JSON schema specified in respons
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              responseText: { type: Type.STRING, description: "Professional grounded response text in Markdown Thai" },
+              responseText: {
+                type: Type.STRING,
+                description:
+                  "Professional grounded response text in Markdown Thai",
+              },
               citations: {
                 type: Type.ARRAY,
                 items: {
@@ -243,26 +314,27 @@ You must return your response conforming to the JSON schema specified in respons
                     id: { type: Type.STRING },
                     title: { type: Type.STRING },
                     type: { type: Type.STRING },
-                    content: { type: Type.STRING }
+                    content: { type: Type.STRING },
                   },
-                  required: ["id", "title", "type", "content"]
-                }
-              }
+                  required: ["id", "title", "type", "content"],
+                },
+              },
             },
-            required: ["responseText", "citations"]
-          }
-        }
+            required: ["responseText", "citations"],
+          },
+        },
       });
 
       const responseString = response.text || "{}";
       const parsedData = JSON.parse(responseString.trim());
       res.json(parsedData);
-
     } catch (error: any) {
       console.error("Gemini RAG Server Error:", error);
-      res.status(500).json({ 
-        error: "RAG Server Error", 
-        message: error.message || "An unexpected error occurred during semantic retrieval." 
+      res.status(500).json({
+        error: "RAG Server Error",
+        message:
+          error.message ||
+          "An unexpected error occurred during semantic retrieval.",
       });
     }
   });
@@ -272,7 +344,9 @@ You must return your response conforming to the JSON schema specified in respons
     try {
       const { base64Data, fileType, fileName } = req.body;
       if (!base64Data || !fileType) {
-        return res.status(400).json({ error: "base64Data and fileType are required" });
+        return res
+          .status(400)
+          .json({ error: "base64Data and fileType are required" });
       }
 
       // Prepare contents for Gemini API
@@ -280,12 +354,12 @@ You must return your response conforming to the JSON schema specified in respons
         {
           inlineData: {
             data: base64Data,
-            mimeType: fileType
-          }
+            mimeType: fileType,
+          },
         },
         {
           text: `You are an expert HR Data Structurer and OCR extraction system for Royal Meiwa Pax Co., Ltd.
-Analyze this uploaded file ("${fileName || 'document'}") and extract all employee records.
+Analyze this uploaded file ("${fileName || "document"}") and extract all employee records.
 
 CRITICAL INSTRUCTIONS:
 1. Identify all employees mentioned in the document.
@@ -299,8 +373,8 @@ CRITICAL INSTRUCTIONS:
    - email: Corporate email (e.g. name.firstletter@royalmeiwa.co.th).
    - phone: Thai phone number format (e.g., 08X-XXX-XXXX).
 3. Do not invent unrelated data, but make sure all 9 fields of the EmployeeMaster interface are correctly populated.
-4. Output must be in JSON matching the specified responseSchema. No external text wrapper.`
-        }
+4. Output must be in JSON matching the specified responseSchema. No external text wrapper.`,
+        },
       ];
 
       const response = await ai.models.generateContent({
@@ -325,27 +399,36 @@ CRITICAL INSTRUCTIONS:
                     level: { type: Type.STRING },
                     email: { type: Type.STRING },
                     phone: { type: Type.STRING },
-                    status: { type: Type.STRING }
+                    status: { type: Type.STRING },
                   },
-                  required: ["employeeId", "name", "department", "position", "startDate", "level", "email", "phone", "status"]
-                }
+                  required: [
+                    "employeeId",
+                    "name",
+                    "department",
+                    "position",
+                    "startDate",
+                    "level",
+                    "email",
+                    "phone",
+                    "status",
+                  ],
+                },
               },
-              message: { type: Type.STRING }
+              message: { type: Type.STRING },
             },
-            required: ["success", "employees"]
-          }
-        }
+            required: ["success", "employees"],
+          },
+        },
       });
 
       const responseString = response.text || "{}";
       const parsedData = JSON.parse(responseString.trim());
       res.json(parsedData);
-
     } catch (error: any) {
       console.error("AI Document Parse Error:", error);
       res.status(500).json({
         error: "AI Parser Error",
-        message: error.message || "Failed to parse document with AI."
+        message: error.message || "Failed to parse document with AI.",
       });
     }
   });
@@ -355,17 +438,29 @@ CRITICAL INSTRUCTIONS:
     try {
       const currentUser = req.body.currentUser;
       const careerGoal = req.body.careerGoal || req.body.targetGoal;
-      const competencies = req.body.competencies || req.body.myCompetencies || [];
+      const competencies =
+        req.body.competencies || req.body.myCompetencies || [];
       const courses = req.body.courses || req.body.availableCourses || [];
       const documents = req.body.documents || req.body.availableDocuments || [];
 
       if (!currentUser || !careerGoal) {
-        return res.status(400).json({ error: "currentUser and careerGoal (or targetGoal) are required" });
+        return res.status(400).json({
+          error: "currentUser and careerGoal (or targetGoal) are required",
+        });
       }
 
       // Serialize available courses & WIs
-      const simpleCourses = (courses || []).map((c: any) => ({ id: c.id, title: c.title, targetPositions: c.targetPositions }));
-      const simpleWIs = (documents || []).map((d: any) => ({ id: d.id, title: d.title, type: d.type, department: d.departmentId || d.department || '' }));
+      const simpleCourses = (courses || []).map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        targetPositions: c.targetPositions,
+      }));
+      const simpleWIs = (documents || []).map((d: any) => ({
+        id: d.id,
+        title: d.title,
+        type: d.type,
+        department: d.departmentId || d.department || "",
+      }));
 
       const systemInstruction = `You are "RMP AI Career Advisor", an intelligent and compliance-focused training roadmap generator for Royal Meiwa Pax Co., Ltd.
 Your job is to recommend a highly personalized career progression roadmap based on current employee profile and target career goals.
@@ -373,8 +468,8 @@ Your job is to recommend a highly personalized career progression roadmap based 
 User Profile:
 - Name: "${currentUser.name}"
 - Position: "${currentUser.position}"
-- Department: "${currentUser.departmentId || currentUser.department || ''}"
-- Date Started: "${currentUser.startDate || 'Unknown'}"
+- Department: "${currentUser.departmentId || currentUser.department || ""}"
+- Date Started: "${currentUser.startDate || "Unknown"}"
 
 Current Competencies:
 ${JSON.stringify(competencies, null, 2)}
@@ -398,48 +493,88 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
       const response = await ai.models.generateContent({
         model: "gemini-3.5-flash",
-        contents: [
-          { text: "Suggest career learning roadmap path." }
-        ],
+        contents: [{ text: "Suggest career learning roadmap path." }],
         config: {
           systemInstruction: systemInstruction,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              careerGoalExplanation: { type: Type.STRING, description: "Detailed explanation of candidate's goal in Thai" },
-              currentTenureAnalysis: { type: Type.STRING, description: "Analysis of current position, department tenure, and general readiness in Thai" },
+              careerGoalExplanation: {
+                type: Type.STRING,
+                description: "Detailed explanation of candidate's goal in Thai",
+              },
+              currentTenureAnalysis: {
+                type: Type.STRING,
+                description:
+                  "Analysis of current position, department tenure, and general readiness in Thai",
+              },
               recommendedSteps: {
                 type: Type.ARRAY,
                 items: {
                   type: Type.OBJECT,
                   properties: {
                     step: { type: Type.INTEGER },
-                    title: { type: Type.STRING, description: "Step title in Thai" },
-                    description: { type: Type.STRING, description: "Detail of step tasks in Thai" },
-                    targetSkills: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Skills to target in this step" },
-                    recommendedCourses: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Exact Course IDs linked from available courses" },
-                    recommendedWIs: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Exact document/WI IDs linked from available SOPs" }
+                    title: {
+                      type: Type.STRING,
+                      description: "Step title in Thai",
+                    },
+                    description: {
+                      type: Type.STRING,
+                      description: "Detail of step tasks in Thai",
+                    },
+                    targetSkills: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description: "Skills to target in this step",
+                    },
+                    recommendedCourses: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description:
+                        "Exact Course IDs linked from available courses",
+                    },
+                    recommendedWIs: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description:
+                        "Exact document/WI IDs linked from available SOPs",
+                    },
                   },
-                  required: ["step", "title", "description", "targetSkills", "recommendedCourses", "recommendedWIs"]
-                }
+                  required: [
+                    "step",
+                    "title",
+                    "description",
+                    "targetSkills",
+                    "recommendedCourses",
+                    "recommendedWIs",
+                  ],
+                },
               },
-              expertAdvise: { type: Type.STRING, description: "Professional advice and encouragement in Thai" }
+              expertAdvise: {
+                type: Type.STRING,
+                description: "Professional advice and encouragement in Thai",
+              },
             },
-            required: ["careerGoalExplanation", "currentTenureAnalysis", "recommendedSteps", "expertAdvise"]
-          }
-        }
+            required: [
+              "careerGoalExplanation",
+              "currentTenureAnalysis",
+              "recommendedSteps",
+              "expertAdvise",
+            ],
+          },
+        },
       });
 
       const responseString = response.text || "{}";
       const parsedData = JSON.parse(responseString.trim());
       res.json(parsedData);
-
     } catch (error: any) {
       console.error("AI Personalized Path Error:", error);
       res.status(500).json({
         error: "AI Advisor Error",
-        message: error.message || "Failed to generate personalized career roadmap."
+        message:
+          error.message || "Failed to generate personalized career roadmap.",
       });
     }
   });
@@ -448,26 +583,38 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Users APIs
   app.get("/api/users", (req, res) => {
-    res.json(db_users);
+    res.json(db_users.map(sanitizeUser));
   });
-  app.post("/api/users", (req, res) => {
+  app.post("/api/users", async (req, res) => {
     try {
-      const newUser = req.body;
-      if (!newUser.id) {
-        newUser.id = `usr-${Date.now()}`;
+      const newUser = { ...req.body };
+      if (!newUser.id) newUser.id = `user-${Date.now()}`;
+      if (newUser.password) {
+        newUser.password = await bcrypt.hash(newUser.password, SALT_ROUNDS);
       }
       db_users.push(newUser);
-      res.json(newUser);
+      res.json(sanitizeUser(newUser));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
-  app.put("/api/users/:id", (req, res) => {
+  app.put("/api/users/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const updatedUser = req.body;
-      db_users = db_users.map(u => u.id === id ? { ...u, ...updatedUser } : u);
-      res.json(updatedUser);
+      const updatedUser = { ...req.body };
+      if (updatedUser.password) {
+        updatedUser.password = await bcrypt.hash(
+          updatedUser.password,
+          SALT_ROUNDS,
+        );
+      } else {
+        delete updatedUser.password;
+      }
+      db_users = db_users.map((u) =>
+        u.id === id ? { ...u, ...updatedUser } : u,
+      );
+      const saved = db_users.find((u) => u.id === id);
+      res.json(saved ? sanitizeUser(saved) : null);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -475,8 +622,61 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.delete("/api/users/:id", (req, res) => {
     try {
       const { id } = req.params;
-      db_users = db_users.filter(u => u.id !== id);
+      db_users = db_users.filter((u) => u.id !== id);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  //Login API
+  app.post("/api/login", async (req, res) => {
+    try {
+      const { employeeId, password } = req.body;
+      if (!employeeId || !password) {
+        return res
+          .status(400)
+          .json({
+            error: "MISSING_FIELDS",
+            message: "กรุณากรอกรหัสพนักงานและรหัสผ่าน",
+          });
+      }
+
+      const user = db_users.find(
+        (u) => u.employeeId.toLowerCase() === String(employeeId).toLowerCase(),
+      );
+      if (!user) {
+        return res
+          .status(401)
+          .json({
+            error: "INVALID_CREDENTIALS",
+            message: "ไม่พบรหัสพนักงานนี้ในระบบ",
+          });
+      }
+      if (user.status === "Suspended") {
+        return res
+          .status(403)
+          .json({ error: "SUSPENDED", message: "บัญชีถูกระงับสิทธิ์ชั่วคราว" });
+      }
+      if (user.status === "Terminated") {
+        return res
+          .status(403)
+          .json({ error: "TERMINATED", message: "บัญชีถูกยกเลิกการใช้งาน" });
+      }
+
+      const isValid = user.password
+        ? await bcrypt.compare(password, user.password)
+        : false;
+      if (!isValid) {
+        return res
+          .status(401)
+          .json({
+            error: "INVALID_CREDENTIALS",
+            message: "รหัสผ่านไม่ถูกต้อง",
+          });
+      }
+
+      res.json(sanitizeUser(user));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -502,7 +702,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { id } = req.params;
       const updatedDoc = req.body;
-      db_documents = db_documents.map(d => d.id === id ? updatedDoc : d);
+      db_documents = db_documents.map((d) => (d.id === id ? updatedDoc : d));
       res.json(updatedDoc);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -511,7 +711,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.delete("/api/documents/:id", (req, res) => {
     try {
       const { id } = req.params;
-      db_documents = db_documents.filter(d => d.id !== id);
+      db_documents = db_documents.filter((d) => d.id !== id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -521,13 +721,17 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { id } = req.params;
       const { approverName } = req.body;
-      db_documents = db_documents.map(doc => doc.id === id ? {
-        ...doc,
-        status: 'Published',
-        approvedBy: approverName,
-        approvedAt: new Date().toISOString(),
-      } : doc);
-      const updated = db_documents.find(doc => doc.id === id);
+      db_documents = db_documents.map((doc) =>
+        doc.id === id
+          ? {
+              ...doc,
+              status: "Published",
+              approvedBy: approverName,
+              approvedAt: new Date().toISOString(),
+            }
+          : doc,
+      );
+      const updated = db_documents.find((doc) => doc.id === id);
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -554,7 +758,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { id } = req.params;
       const updatedCourse = req.body;
-      db_courses = db_courses.map(c => c.id === id ? updatedCourse : c);
+      db_courses = db_courses.map((c) => (c.id === id ? updatedCourse : c));
       res.json(updatedCourse);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -563,7 +767,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.delete("/api/courses/:id", (req, res) => {
     try {
       const { id } = req.params;
-      db_courses = db_courses.filter(c => c.id !== id);
+      db_courses = db_courses.filter((c) => c.id !== id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -590,7 +794,9 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { id } = req.params;
       const updatedArt = req.body;
-      db_kb_articles = db_kb_articles.map(art => art.id === id ? updatedArt : art);
+      db_kb_articles = db_kb_articles.map((art) =>
+        art.id === id ? updatedArt : art,
+      );
       res.json(updatedArt);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -599,7 +805,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.delete("/api/kb_articles/:id", (req, res) => {
     try {
       const { id } = req.params;
-      db_kb_articles = db_kb_articles.filter(art => art.id !== id);
+      db_kb_articles = db_kb_articles.filter((art) => art.id !== id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -608,8 +814,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.post("/api/kb_articles/:id/approve", (req, res) => {
     try {
       const { id } = req.params;
-      db_kb_articles = db_kb_articles.map(art => art.id === id ? { ...art, status: 'Approved' } : art);
-      const updated = db_kb_articles.find(art => art.id === id);
+      db_kb_articles = db_kb_articles.map((art) =>
+        art.id === id ? { ...art, status: "Approved" } : art,
+      );
+      const updated = db_kb_articles.find((art) => art.id === id);
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -618,8 +826,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.post("/api/kb_articles/:id/like", (req, res) => {
     try {
       const { id } = req.params;
-      db_kb_articles = db_kb_articles.map(art => art.id === id ? { ...art, likes: art.likes + 1 } : art);
-      const updated = db_kb_articles.find(art => art.id === id);
+      db_kb_articles = db_kb_articles.map((art) =>
+        art.id === id ? { ...art, likes: art.likes + 1 } : art,
+      );
+      const updated = db_kb_articles.find((art) => art.id === id);
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -646,7 +856,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { id } = req.params;
       const updatedExpert = req.body;
-      db_experts = db_experts.map(e => e.id === id ? updatedExpert : e);
+      db_experts = db_experts.map((e) => (e.id === id ? updatedExpert : e));
       res.json(updatedExpert);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -655,7 +865,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.delete("/api/experts/:id", (req, res) => {
     try {
       const { id } = req.params;
-      db_experts = db_experts.filter(e => e.id !== id);
+      db_experts = db_experts.filter((e) => e.id !== id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -689,7 +899,9 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       if (!prog.id) {
         prog.id = `prog-${Date.now()}`;
       }
-      const idx = db_user_progress.findIndex(p => p.userId === prog.userId && p.courseId === prog.courseId);
+      const idx = db_user_progress.findIndex(
+        (p) => p.userId === prog.userId && p.courseId === prog.courseId,
+      );
       if (idx !== -1) {
         db_user_progress[idx] = prog;
       } else {
@@ -755,12 +967,16 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { id } = req.params;
       const { replyMessage } = req.body;
-      db_contact_requests = db_contact_requests.map(req => req.id === id ? {
-        ...req,
-        status: 'Replied',
-        replyMessage,
-      } : req);
-      const updated = db_contact_requests.find(req => req.id === id);
+      db_contact_requests = db_contact_requests.map((req) =>
+        req.id === id
+          ? {
+              ...req,
+              status: "Replied",
+              replyMessage,
+            }
+          : req,
+      );
+      const updated = db_contact_requests.find((req) => req.id === id);
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -786,7 +1002,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.delete("/api/custom_resources/:id", (req, res) => {
     try {
       const { id } = req.params;
-      db_custom_resources = db_custom_resources.filter(r => r.id !== id);
+      db_custom_resources = db_custom_resources.filter((r) => r.id !== id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -801,8 +1017,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { competencies } = req.body;
       if (Array.isArray(competencies)) {
-        competencies.forEach(comp => {
-          const idx = db_user_competencies.findIndex(c => c.userId === comp.userId && c.skillId === comp.skillId);
+        competencies.forEach((comp) => {
+          const idx = db_user_competencies.findIndex(
+            (c) => c.userId === comp.userId && c.skillId === comp.skillId,
+          );
           if (idx !== -1) {
             db_user_competencies[idx] = comp;
           } else {
@@ -824,8 +1042,8 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { certificates } = req.body;
       if (Array.isArray(certificates)) {
-        certificates.forEach(cert => {
-          const idx = db_user_certificates.findIndex(c => c.id === cert.id);
+        certificates.forEach((cert) => {
+          const idx = db_user_certificates.findIndex((c) => c.id === cert.id);
           if (idx !== -1) {
             db_user_certificates[idx] = cert;
           } else {

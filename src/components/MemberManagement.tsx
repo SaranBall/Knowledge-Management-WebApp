@@ -189,7 +189,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       role: u.role,
       email: u.email,
       phone: u.phone,
-      password: u.password || "123456",
+      password: "",
       status: u.status || "Active",
       startDate: u.startDate || new Date().toISOString().split("T")[0],
       avatarUrl: u.avatarUrl || "",
@@ -213,8 +213,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
     // PIN check
     const pin = editForm.password?.trim() || "";
-    if (pin.length !== 6 || !/^\d+$/.test(pin)) {
-      alert("❌ รหัสผ่านความปลอดภัย PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นค่ะ");
+    if (pin && (pin.length !== 6 || !/^\d+$/.test(pin))) {
+      alert("❌ รหัส PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นค่ะ");
       return;
     }
 
@@ -228,7 +228,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         role: editForm.role,
         email: editForm.email,
         phone: editForm.phone,
-        password: pin,
+        password: pin || undefined,
         avatarUrl: editForm.avatarUrl || editingUser?.avatarUrl || "",
         status: editForm.status,
         startDate: editForm.startDate,
