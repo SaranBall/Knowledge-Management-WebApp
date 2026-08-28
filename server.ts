@@ -232,45 +232,73 @@ async function startServer() {
   // แยกจาก /api/users (ซึ่งตอนนี้สงวนไว้ให้ Admin จัดการคนอื่นเท่านั้น)
   app.post("/api/register", async (req, res) => {
     try {
-      const newUser = { ...req.body };
-      if (!newUser.employeeId || !newUser.password) {
-        return res.status(400).json({
-          error: "MISSING_FIELDS",
-          message: "ข้อมูลลงทะเบียนไม่ครบถ้วน",
-        });
+      const { password, employeeId } = req.body; // รับเฉพาะฟิลด์ที่จำเป็น ไม่รับ role จาก client
+      if (!employeeId || !password) {
+        return res
+          .status(400)
+          .json({
+            error: "MISSING_FIELDS",
+            message: "ข้อมูลลงทะเบียนไม่ครบถ้วน",
+          });
       }
 
       const employeeRecord = db_employee_master.find(
-        (e) => e.employeeId.toLowerCase() === newUser.employeeId?.toLowerCase(),
+        (e) => e.employeeId.toLowerCase() === employeeId.toLowerCase(),
       );
       if (!employeeRecord) {
-        return res.status(400).json({
-          error: "NOT_FOUND",
-          message: "ไม่พบรหัสพนักงานนี้ในฐานข้อมูลกลาง",
-        });
+        return res
+          .status(400)
+          .json({
+            error: "NOT_FOUND",
+            message: "ไม่พบรหัสพนักงานนี้ในฐานข้อมูลกลาง",
+          });
       }
       if (
         db_users.some(
-          (u) =>
-            u.employeeId.toLowerCase() === newUser.employeeId.toLowerCase(),
+          (u) => u.employeeId.toLowerCase() === employeeId.toLowerCase(),
         )
       ) {
-        return res.status(409).json({
-          error: "DUPLICATE",
-          message: "รหัสพนักงานนี้ลงทะเบียนแล้ว",
-        });
+        return res
+          .status(409)
+          .json({ error: "DUPLICATE", message: "รหัสพนักงานนี้ลงทะเบียนแล้ว" });
       }
-      if (newUser.password) {
-        newUser.password = await bcrypt.hash(newUser.password, SALT_ROUNDS);
+
+      // คำนวณ role เองจากข้อมูล employeeRecord เท่านั้น ห้ามรับจาก client
+      let assignedRole: "Admin" | "Editor" | "Viewer" = "Viewer";
+      if (
+        employeeRecord.level.toLowerCase().includes("senior") ||
+        employeeRecord.position.toLowerCase().includes("engineer") ||
+        employeeRecord.position.toLowerCase().includes("supervisor")
+      ) {
+        assignedRole = "Editor";
       }
-      if (!newUser.id) newUser.id = `usr-${Date.now()}`;
+
+      const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+      const newUser: UserType = {
+        id: `usr-${Date.now()}`,
+        name: employeeRecord.name,
+        employeeId: employeeRecord.employeeId,
+        departmentId: employeeRecord.departmentId,
+        position: employeeRecord.position,
+        role: assignedRole, // ← มาจาก server เท่านั้น
+        email: employeeRecord.email,
+        phone: employeeRecord.phone,
+        password: hashedPassword,
+        startDate: employeeRecord.startDate,
+      };
       db_users.push(newUser);
 
-      const token = jwt.sign(
-        { id: newUser.id, employeeId: newUser.employeeId, role: newUser.role },
-        JWT_SECRET,
-        { expiresIn: "8h" },
+      // mark employee master เป็น Registered ที่ server เลย ไม่ต้องให้ client เรียก updateEmployeeMaster แยก
+      const idx = db_employee_master.findIndex(
+        (e) => e.employeeId === employeeId,
       );
+      if (idx !== -1) db_employee_master[idx].status = "Registered";
+
+      const token = signToken({
+        id: newUser.id,
+        employeeId: newUser.employeeId,
+        role: newUser.role,
+      });
       res.json({ user: sanitizeUser(newUser), token });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

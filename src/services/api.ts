@@ -14,28 +14,7 @@ import {
   UserCompetency,
   UserCertificate,
   KMContributionLog,
-  setAuthToken,
 } from "../types";
-
-// Standardized fetch wrapper
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers || {}),
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `API Error: ${response.status} ${response.statusText} - ${errorText}`,
-    );
-  }
-
-  return response.json() as Promise<T>;
-}
 
 let authToken: string | null = localStorage.getItem("rm_auth_token");
 

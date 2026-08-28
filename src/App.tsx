@@ -906,7 +906,8 @@ export default function App() {
 
     // Persist registration details to backend REST API
     try {
-      await api.register(newUserObj);
+      const { token } = await api.register(newUserObj);
+      setAuthToken(token);
       await api.saveCompetencies(newComp);
       await api.saveCertificates(newCerts);
       await api.updateEmployeeMaster(updatedEmpMaster);
@@ -951,7 +952,7 @@ export default function App() {
     }
 
     try {
-      const { user, token } = await api.login(trimmedId, trimmedPass);
+      const { user, token } = await api.login(trimedId, trimedPass);
       setAuthToken(token);
       setCurrentUser(user);
       setIsLogged(true);
