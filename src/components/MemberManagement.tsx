@@ -3323,7 +3323,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-500 block">
-                    รหัสพนักงาน (6 หลัก):
+                    รหัสพนักงาน (Employee ID):
                   </label>
                   <input
                     type="text"
@@ -3331,7 +3331,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     onChange={(e) =>
                       setNewUser({ ...newUser, employeeId: e.target.value })
                     }
-                    placeholder="เช่น RMP055"
+                    placeholder="เช่น XX000"
                     required
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-xs font-mono"
                   />

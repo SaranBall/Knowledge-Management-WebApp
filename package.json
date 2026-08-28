@@ -11,10 +11,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "bcryptjs": "^2.4.3",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
@@ -42,5 +42,11 @@
       "esbuild#0.25.12": false,
       "tsx>esbuild#0.28.1": false
     }
+  },
+  "allowScripts": {
+    "@google/genai@2.13.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true,
+    "protobufjs@7.6.5": true
   }
 }

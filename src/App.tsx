@@ -1065,7 +1065,7 @@ export default function App() {
                 <form onSubmit={handleManualLogin} className="space-y-3.5">
                   <div className="text-center md:text-left mb-1">
                     <span className="block text-[11px] text-slate-500 font-extrabold uppercase tracking-widest pl-0.5">
-                      🔑 เข้าสู่ระบบสองปัจจัย (Employee Login)
+                      🔑 เข้าสู่ระบบ (Employee Login)
                     </span>
                   </div>
 
@@ -1149,7 +1149,7 @@ export default function App() {
                   </span>
                   <p className="text-[9.5px] text-slate-600 leading-normal">
                     ตามข้อกำหนดมาตรฐานสากล ISO9001
-                    พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
+                    <br />พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
                   </p>
                 </div>
               </div>
