@@ -934,7 +934,7 @@ export default function App() {
   };
 
   // Manual login with Employee ID & 6-Digit Password PIN
-  const handleManualLogin = (e: React.FormEvent) => {
+  const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError("");
 
