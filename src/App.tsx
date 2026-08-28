@@ -918,10 +918,6 @@ export default function App() {
     setCurrentUser(safeUser as UserType);
     setIsLogged(true);
 
-    // Auto login
-    setCurrentUser(newUserObj);
-    setIsLogged(true);
-
     // Reset registration screen
     setIsRegistering(false);
     setRegEmployeeId("");
