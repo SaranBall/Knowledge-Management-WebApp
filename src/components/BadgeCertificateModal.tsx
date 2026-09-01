@@ -1,10 +1,24 @@
-import React, { useState } from 'react';
-import { 
-  Award, Shield, Zap, Sparkles, Share2, Printer, 
-  Download, Copy, CheckCircle, ExternalLink, Eye, 
-  BookOpen, Clock, X, ShieldAlert, Check, RefreshCw
-} from 'lucide-react';
-import { User, Course } from '../types';
+import React, { useState } from "react";
+import {
+  Award,
+  Shield,
+  Zap,
+  Sparkles,
+  Share2,
+  Printer,
+  Download,
+  Copy,
+  CheckCircle,
+  ExternalLink,
+  Eye,
+  BookOpen,
+  Clock,
+  X,
+  ShieldAlert,
+  Check,
+  RefreshCw,
+} from "lucide-react";
+import { User, Course } from "../types";
 
 interface BadgeCertificateModalProps {
   isOpen: boolean;
@@ -21,10 +35,12 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
   user,
   course,
   score,
-  completedDate
+  completedDate,
 }) => {
-  const [activeTab, setActiveTab] = useState<'cert' | 'badge'>('cert');
-  const [frameStyle, setFrameStyle] = useState<'gold' | 'teal' | 'indigo'>('gold');
+  const [activeTab, setActiveTab] = useState<"cert" | "badge">("cert");
+  const [frameStyle, setFrameStyle] = useState<"gold" | "teal" | "indigo">(
+    "gold",
+  );
   const [hologramSeal, setHologramSeal] = useState<boolean>(true);
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [isSharedToBoard, setIsSharedToBoard] = useState<boolean>(false);
@@ -33,69 +49,69 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
   if (!isOpen) return null;
 
   // Derive completion dates
-  const dateStr = completedDate || new Date().toISOString().split('T')[0];
-  
+  const dateStr = completedDate || new Date().toISOString().split("T")[0];
+
   // Create randomized secure certification ID
   const certId = `CERT-RMP-${course.id.toUpperCase()}-${user.employeeId}`;
-  
+
   // Custom metadata for different courses
   const getCourseBadgeDetails = (courseId: string) => {
     switch (courseId) {
-      case 'c-1':
+      case "c-1":
         return {
-          badgeTitle: 'WMS Logistics Specialist',
-          thaiBadgeTitle: 'ผู้จัดเจนคลังสินค้าและมาตรฐาน 5S',
-          colorTheme: 'indigo',
-          metalTint: 'Indigo Royal Carbon & Silver',
-          symbol: '📦',
+          badgeTitle: "WMS Logistics Specialist",
+          thaiBadgeTitle: "ผู้จัดเจนคลังสินค้าและมาตรฐาน 5S",
+          colorTheme: "indigo",
+          metalTint: "Indigo Royal Carbon & Silver",
+          symbol: "📦",
           icon: Shield,
-          colorClass: 'from-indigo-600 to-slate-800',
-          textColor: 'text-indigo-600',
-          borderColor: 'border-indigo-400',
-          glowColor: 'shadow-indigo-500/30',
-          desc: 'สอบผ่านหลักสูตรวิชาพนักงานคลังสินค้า จัดเรียง Racking และ ISO 9001 Clause 7.2'
+          colorClass: "from-indigo-600 to-slate-800",
+          textColor: "text-indigo-600",
+          borderColor: "border-indigo-400",
+          glowColor: "shadow-indigo-500/30",
+          desc: "สอบผ่านหลักสูตรวิชาพนักงานคลังสินค้า จัดเรียง Racking และ ISO 9001 Clause 7.2",
         };
-      case 'c-2':
+      case "c-2":
         return {
-          badgeTitle: 'ISO Quality Control Expert',
-          thaiBadgeTitle: 'ผู้พิทักษ์คุณภาพและเคมีภัณฑ์ขั้นสุจริต',
-          colorTheme: 'emerald',
-          metalTint: 'Emerald Chrome & Platinum Dual',
-          symbol: '🧪',
+          badgeTitle: "ISO Quality Control Expert",
+          thaiBadgeTitle: "ผู้พิทักษ์คุณภาพและเคมีภัณฑ์ขั้นสุจริต",
+          colorTheme: "emerald",
+          metalTint: "Emerald Chrome & Platinum Dual",
+          symbol: "🧪",
           icon: Award,
-          colorClass: 'from-emerald-605 to-slate-800',
-          textColor: 'text-emerald-600',
-          borderColor: 'border-emerald-400',
-          glowColor: 'shadow-emerald-500/30',
-          desc: 'สอบผ่านระบบควบคุมและวิจัยระดับสารละลายเคมี บรรลุกระบวนการผลิตแกนลามิเนต'
+          colorClass: "from-emerald-605 to-slate-800",
+          textColor: "text-emerald-600",
+          borderColor: "border-emerald-400",
+          glowColor: "shadow-emerald-500/30",
+          desc: "สอบผ่านระบบควบคุมและวิจัยระดับสารละลายเคมี บรรลุกระบวนการผลิตแกนลามิเนต",
         };
-      case 'c-3':
+      case "c-3":
         return {
-          badgeTitle: 'Verified Forklift Safety Officer',
-          thaiBadgeTitle: 'วิศวกรผู้บังคับรถยกและเซฟตี้ภาคปฏิบัติ',
-          colorTheme: 'amber',
-          metalTint: 'Polished 24K Gold & Safety Yellow',
-          symbol: '🛡️',
+          badgeTitle: "Verified Forklift Safety Officer",
+          thaiBadgeTitle: "วิศวกรผู้บังคับรถยกและเซฟตี้ภาคปฏิบัติ",
+          colorTheme: "amber",
+          metalTint: "Polished 24K Gold & Safety Yellow",
+          symbol: "🛡️",
           icon: Zap,
-          colorClass: 'from-amber-500 to-amber-950',
-          textColor: 'text-amber-600',
-          borderColor: 'border-amber-400',
-          glowColor: 'shadow-amber-500/30',
-          desc: 'สำเร็จการกวดขันการขับรถยกไฟฟ้า ดับเพลิง และมาตรฐานความปลอดภัยทางวิศวกรรม SHE'
+          colorClass: "from-amber-500 to-amber-950",
+          textColor: "text-amber-600",
+          borderColor: "border-amber-400",
+          glowColor: "shadow-amber-500/30",
+          desc: "สำเร็จการกวดขันการขับรถยกไฟฟ้า ดับเพลิง และมาตรฐานความปลอดภัยทางวิศวกรรม SHE",
         };
       default:
         return {
-          badgeTitle: 'Meiwa Certified Tech Professional',
-          thaiBadgeTitle: 'พนักงานวิชาชีพเทคโนโลยีอุตสาหกรรมการพิมพ์',
-          colorTheme: 'violet',
-          metalTint: 'Holographic Violet Cobalt & Bronze',
-          symbol: '🎓',
+          badgeTitle: "Meiwa Certified Tech Professional",
+          thaiBadgeTitle: "พนักงานวิชาชีพเทคโนโลยีอุตสาหกรรมการพิมพ์",
+          colorTheme: "violet",
+          metalTint: "Holographic Violet Cobalt & Bronze",
+          symbol: "🎓",
           icon: Award,
-          colorClass: 'from-violet-650 to-slate-850',
-          textColor: 'text-violet-600',
-          borderColor: 'border-violet-400',
-          glowColor: 'shadow-violet-500/30',
-          desc: 'สำเร็จหลักสูตรบูรณาการยกระดับวิชาชีพโรงงาน อนุมัติโดยหัวหน้าวิศวกรรมสากล'
+          colorClass: "from-violet-650 to-slate-850",
+          textColor: "text-violet-600",
+          borderColor: "border-violet-400",
+          glowColor: "shadow-violet-500/30",
+          desc: "สำเร็จหลักสูตรบูรณาการยกระดับวิชาชีพโรงงาน อนุมัติโดยหัวหน้าวิศวกรรมสากล",
         };
     }
   };
@@ -122,9 +138,9 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
 
   // Handle printing certificate (highly targeted A4 styling)
   const handlePrint = () => {
-    const printContent = document.getElementById('printable-cert-document');
+    const printContent = document.getElementById("printable-cert-document");
     if (!printContent) return;
-    
+
     const originalContent = document.body.innerHTML;
     const printHTML = `
       <html>
@@ -136,9 +152,50 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
               #printable-cert-document { border: 15px double gold !important; padding: 40px !important; text-align: center !important; }
               .no-print { display: none !important; }
             }
+                         /* Critical CSS แบบ inline แทนการโหลด Tailwind จาก CDN
+              ครอบคลุมเฉพาะ class ที่ใช้จริงใน #printable-cert-document */
+           * { box-sizing: border-box; }
+           body { margin: 0; font-family: 'Inter', 'Sarabun', sans-serif; background: #f8fafc; }
+           .relative { position: relative; }
+           .absolute { position: absolute; }
+           .overflow-hidden { overflow: hidden; }
+           .text-center { text-align: center; }
+           .text-left { text-align: left; }
+           .text-right { text-align: right; }
+           .flex { display: flex; }
+           .grid { display: grid; }
+           .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+           .items-center { align-items: center; }
+           .justify-center { justify-content: center; }
+           .justify-between { justify-content: space-between; }
+           .flex-col { flex-direction: column; }
+           .gap-1 { gap: 4px; } .gap-1\\.5 { gap: 6px; } .gap-4 { gap: 16px; }
+           .space-y-1 > * + * { margin-top: 4px; } .space-y-1\\.5 > * + * { margin-top: 6px; }
+           .space-y-2 > * + * { margin-top: 8px; } .space-y-6 > * + * { margin-top: 24px; }
+           .w-full { width: 100%; } .max-w-2xl { max-width: 42rem; } .mx-auto { margin-left: auto; margin-right: auto; }
+           .rounded-2xl { border-radius: 1rem; } .rounded-full { border-radius: 9999px; }
+           .border-4 { border-width: 4px; } .border-double { border-style: double; }
+           .border-amber-400 { border-color: #fbbf24; } .border-teal-400 { border-color: #2dd4bf; } .border-indigo-400 { border-color: #818cf8; }
+           .p-8 { padding: 32px; } .p-4 { padding: 16px; } .p-3 { padding: 12px; } .p-2\\.5 { padding: 10px; }
+           .py-1 { padding-top: 4px; padding-bottom: 4px; } .px-3 { padding-left: 12px; padding-right: 12px; }
+           .pt-6 { padding-top: 24px; } .pl-3 { padding-left: 12px; } .pr-3 { padding-right: 12px; }
+           .mt-1 { margin-top: 4px; } .mt-1\\.5 { margin-top: 6px; } .mt-2 { margin-top: 8px; } .my-1\\.5 { margin: 6px 0; }
+           .font-serif { font-family: Georgia, 'Times New Roman', serif; }
+           .font-sans { font-family: 'Inter', 'Sarabun', sans-serif; }
+           .font-mono { font-family: 'Courier New', monospace; }
+           .font-black { font-weight: 900; } .font-extrabold { font-weight: 800; } .font-bold { font-weight: 700; }
+           .font-semibold { font-weight: 600; } .font-medium { font-weight: 500; } .italic { font-style: italic; }
+           .uppercase { text-transform: uppercase; } .tracking-widest { letter-spacing: 0.1em; } .tracking-wider { letter-spacing: 0.05em; }
+           .underline { text-decoration: underline; } .decoration-double { text-decoration-style: double; }
+           .leading-none { line-height: 1; } .leading-relaxed { line-height: 1.625; }
+           .text-slate-400 { color: #94a3b8; } .text-slate-500 { color: #64748b; } .text-slate-800 { color: #1e293b; }
+           .text-slate-900 { color: #0f172a; } .text-emerald-700 { color: #047857; } .text-indigo-700 { color: #4338ca; }
+           .text-amber-800 { color: #92400e; } .text-teal-800 { color: #115e59; } .text-\\[\\#11297e\\] { color: #11297e; }
+           .bg-white { background: #fff; } .bg-slate-50 { background: #f8fafc; } .bg-slate-100 { background: #f1f5f9; }
+           .bg-gradient-to-tr { background-image: linear-gradient(to top right, var(--tw-gradient-stops)); }
+           .border { border-width: 1px; } .border-slate-200 { border-color: #e2e8f0; } .border-slate-100 { border-color: #f1f5f9; }
           </style>
-          <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
-        </head>
+          </head>
         <body>
           <div class="p-8 max-w-2xl mx-auto">
             ${printContent.outerHTML}
@@ -146,8 +203,8 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
         </body>
       </html>
     `;
-    
-    const printWindow = window.open('', '_blank');
+
+    const printWindow = window.open("", "_blank");
     if (printWindow) {
       printWindow.document.write(printHTML);
       printWindow.document.close();
@@ -162,9 +219,8 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fade-in text-slate-800">
       <div className="bg-[#fbfcff] rounded-3xl border border-slate-200 shadow-2xl max-w-5xl w-full flex flex-col md:flex-row max-h-[92vh] overflow-hidden text-left relative">
-        
         {/* Toggle Switch Tabs on Mobile Top */}
-        <button 
+        <button
           onClick={onClose}
           className="absolute top-4 right-4 z-50 text-slate-400 hover:text-slate-600 bg-white/80 border w-8 h-8 rounded-full flex items-center justify-center cursor-pointer shadow-xs transition"
           title="ปิดหน้าต่าง"
@@ -184,7 +240,8 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                 ใบเซอร์และตราทักษะวิชาชีพ
               </h3>
               <p className="text-[11px] text-slate-500 mt-1">
-                ตรวจรับรองคุณสมบัติตามมาตรฐานระบบ ISO 9001:2015 ยกระดับคุณภาพโรงงาน
+                ตรวจรับรองคุณสมบัติตามมาตรฐานระบบ ISO 9001:2015
+                ยกระดับคุณภาพโรงงาน
               </p>
             </div>
 
@@ -192,11 +249,11 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
             <div className="bg-slate-200/65 p-1 rounded-xl grid grid-cols-2 text-xs font-bold font-sans">
               <button
                 type="button"
-                onClick={() => setActiveTab('cert')}
+                onClick={() => setActiveTab("cert")}
                 className={`py-1.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition ${
-                  activeTab === 'cert' 
-                    ? 'bg-white text-[#15329c] shadow-xs' 
-                    : 'text-slate-600 hover:text-slate-900'
+                  activeTab === "cert"
+                    ? "bg-white text-[#15329c] shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
                 }`}
               >
                 <Award className="w-3.5 h-3.5" />
@@ -204,11 +261,11 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('badge')}
+                onClick={() => setActiveTab("badge")}
                 className={`py-1.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition ${
-                  activeTab === 'badge' 
-                    ? 'bg-white text-[#15329c] shadow-xs' 
-                    : 'text-slate-600 hover:text-slate-900'
+                  activeTab === "badge"
+                    ? "bg-white text-[#15329c] shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
                 }`}
               >
                 <Shield className="w-3.5 h-3.5" />
@@ -223,23 +280,37 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
               </span>
 
               {/* Border select */}
-              {activeTab === 'cert' && (
+              {activeTab === "cert" && (
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-600 block">กรอบขอบประธาน:</label>
+                  <label className="text-[11px] font-bold text-slate-600 block">
+                    กรอบขอบประธาน:
+                  </label>
                   <div className="grid grid-cols-3 gap-1.5">
                     {[
-                      { id: 'gold', label: '🏆 ทองคำสากล', col: 'border-amber-400 bg-amber-50/20' },
-                      { id: 'teal', label: '🔬 มรกตเทค', col: 'border-teal-400 bg-teal-50/20' },
-                      { id: 'indigo', label: '🌌 สเปซอินดิโก้', col: 'border-indigo-400 bg-indigo-50/20' }
+                      {
+                        id: "gold",
+                        label: "🏆 ทองคำสากล",
+                        col: "border-amber-400 bg-amber-50/20",
+                      },
+                      {
+                        id: "teal",
+                        label: "🔬 มรกตเทค",
+                        col: "border-teal-400 bg-teal-50/20",
+                      },
+                      {
+                        id: "indigo",
+                        label: "🌌 สเปซอินดิโก้",
+                        col: "border-indigo-400 bg-indigo-50/20",
+                      },
                     ].map((opt) => (
                       <button
                         key={opt.id}
                         type="button"
                         onClick={() => setFrameStyle(opt.id as any)}
                         className={`p-1.5 rounded-lg border text-[9px] text-center font-bold font-sans transition block cursor-pointer ${
-                          frameStyle === opt.id 
-                            ? 'border-[#15329c] bg-indigo-50 text-[#15329c]' 
-                            : 'border-slate-200 hover:bg-slate-100 text-slate-600'
+                          frameStyle === opt.id
+                            ? "border-[#15329c] bg-indigo-50 text-[#15329c]"
+                            : "border-slate-200 hover:bg-slate-100 text-slate-600"
                         }`}
                       >
                         {opt.label}
@@ -252,8 +323,12 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
               {/* Seal option */}
               <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
                 <div className="text-[11px]">
-                  <span className="font-bold text-slate-700 block">สลักลายเซ็นและตราฮอโลแกรม</span>
-                  <p className="text-[9.5px] text-slate-400 leading-none">เพิ่มรายละเอียดเครื่องหมายประดับ</p>
+                  <span className="font-bold text-slate-700 block">
+                    สลักลายเซ็นและตราฮอโลแกรม
+                  </span>
+                  <p className="text-[9.5px] text-slate-400 leading-none">
+                    เพิ่มรายละเอียดเครื่องหมายประดับ
+                  </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -277,9 +352,9 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                 type="button"
                 onClick={handleCopyLink}
                 className={`w-full py-2 px-3 rounded-xl border font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs ${
-                  isCopied 
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
-                    : 'bg-white hover:bg-slate-50 text-slate-705 border-slate-250'
+                  isCopied
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                    : "bg-white hover:bg-slate-50 text-slate-705 border-slate-250"
                 }`}
               >
                 {isCopied ? (
@@ -300,9 +375,9 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                 onClick={handleShareToBoard}
                 disabled={isSharedToBoard || sharedLoading}
                 className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow ${
-                  isSharedToBoard 
-                    ? 'bg-emerald-600 text-white border-0 cursor-default' 
-                    : 'bg-[#15329c] hover:bg-[#11297e] text-white border-0'
+                  isSharedToBoard
+                    ? "bg-emerald-600 text-white border-0 cursor-default"
+                    : "bg-[#15329c] hover:bg-[#11297e] text-white border-0"
                 }`}
               >
                 {sharedLoading ? (
@@ -323,7 +398,7 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                 )}
               </button>
 
-              {activeTab === 'cert' && (
+              {activeTab === "cert" && (
                 <button
                   type="button"
                   onClick={handlePrint}
@@ -344,14 +419,16 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
 
         {/* 2. RIGHT SIDE: Display Stage */}
         <div className="flex-1 bg-slate-100 p-6 md:p-8 flex items-center justify-center min-h-[400px] md:min-h-[520px] overflow-x-auto">
-          {activeTab === 'cert' ? (
+          {activeTab === "cert" ? (
             /* ================== CERTIFICATE TAB VIEW ================== */
-            <div 
+            <div
               id="printable-cert-document"
               className={`w-full max-w-2xl bg-white p-8 md:p-12 rounded-2xl border-4 shadow-xl text-center space-y-6 relative overflow-hidden transition-all duration-300 ${
-                frameStyle === 'gold' ? 'border-amber-400 bg-gradient-to-tr from-amber-50/10 via-white to-amber-50/15' :
-                frameStyle === 'teal' ? 'border-teal-400 bg-gradient-to-tr from-teal-50/10 via-white to-teal-50/15' :
-                'border-indigo-400 bg-gradient-to-tr from-indigo-50/10 via-white to-indigo-50/15'
+                frameStyle === "gold"
+                  ? "border-amber-400 bg-gradient-to-tr from-amber-50/10 via-white to-amber-50/15"
+                  : frameStyle === "teal"
+                    ? "border-teal-400 bg-gradient-to-tr from-teal-50/10 via-white to-teal-50/15"
+                    : "border-indigo-400 bg-gradient-to-tr from-indigo-50/10 via-white to-indigo-50/15"
               }`}
             >
               {/* Background Guilloche watermark pattern simulation */}
@@ -386,7 +463,8 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                 </h2>
                 <div className="h-0.5 bg-gradient-to-r from-transparent via-slate-300 to-transparent w-48 mx-auto my-1.5"></div>
                 <p className="text-slate-500 text-[10.5px] italic">
-                  ด้วยฝ่ายฝึกอบรมและหัวหน้ากรรมการฝ่ายมาตรฐานการผลิต ได้ตรวจสอบสัมฤทธิผลสอบขอประกาศประสาทคุณวุฒิแก่มอบให้:
+                  ด้วยฝ่ายฝึกอบรมและหัวหน้ากรรมการฝ่ายมาตรฐานการผลิต
+                  ได้ตรวจสอบสัมฤทธิผลสอบขอประกาศประสาทคุณวุฒิแก่มอบให้:
                 </p>
               </div>
 
@@ -396,7 +474,12 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                   {user.name}
                 </h3>
                 <p className="text-[10px] text-slate-500 font-mono mt-1">
-                  รหัสประจำตัว: <span className="font-bold">{user.employeeId}</span> | ตำแหน่งสังกัด: <span className="font-bold text-[#15329c]">{user.position}</span>
+                  รหัสประจำตัว:{" "}
+                  <span className="font-bold">{user.employeeId}</span> |
+                  ตำแหน่งสังกัด:{" "}
+                  <span className="font-bold text-[#15329c]">
+                    {user.position}
+                  </span>
                 </p>
                 <p className="text-[9px] text-slate-400">
                   สำนักงานปฏิบัติการโรงงาน: {user.department}
@@ -424,26 +507,40 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
 
               {/* ISO Regulation References */}
               <p className="text-[9px] text-slate-400 font-light max-w-md mx-auto leading-normal">
-                เกียรติบัตรนี้มีผลบันทึกถาวรลงในฐานข้อมูลทรัพยากรการอบรม RMP (SOP Database v4) เพื่อใช้เป็นทรานสคริปต์สิทธิ์วิชาชีพสากลตามเกณฑ์ประเมิน ISO 9001:2015 Clause 7.2 (Competence)
+                เกียรติบัตรนี้มีผลบันทึกถาวรลงในฐานข้อมูลทรัพยากรการอบรม RMP
+                (SOP Database v4)
+                เพื่อใช้เป็นทรานสคริปต์สิทธิ์วิชาชีพสากลตามเกณฑ์ประเมิน ISO
+                9001:2015 Clause 7.2 (Competence)
               </p>
 
               {/* Official Signatures Panel */}
               <div className="grid grid-cols-2 gap-4 pt-6 border-t border-slate-100 text-[10px] font-sans">
                 <div className="text-left pl-3 space-y-1">
-                  <span className="italic text-slate-400 font-serif font-bold text-[11px] leading-none block">Sirima S.</span>
-                  <p className="font-bold text-slate-800">คุณหญิง สิริมา แสงสะอาด</p>
-                  <p className="text-[8.5px] text-slate-400">Managing Director (MD) - รอแยล เมอิวะ แพ็คซ์</p>
+                  <span className="italic text-slate-400 font-serif font-bold text-[11px] leading-none block">
+                    Sirima S.
+                  </span>
+                  <p className="font-bold text-slate-800">
+                    คุณหญิง สิริมา แสงสะอาด
+                  </p>
+                  <p className="text-[8.5px] text-slate-400">
+                    Managing Director (MD) - รอแยล เมอิวะ แพ็คซ์
+                  </p>
                 </div>
                 <div className="text-right pr-3 space-y-1">
-                  <span className="block italic text-slate-400 font-serif font-bold text-[11px] leading-none">Darin Saetang</span>
+                  <span className="block italic text-slate-400 font-serif font-bold text-[11px] leading-none">
+                    Darin Saetang
+                  </span>
                   <p className="font-bold text-slate-800">ดารินทร์ แซ่ตั้ง</p>
-                  <p className="text-[8.5px] text-slate-400">QA/QC Supervisor (Lead Auditor 9001)</p>
+                  <p className="text-[8.5px] text-slate-400">
+                    QA/QC Supervisor (Lead Auditor 9001)
+                  </p>
                 </div>
               </div>
 
               {/* Dynamic bottom stamp for confirmation */}
               <div className="text-[8px] font-mono text-slate-400 text-center pt-2 select-none">
-                VERIFIED SECURITY CODE: RMP-MD-{user.employeeId}-{score}-{dateStr}
+                VERIFIED SECURITY CODE: RMP-MD-{user.employeeId}-{score}-
+                {dateStr}
               </div>
             </div>
           ) : (
@@ -457,22 +554,21 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
               <div className="relative w-44 h-44 mx-auto my-2 group select-none">
                 {/* Outer Glow ripple ring */}
                 <div className="absolute inset-0 rounded-full bg-indigo-500/10 animate-ping opacity-60"></div>
-                
+
                 {/* Main metallic ring structure */}
                 <div className="absolute inset-0 rounded-full border-4 border-slate-800 bg-radial from-slate-900 to-slate-950 p-2 shadow-lg flex items-center justify-center">
                   <div className="absolute inset-1 rounded-full border-2 border-dashed border-amber-400/40 animate-spin-slow"></div>
-                  
+
                   {/* Outer bronze/gold text wrap circle */}
                   <div className="w-full h-full rounded-full flex flex-col items-center justify-center border-2 border-slate-700 bg-gradient-to-b from-slate-800 via-slate-900 to-slate-950 p-1 relative overflow-hidden">
-                    
                     {/* Glowing background */}
                     <div className="absolute inset-2 bg-radial from-indigo-500/20 to-transparent blur-md"></div>
-                    
+
                     {/* Badge Icon center */}
                     <span className="text-5xl drop-shadow-md z-10 filter hover:scale-110 transition duration-300 cursor-pointer">
                       {badgeProps.symbol}
                     </span>
-                    
+
                     {/* Small validation tag on center bottom */}
                     <span className="absolute bottom-2 bg-amber-400 text-slate-900 font-bold px-1.5 py-0.2 rounded text-[7.5px] font-mono tracking-wide z-10 uppercase border border-white">
                       RMP Verified
@@ -501,7 +597,9 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
               <div className="border-t pt-3.5 space-y-1.5">
                 <div className="flex items-center justify-between text-[10px] font-semibold text-slate-600 font-mono">
                   <span>ผู้ครอบครอง:</span>
-                  <span className="text-slate-900 font-bold">{user.name} ({user.employeeId})</span>
+                  <span className="text-slate-900 font-bold">
+                    {user.name} ({user.employeeId})
+                  </span>
                 </div>
                 <div className="flex items-center justify-between text-[10px] font-semibold text-slate-600 font-mono">
                   <span>วันที่สัมฤทธิ์ผล:</span>
@@ -509,13 +607,17 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                 </div>
                 <div className="flex items-center justify-between text-[10px] font-semibold text-slate-600 font-mono text-left">
                   <span>รหัสคีย์ข้อมูล:</span>
-                  <span className="text-slate-400 text-[8.5px] truncate max-w-[150px] font-bold" title={certId}>{certId}</span>
+                  <span
+                    className="text-slate-400 text-[8.5px] truncate max-w-[150px] font-bold"
+                    title={certId}
+                  >
+                    {certId}
+                  </span>
                 </div>
               </div>
             </div>
           )}
         </div>
-
       </div>
 
       {/* Simulated Org Feed Toast */}
@@ -526,12 +628,16 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
               <Check className="w-5 h-5" />
             </span>
             <div className="space-y-0.5 text-left">
-              <div className="font-extrabold text-xs">แชร์ลงกระดานสโมสรสำเร็จ!</div>
+              <div className="font-extrabold text-xs">
+                แชร์ลงกระดานสโมสรสำเร็จ!
+              </div>
               <p className="text-[10px] text-slate-350 leading-relaxed">
-                เหรียญตราและข้อความรับรองความรู้ของคุณถูกส่งไปประกาศในช่องประกาศ RMP News & Accomplishment Board แล้ว เพื่อนพนักงานสามารถตรวจสอบเกียรติประวัติได้ค่ะ
+                เหรียญตราและข้อความรับรองความรู้ของคุณถูกส่งไปประกาศในช่องประกาศ
+                RMP News & Accomplishment Board แล้ว
+                เพื่อนพนักงานสามารถตรวจสอบเกียรติประวัติได้ค่ะ
               </p>
             </div>
-            <button 
+            <button
               onClick={() => setIsSharedToBoard(false)}
               className="text-slate-400 hover:text-white"
             >

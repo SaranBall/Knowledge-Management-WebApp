@@ -48,6 +48,7 @@ import {
 import { INITIAL_EMPLOYEE_MASTER } from "../data/initialData";
 import { getUserBadges } from "../utils/badgeUtils";
 import { BadgePill } from "./BadgeDisplay";
+import { DEFAULT_AVATAR_URL } from "../utils/assets";
 import {
   getMainDepartments,
   getSubDepartments,
@@ -199,6 +200,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const handleEditUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editForm || !editForm.name || !editForm.email) return;
+    if (!editForm.avatarUrl) {
+      alert("❌ กรุณาอัปโหลดรูปภาพโปรไฟล์จริงของพนักงานก่อนบันทึก");
+      return;
+    }
 
     // Check if employeeId duplicates other users
     const duplicate = users.some(
@@ -587,6 +592,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const handleCreateUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUser.name || !newUser.employeeId || !newUser.email) return;
+    if (!newUser.avatarUrl) {
+      alert("❌ กรุณาอัปโหลดรูปภาพโปรไฟล์จริงของพนักงานก่อนบันทึก");
+      return;
+    }
 
     // Check if ID already exists
     if (users.some((u) => u.employeeId === newUser.employeeId)) {
@@ -601,9 +610,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       departmentId: newUser.departmentId,
       position: newUser.position,
       role: newUser.role,
-      avatarUrl:
-        newUser.avatarUrl ||
-        `https://images.unsplash.com/photo-1535713875002?w=120`, // fallback if they somehow bypass
+      avatarUrl: newUser.avatarUrl, // ผ่าน validation ด้านบนแล้ว รับประกันว่ามีค่าจริงเสมอ
       email: newUser.email,
       phone: newUser.phone || "02-1234567",
       startDate: newUser.startDate || new Date().toISOString().split("T")[0],
@@ -737,7 +744,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         return [
           u.employeeId,
           u.name,
-          getDepartmentById(u.departmentId)?.name || 'ไม่ระบุแผนก',
+          getDepartmentById(u.departmentId)?.name || "ไม่ระบุแผนก",
           u.position,
           displayedRole,
           u.email,
@@ -803,7 +810,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         return [
           u.employeeId,
           u.name,
-          getDepartmentById(u.departmentId)?.name || 'ไม่ระบุแผนก',
+          getDepartmentById(u.departmentId)?.name || "ไม่ระบุแผนก",
           u.position,
           completions,
           reqs,
@@ -1020,7 +1027,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         return [
           u.employeeId,
           u.name,
-          getDepartmentById(u.departmentId)?.name || 'ไม่ระบุแผนก',
+          getDepartmentById(u.departmentId)?.name || "ไม่ระบุแผนก",
           u.position,
           courseId,
           title,
@@ -1185,10 +1192,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     {/* Name column */}
                     <div className="md:col-span-3 flex items-center gap-3">
                       <img
-                        src={
-                          u.avatarUrl ||
-                          "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80"
-                        }
+                        src={u.avatarUrl || DEFAULT_AVATAR_URL}
                         alt={u.name}
                         className="w-10 h-10 rounded-full object-cover border border-slate-200 shadow-xs shrink-0"
                       />
@@ -2022,10 +2026,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       {/* Employee resume header */}
                       <div className="flex flex-col sm:flex-row gap-4 items-center bg-slate-50/50 p-4 rounded-xl border border-slate-200">
                         <img
-                          src={
-                            u.avatarUrl ||
-                            "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80"
-                          }
+                          src={u.avatarUrl || DEFAULT_AVATAR_URL}
                           alt={u.name}
                           className="w-16 h-16 rounded-full object-cover border border-slate-205 shadow-sm shrink-0"
                         />
@@ -2823,8 +2824,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                           if (parts.length >= 2) {
                             const employeeId = parts[0].trim();
                             const name = parts[1].trim();
-                            const departmentId =
-                              parts[2]?.trim() || "d-pd";
+                            const departmentId = parts[2]?.trim() || "d-pd";
                             const position =
                               parts[3]?.trim() || "Technician Operative 1";
                             const level = parts[4]?.trim() || "Junior Staff";
@@ -2972,7 +2972,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                             const isDuplicate = employeeMaster.some(
                               (exist) => exist.employeeId === emp.employeeId,
                             );
-                            const isDeptUnresolved = emp.isDeptResolved === false;
+                            const isDeptUnresolved =
+                              emp.isDeptResolved === false;
                             return (
                               <tr
                                 key={i}
@@ -2990,7 +2991,13 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                   {emp.name}
                                 </td>
                                 <td className="p-3 text-slate-600">
-                                  <span className={isDeptUnresolved ? "text-rose-700 font-bold" : ""}>
+                                  <span
+                                    className={
+                                      isDeptUnresolved
+                                        ? "text-rose-700 font-bold"
+                                        : ""
+                                    }
+                                  >
                                     {emp.departmentId}
                                   </span>
                                   {isDeptUnresolved && (
@@ -3492,8 +3499,14 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         className="hidden"
                       />
                     </label>
-                    <p className="text-[9px] text-slate-400 mt-1">
-                      อัปโหลดรูปถ่ายจริง
+                    <p
+                      className={`text-[9px] mt-1 font-bold ${
+                        newUser.avatarUrl ? "text-emerald-600" : "text-red-500"
+                      }`}
+                    >
+                      {newUser.avatarUrl
+                        ? "✓ อัปโหลดรูปภาพจริงแล้ว"
+                        : "⚠ กรุณาอัปโหลดรูปภาพจริง (จำเป็น)"}
                     </p>
                   </div>
                 </div>
@@ -3906,8 +3919,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-[#15329c]"
                     />
                   </div>
+                </div>
               </div>
-            </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -3921,9 +3934,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     }
                     className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs cursor-pointer font-bold text-[#15329c] focus:outline-none focus:ring-1 focus:ring-[#15329c]"
                   >
-                    <option value="Viewer">
-                      Viewer (ผู้เข้าชมทั่วไป)
-                    </option>
+                    <option value="Viewer">Viewer (ผู้เข้าชมทั่วไป)</option>
                     <option value="Editor">
                       Editor (ผู้แก้ไขข้อมูลร่วมเขียน SOP)
                     </option>
@@ -4017,8 +4028,14 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         className="hidden"
                       />
                     </label>
-                    <p className="text-[9px] text-slate-400 mt-1">
-                      ✓ อัปโหลดรูปถ่ายจริงเพื่อระบุตนตามเกณฑ์ระบบบริหาร
+                    <p
+                      className={`text-[9px] mt-1 font-bold ${
+                        editForm.avatarUrl ? "text-emerald-600" : "text-red-500"
+                      }`}
+                    >
+                      {editForm.avatarUrl
+                        ? "✓ อัปโหลดรูปภาพจริงแล้ว"
+                        : "⚠ กรุณาอัปโหลดรูปภาพจริง (จำเป็น)"}
                     </p>
                   </div>
                 </div>

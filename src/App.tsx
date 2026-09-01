@@ -44,6 +44,7 @@ import {
 
 import { api, setAuthToken } from "./services/api";
 import { getDepartmentById } from "./utils/departmentUtils";
+import { DEFAULT_AVATAR_URL } from "./utils/assets";
 
 // Import initial dataset
 import {
@@ -220,6 +221,7 @@ export default function App() {
   );
   const [regError, setRegError] = useState<string>("");
   const [regPassword, setRegPassword] = useState<string>("");
+  const [regAvatarUrl, setRegAvatarUrl] = useState<string>("");
 
   // --- Manual Login States ---
   const [loginEmployeeId, setLoginEmployeeId] = useState<string>("");
@@ -828,9 +830,21 @@ export default function App() {
     // Success
     setMatchedEmployee(match);
   };
+  // Registration: อัปโหลดรูปโปรไฟล์จริง (บังคับก่อนยืนยันลงทะเบียน)
+  const handleRegAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setRegAvatarUrl(reader.result as string);
+    reader.readAsDataURL(file);
+  };
 
   const handleConfirmRegistration = async () => {
     if (!matchedEmployee) return;
+    if (!regAvatarUrl) {
+      setRegError("⚠️ กรุณาอัปโหลดรูปภาพโปรไฟล์จริงก่อนยืนยันการลงทะเบียน");
+      return;
+    }
 
     // Check once more to be safe
     const alreadyRegistered = users.some(
@@ -874,7 +888,7 @@ export default function App() {
       email: matchedEmployee.email,
       phone: matchedEmployee.phone,
       password: cleanPass,
-      avatarUrl: `https://images.unsplash.com/photo-1535713875002?w=150`,
+      avatarUrl: regAvatarUrl,
       startDate:
         matchedEmployee.startDate || new Date().toISOString().split("T")[0],
     };
@@ -923,6 +937,7 @@ export default function App() {
     setIsRegistering(false);
     setRegEmployeeId("");
     setRegPassword("");
+    setRegAvatarUrl("");
     setMatchedEmployee(null);
 
     alert(
@@ -1340,6 +1355,45 @@ export default function App() {
                       💚 ระบบจะเชื่อมต่อวุฒิความรู้ (Competency Score Card)
                       และหลักสูตรสอนงานเซฟตี้ Onboarding แผนกตรงโดยอัตโนมัติ
                     </div>
+                    {/* บังคับอัปโหลดรูปโปรไฟล์จริงก่อนลงทะเบียน */}
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-center">
+                      <label className="text-[10px] font-extrabold text-slate-500 block uppercase tracking-wider">
+                        📷 อัปโหลดรูปโปรไฟล์จริง (จำเป็น):
+                      </label>
+                      <div className="flex flex-col items-center gap-2">
+                        {regAvatarUrl ? (
+                          <img
+                            src={regAvatarUrl}
+                            alt="Avatar Preview"
+                            className="w-16 h-16 rounded-full object-cover border-2 border-emerald-500 shadow-sm"
+                          />
+                        ) : (
+                          <div className="w-16 h-16 rounded-full border-2 border-dashed border-red-400 bg-red-50 flex items-center justify-center">
+                            <span className="text-red-400 text-[9px] font-bold">
+                              ยังไม่มีรูป
+                            </span>
+                          </div>
+                        )}
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer transition shadow-xs">
+                          <span>เลือกไฟล์รูปภาพ</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleRegAvatarChange}
+                            className="hidden"
+                          />
+                        </label>
+                        <p
+                          className={`text-[9.5px] font-bold ${
+                            regAvatarUrl ? "text-emerald-600" : "text-red-500"
+                          }`}
+                        >
+                          {regAvatarUrl
+                            ? "✓ อัปโหลดรูปภาพจริงแล้ว"
+                            : "⚠ กรุณาอัปโหลดรูปภาพจริง (จำเป็น)"}
+                        </p>
+                      </div>
+                    </div>
 
                     {/* Require numeric 6 digit pin password input */}
                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
@@ -1485,10 +1539,7 @@ export default function App() {
             >
               <div className="flex items-center gap-2.5">
                 <img
-                  src={
-                    currentUser.avatarUrl ||
-                    "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80"
-                  }
+                  src={currentUser.avatarUrl || DEFAULT_AVATAR_URL}
                   alt={currentUser.name}
                   referrerPolicy="no-referrer"
                   className="w-8 h-8 rounded-full border border-slate-250 object-cover shrink-0"
