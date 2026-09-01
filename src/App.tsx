@@ -960,7 +960,18 @@ export default function App() {
       setLoginPassword("");
       setMobileMenuOpen(false);
     } catch (error: any) {
-      setLoginError("รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง");
+      // ดึง message จริงจาก server (รองรับทั้ง invalid credentials และ rate limit)
+      const match = error?.message?.match(/API Error: \d+ .+ - (.+)/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[1]);
+          setLoginError(parsed.message || "รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง");
+        } catch {
+          setLoginError("รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง");
+        }
+      } else {
+        setLoginError("รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง");
+      }
     }
   };
 

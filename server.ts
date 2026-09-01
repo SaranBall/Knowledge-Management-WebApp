@@ -61,6 +61,17 @@ function sanitizeUser<T extends { password?: string }>(user: T) {
   return rest;
 }
 
+// Mask email/phone สำหรับ Viewer ที่ดูข้อมูลของคนอื่น (ไม่ใช่ตัวเอง)
+function sanitizeUserForViewer(user: UserType, viewerId: string) {
+  const base = sanitizeUser(user);
+  if (user.id === viewerId) return base; // เห็นข้อมูลตัวเองเต็มเสมอ
+  return {
+    ...base,
+    email: "••••@royalmeiwa.com",
+    phone: "0XX-XXX-XXXX",
+  };
+}
+
 // ============================================================
 // --- AUTH: JWT setup + middleware ---
 // ============================================================
@@ -132,6 +143,27 @@ function requireRole(...allowedRoles: string[]) {
     next();
   };
 }
+//ตรวจว่า field ที่ระบุ (userId หรือ employeeId) ในbody ตรงกับเจ้าของ token จริง
+// Admin bypass ได้เสมอ (เผื่อกรณีแอดมินต้องแก้ไข/บันทึกข้อมูลของคนอื่น)
+function requireOwnField(field: "userId" | "employeeId") {
+  return (
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    if (req.authUser?.role === "Admin") return next();
+    const bodyValue = req.body[field];
+    const ownValue =
+      field === "userId" ? req.authUser?.id : req.authUser?.employeeId;
+    if (!bodyValue || bodyValue !== ownValue) {
+      return res.status(403).json({
+        error: "FORBIDDEN",
+        message: "ไม่สามารถบันทึกหรือแก้ไขข้อมูลแทนผู้อื่นได้",
+      });
+    }
+    next();
+  };
+}
 
 async function startServer() {
   const app = express();
@@ -175,6 +207,57 @@ async function startServer() {
   // --- AUTH ENDPOINTS (ไม่ต้อง requireAuth เพราะเป็นทางเข้าระบบ) ---
   // ============================================================
 
+  // --- Simple in-memory rate limiter สำหรับ /api/login ---
+  // กัน brute-force PIN 6 หลัก (1,000,000 combinations) โดยไม่ต้องพึ่ง external package
+  const loginAttempts = new Map<
+    string,
+    { count: number; firstAttemptAt: number; lockedUntil?: number }
+  >();
+  const LOGIN_MAX_ATTEMPTS = 5;
+  const LOGIN_WINDOW_MS = 10 * 60 * 1000; // 10 นาที
+  const LOGIN_LOCKOUT_MS = 15 * 60 * 1000; // ล็อก 15 นาทีหลังพยายามเกิน
+
+  function getLoginKey(req: express.Request, employeeId: string): string {
+    // ผูกกับ employeeId + IP เพื่อไม่ให้คนอื่นโดนล็อกร่วมกันถ้าใช้ NAT/proxy เดียวกัน
+    return `${employeeId.toLowerCase()}::${req.ip}`;
+  }
+
+  function checkLoginRateLimit(
+    req: express.Request,
+    employeeId: string,
+  ): { allowed: boolean; retryAfterSec?: number } {
+    const key = getLoginKey(req, employeeId);
+    const now = Date.now();
+    const entry = loginAttempts.get(key);
+
+    if (entry?.lockedUntil && entry.lockedUntil > now) {
+      return {
+        allowed: false,
+        retryAfterSec: Math.ceil((entry.lockedUntil - now) / 1000),
+      };
+    }
+
+    if (!entry || now - entry.firstAttemptAt > LOGIN_WINDOW_MS) {
+      loginAttempts.set(key, { count: 0, firstAttemptAt: now });
+    }
+    return { allowed: true };
+  }
+
+  function recordLoginFailure(req: express.Request, employeeId: string) {
+    const key = getLoginKey(req, employeeId);
+    const now = Date.now();
+    const entry = loginAttempts.get(key) || { count: 0, firstAttemptAt: now };
+    entry.count += 1;
+    if (entry.count >= LOGIN_MAX_ATTEMPTS) {
+      entry.lockedUntil = now + LOGIN_LOCKOUT_MS;
+    }
+    loginAttempts.set(key, entry);
+  }
+
+  function clearLoginAttempts(req: express.Request, employeeId: string) {
+    loginAttempts.delete(getLoginKey(req, employeeId));
+  }
+
   // Login: ตรวจ employeeId + password ที่ server แล้วออก JWT กลับไป
   app.post("/api/login", async (req, res) => {
     try {
@@ -186,10 +269,19 @@ async function startServer() {
         });
       }
 
+      const rateCheck = checkLoginRateLimit(req, employeeId);
+      if (!rateCheck.allowed) {
+        return res.status(429).json({
+          error: "TOO_MANY_ATTEMPTS",
+          message: `ลองรหัสผ่านผิดหลายครั้งเกินไป กรุณารออีก ${rateCheck.retryAfterSec} วินาทีแล้วลองใหม่`,
+        });
+      }
+
       const user = db_users.find(
         (u) => u.employeeId.toLowerCase() === String(employeeId).toLowerCase(),
       );
       if (!user) {
+        recordLoginFailure(req, employeeId);
         return res.status(401).json({
           error: "INVALID_CREDENTIALS",
           message: "ไม่พบรหัสพนักงานนี้ในระบบ",
@@ -210,12 +302,13 @@ async function startServer() {
         ? await bcrypt.compare(password, user.password)
         : false;
       if (!isValid) {
+        recordLoginFailure(req, employeeId);
         return res.status(401).json({
           error: "INVALID_CREDENTIALS",
           message: "รหัสผ่านไม่ถูกต้อง",
         });
       }
-
+      clearLoginAttempts(req, employeeId);
       const token = signToken({
         id: user.id,
         employeeId: user.employeeId,
@@ -234,24 +327,20 @@ async function startServer() {
     try {
       const { password, employeeId } = req.body; // รับเฉพาะฟิลด์ที่จำเป็น ไม่รับ role จาก client
       if (!employeeId || !password) {
-        return res
-          .status(400)
-          .json({
-            error: "MISSING_FIELDS",
-            message: "ข้อมูลลงทะเบียนไม่ครบถ้วน",
-          });
+        return res.status(400).json({
+          error: "MISSING_FIELDS",
+          message: "ข้อมูลลงทะเบียนไม่ครบถ้วน",
+        });
       }
 
       const employeeRecord = db_employee_master.find(
         (e) => e.employeeId.toLowerCase() === employeeId.toLowerCase(),
       );
       if (!employeeRecord) {
-        return res
-          .status(400)
-          .json({
-            error: "NOT_FOUND",
-            message: "ไม่พบรหัสพนักงานนี้ในฐานข้อมูลกลาง",
-          });
+        return res.status(400).json({
+          error: "NOT_FOUND",
+          message: "ไม่พบรหัสพนักงานนี้ในฐานข้อมูลกลาง",
+        });
       }
       if (
         db_users.some(
@@ -348,6 +437,9 @@ async function startServer() {
   });
 
   // Serve the uploaded files (ไฟล์ที่อัปโหลดแล้ว อ่านได้เมื่อ login เท่านั้น)
+  // ⚠️ TODO: เมื่อ DocumentList.tsx เปลี่ยนไปใช้ /api/upload จริงสำหรับเอกสาร QP
+  // (แทน URL.createObjectURL ปัจจุบัน) ต้องเพิ่ม role-check ตรงนี้ทันที:
+  // เช็คว่า filename ผูกกับ document ที่ type === 'QP' หรือไม่ ถ้าใช่ต้อง requireRole('Admin')
   app.get("/uploads/:filename", requireAuth, (req, res) => {
     const filename = req.params.filename;
     if (uploadedFiles.has(filename)) {
@@ -645,16 +737,29 @@ CRITICAL INSTRUCTIONS:
   // --- AI Personalized Career Learning Path Advisor (ต้อง login) ---
   app.post("/api/personalized-path", requireAuth, async (req, res) => {
     try {
-      const currentUser = req.body.currentUser;
+      // ดึงข้อมูลตัวจริงจาก DB โดยอิง req.authUser.id เท่านั้น ไม่เชื่อ body ที่ client ส่งมา
+      const authUserRecord = db_users.find((u) => u.id === req.authUser!.id);
+      if (!authUserRecord) {
+        return res.status(401).json({
+          error: "USER_NOT_FOUND",
+          message: "ไม่พบข้อมูลผู้ใช้ในระบบ กรุณาเข้าสู่ระบบใหม่",
+        });
+      }
+      const currentUser = {
+        name: authUserRecord.name,
+        position: authUserRecord.position,
+        departmentId: authUserRecord.departmentId,
+        startDate: authUserRecord.startDate,
+      };
       const careerGoal = req.body.careerGoal || req.body.targetGoal;
       const competencies =
         req.body.competencies || req.body.myCompetencies || [];
       const courses = req.body.courses || req.body.availableCourses || [];
       const documents = req.body.documents || req.body.availableDocuments || [];
 
-      if (!currentUser || !careerGoal) {
+      if (!careerGoal) {
         return res.status(400).json({
-          error: "currentUser and careerGoal (or targetGoal) are required",
+          error: "careerGoal (or targetGoal) is required",
         });
       }
 
@@ -795,7 +900,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Users APIs — จัดการได้เฉพาะ Admin เท่านั้น (สมัครเองใช้ /api/register แทน)
   app.get("/api/users", requireAuth, (req, res) => {
-    res.json(db_users.map(sanitizeUser));
+    const role = req.authUser!.role;
+    if (role === "Admin" || role === "Editor") {
+      return res.json(db_users.map(sanitizeUser));
+    }
+    // Viewer: mask email/phone ของคนอื่น ยกเว้นตัวเอง
+    res.json(db_users.map((u) => sanitizeUserForViewer(u, req.authUser!.id)));
   });
   app.post(
     "/api/users",
@@ -1123,42 +1233,52 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.get("/api/user_progress", requireAuth, (req, res) => {
     res.json(db_user_progress);
   });
-  app.post("/api/user_progress", requireAuth, (req, res) => {
-    try {
-      const prog = req.body;
-      if (!prog.id) {
-        prog.id = `prog-${Date.now()}`;
+  app.post(
+    "/api/user_progress",
+    requireAuth,
+    requireOwnField("userId"),
+    (req, res) => {
+      try {
+        const prog = req.body;
+        if (!prog.id) {
+          prog.id = `prog-${Date.now()}`;
+        }
+        const idx = db_user_progress.findIndex(
+          (p) => p.userId === prog.userId && p.courseId === prog.courseId,
+        );
+        if (idx !== -1) {
+          db_user_progress[idx] = prog;
+        } else {
+          db_user_progress.push(prog);
+        }
+        res.json(prog);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      const idx = db_user_progress.findIndex(
-        (p) => p.userId === prog.userId && p.courseId === prog.courseId,
-      );
-      if (idx !== -1) {
-        db_user_progress[idx] = prog;
-      } else {
-        db_user_progress.push(prog);
-      }
-      res.json(prog);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
 
   // Exam Results APIs
   app.get("/api/exam_results", requireAuth, (req, res) => {
     res.json(db_exam_results);
   });
-  app.post("/api/exam_results", requireAuth, (req, res) => {
-    try {
-      const result = req.body;
-      if (!result.id) {
-        result.id = `ex-${Date.now()}`;
+  app.post(
+    "/api/exam_results",
+    requireAuth,
+    requireOwnField("employeeId"),
+    (req, res) => {
+      try {
+        const result = req.body;
+        if (!result.id) {
+          result.id = `ex-${Date.now()}`;
+        }
+        db_exam_results.unshift(result);
+        res.json(result);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_exam_results.unshift(result);
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
 
   // Search Logs APIs
   app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {
@@ -1262,7 +1382,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { competencies } = req.body;
       if (Array.isArray(competencies)) {
-        competencies.forEach((comp) => {
+        const isAdmin = req.authUser?.role === "Admin";
+        const allowed = isAdmin
+          ? competencies
+          : competencies.filter((c) => c.userId === req.authUser?.id);
+        allowed.forEach((comp) => {
           const idx = db_user_competencies.findIndex(
             (c) => c.userId === comp.userId && c.skillId === comp.skillId,
           );
@@ -1287,7 +1411,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     try {
       const { certificates } = req.body;
       if (Array.isArray(certificates)) {
-        certificates.forEach((cert) => {
+        const isAdmin = req.authUser?.role === "Admin";
+        const allowed = isAdmin
+          ? certificates
+          : certificates.filter((c) => c.userId === req.authUser?.id);
+        allowed.forEach((cert) => {
           const idx = db_user_certificates.findIndex((c) => c.id === cert.id);
           if (idx !== -1) {
             db_user_certificates[idx] = cert;

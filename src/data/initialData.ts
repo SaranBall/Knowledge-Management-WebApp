@@ -4,6 +4,7 @@
  */
 
 import { User, DocumentItem, Course, KBArticle, Expert, SearchLog, UserCourseProgress, RatingAndComment, ContactRequest, EmployeeMaster } from '../types';
+import { DEFAULT_AVATAR_URL } from '../utils/assets';
 
 export const INITIAL_USERS: User[] = [
   {
@@ -15,7 +16,8 @@ export const INITIAL_USERS: User[] = [
     role: 'Admin',
     email: 'saran@royalmeiwa.com',
     phone: '02-749-4100 ต่อ 2111',
-    avatarUrl: 'https://randomuser.me/api/portraits/men/1.jpg',
+    // TODO: seed data ควรมีรูปโปรไฟล์จริงในระยะยาว — ใช้ placeholder ชั่วคราวเพื่อเลี่ยง external CDN
+    avatarUrl: DEFAULT_AVATAR_URL,
     password: '120246',
     startDate: '2026-04-01'
   } as User
