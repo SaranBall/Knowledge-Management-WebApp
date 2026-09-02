@@ -3235,7 +3235,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                           `${emp.employeeId.toLowerCase()}@royalmeiwa.co.th`,
                                         phone: emp.phone || "02-1234567",
                                         password: cleanPin,
-                                        avatarUrl: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 99999)}?w=120`,
+                                        avatarUrl: DEFAULT_AVATAR_URL,
                                         startDate: emp.startDate,
                                       };
                                       onAddUser(createdUser);

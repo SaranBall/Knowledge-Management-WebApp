@@ -395,11 +395,17 @@ async function startServer() {
   });
 
   // --- Secure File Upload API Endpoint & Store (ต้อง login ก่อนอัปโหลด) ---
-  const uploadedFiles = new Map<string, { buffer: Buffer; mimeType: string }>();
+  interface UploadedFileMeta {
+    buffer: Buffer;
+    mimeType: string;
+    uploadedBy: string; // employeeId ของผู้อัปโหลด
+    restricted: boolean; // true = เฉพาะ Admin หรือผู้อัปโหลดเองเท่านั้นที่อ่านได้
+  }
+  const uploadedFiles = new Map<string, UploadedFileMeta>();
 
   app.post("/api/upload", requireAuth, (req, res) => {
     try {
-      const { filename, fileData, mimeType } = req.body;
+      const { filename, fileData, mimeType, restricted } = req.body;
       if (!filename || !fileData) {
         return res
           .status(400)
@@ -410,6 +416,9 @@ async function startServer() {
       uploadedFiles.set(cleanName, {
         buffer,
         mimeType: mimeType || "application/octet-stream",
+        uploadedBy: req.authUser!.employeeId,
+        // ⚠️ QP/เอกสารลับให้ client ส่ง restricted: true มาด้วยตอน implement จริง
+        restricted: restricted === true,
       });
 
       // Also try to write to filesystem (in public/uploads and dist/uploads) for persistence if possible
@@ -437,13 +446,20 @@ async function startServer() {
   });
 
   // Serve the uploaded files (ไฟล์ที่อัปโหลดแล้ว อ่านได้เมื่อ login เท่านั้น)
-  // ⚠️ TODO: เมื่อ DocumentList.tsx เปลี่ยนไปใช้ /api/upload จริงสำหรับเอกสาร QP
-  // (แทน URL.createObjectURL ปัจจุบัน) ต้องเพิ่ม role-check ตรงนี้ทันที:
-  // เช็คว่า filename ผูกกับ document ที่ type === 'QP' หรือไม่ ถ้าใช่ต้อง requireRole('Admin')
   app.get("/uploads/:filename", requireAuth, (req, res) => {
     const filename = req.params.filename;
     if (uploadedFiles.has(filename)) {
       const file = uploadedFiles.get(filename)!;
+      if (
+        file.restricted &&
+        req.authUser!.role !== "Admin" &&
+        file.uploadedBy !== req.authUser!.employeeId
+      ) {
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "ไฟล์นี้จำกัดสิทธิ์เฉพาะผู้ดูแลระบบหรือผู้อัปโหลดเท่านั้น",
+        });
+      }
       res.setHeader("Content-Type", file.mimeType);
       return res.send(file.buffer);
     }
@@ -1299,7 +1315,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Contact Requests APIs
   app.get("/api/contact_requests", requireAuth, (req, res) => {
-    res.json(db_contact_requests);
+    const role = req.authUser!.role;
+    if (role === "Admin" || role === "Editor") {
+      return res.json(db_contact_requests);
+    }
+    // Viewer เห็นเฉพาะคำถามที่ตนเองเป็นคนส่งเท่านั้น
+    res.json(db_contact_requests.filter((r) => r.userId === req.authUser!.id));
   });
   app.post("/api/contact_requests", requireAuth, (req, res) => {
     try {
