@@ -114,6 +114,20 @@ export interface UserCourseProgress {
   totalStudyMinutes: number;
 }
 
+export interface AttendanceLog {
+  id: string;
+  userId: string;
+  userName: string;
+  employeeId: string;
+  department: string;
+  position: string;
+  sessionId: string;
+  sessionName: string;
+  courseId: string;
+  courseTitle: string;
+  timestamp: string;
+}
+
 export type KBType =
   | "Troubleshooting"
   | "Best Practice"

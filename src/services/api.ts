@@ -14,6 +14,7 @@ import {
   UserCompetency,
   UserCertificate,
   KMContributionLog,
+  AttendanceLog,
 } from "../types";
 
 let authToken: string | null = localStorage.getItem("rm_auth_token");
@@ -38,10 +39,14 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
 
   if (response.status === 401) {
-    // token หมดอายุหรือไม่ถูกต้อง → บังคับ logout
-    setAuthToken(null);
-    window.location.reload();
-    throw new Error("SESSION_EXPIRED");
+    // token หมดอายุหรือไม่ถูกต้อง → เคลียร์ auth token เฉพาะเมื่อไม่ใช่การพยายาม login
+    if (!url.includes("/api/login")) {
+      setAuthToken(null);
+    }
+    const errorText = await response.text();
+    throw new Error(
+      `API Error: ${response.status} ${response.statusText} - ${errorText}`,
+    );
   }
 
   if (!response.ok) {
@@ -114,6 +119,14 @@ export const api = {
     request<DocumentItem>(`/api/documents/${id}/approve`, {
       method: "POST",
       body: JSON.stringify({ approverName }),
+    }),
+  viewDocument: (id: string) =>
+    request<DocumentItem>(`/api/documents/${id}/view`, {
+      method: "POST",
+    }),
+  downloadDocument: (id: string) =>
+    request<DocumentItem>(`/api/documents/${id}/download`, {
+      method: "POST",
     }),
 
   // Courses APIs
@@ -263,6 +276,18 @@ export const api = {
     request<EmployeeMaster[]>("/api/employee_master", {
       method: "POST",
       body: JSON.stringify({ employeeMaster }),
+    }),
+
+  // Attendance Logs APIs (QR Check-in)
+  getAttendanceLogs: () => request<AttendanceLog[]>("/api/attendance_logs"),
+  createAttendanceLog: (log: Partial<AttendanceLog>) =>
+    request<AttendanceLog>("/api/attendance_logs", {
+      method: "POST",
+      body: JSON.stringify(log),
+    }),
+  clearAttendanceLogs: () =>
+    request<{ success: boolean; message: string }>("/api/attendance_logs", {
+      method: "DELETE",
     }),
 
   // System Audit Logs APIs

@@ -62,7 +62,6 @@ import {
 } from "./data/initialData";
 
 // Import modules
-import { RoleSelector } from "./components/RoleSelector";
 import { Dashboard } from "./components/Dashboard";
 import { DocumentList } from "./components/DocumentList";
 import { LearningCenter } from "./components/LearningCenter";
@@ -254,12 +253,6 @@ export default function App() {
     setCurrentUser(user);
     setIsLogged(true);
     setMobileMenuOpen(false);
-  };
-
-  // Switch simulated identity
-  const handleSimulateUserChange = (user: UserType) => {
-    setCurrentUser(user);
-    // synchronize role privileges
   };
 
   // RAG Custom Resources Handlers
@@ -1040,15 +1033,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f0f4fa] font-sans flex flex-col text-[#1e293b] selection:bg-[#e51a24] selection:text-white">
-      {/* 1. Global simulated role toolbar */}
-      {isLogged && currentUser && import.meta.env.DEV && (
-        <RoleSelector
-          users={users}
-          currentUser={currentUser}
-          onUserChange={handleSimulateUserChange}
-        />
-      )}
-
       {/* Login Page / 1-Click login portal */}
       {!isLogged ? (
         <div

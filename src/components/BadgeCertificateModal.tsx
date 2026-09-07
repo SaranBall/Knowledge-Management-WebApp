@@ -4,19 +4,13 @@ import {
   Shield,
   Zap,
   Sparkles,
-  Share2,
   Printer,
-  Download,
-  Copy,
-  CheckCircle,
-  ExternalLink,
   Eye,
   BookOpen,
   Clock,
   X,
   ShieldAlert,
   Check,
-  RefreshCw,
 } from "lucide-react";
 import { User, Course } from "../types";
 
@@ -42,9 +36,6 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
     "gold",
   );
   const [hologramSeal, setHologramSeal] = useState<boolean>(true);
-  const [isCopied, setIsCopied] = useState<boolean>(false);
-  const [isSharedToBoard, setIsSharedToBoard] = useState<boolean>(false);
-  const [sharedLoading, setSharedLoading] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -117,24 +108,6 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
   };
 
   const badgeProps = getCourseBadgeDetails(course.id);
-
-  // Copy Verification Link
-  const handleCopyLink = () => {
-    const fakeVerificationUrl = `${window.location.origin}/verify-credential?id=${certId}&course=${course.id}`;
-    navigator.clipboard.writeText(fakeVerificationUrl);
-    setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2000);
-  };
-
-  // Simulate sharing to board
-  const handleShareToBoard = () => {
-    setSharedLoading(true);
-    setTimeout(() => {
-      setSharedLoading(false);
-      setIsSharedToBoard(true);
-      // Automatically keep in state if we want, but simple response is perfect
-    }, 1200);
-  };
 
   // Handle printing certificate (highly targeted A4 styling)
   const handlePrint = () => {
@@ -345,69 +318,17 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
             {/* INTERACTIVE SHARING CONTROLS */}
             <div className="space-y-3.5 pt-3 border-t">
               <span className="block text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                ส่งออกและแบ่งปัน (View & Share Options)
+                ส่งออกเอกสารรับรอง (Export Certificate)
               </span>
 
               <button
                 type="button"
-                onClick={handleCopyLink}
-                className={`w-full py-2 px-3 rounded-xl border font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs ${
-                  isCopied
-                    ? "bg-emerald-50 text-emerald-800 border-emerald-300"
-                    : "bg-white hover:bg-slate-50 text-slate-705 border-slate-250"
-                }`}
+                onClick={handlePrint}
+                className="w-full bg-[#15329c] hover:bg-[#11297e] text-white py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
               >
-                {isCopied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    คัดลอกลิงก์สำเร็จ!
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                    คัดลอกลิงก์รับรอง (Copy URL)
-                  </>
-                )}
+                <Printer className="w-4 h-4" />
+                พิมพ์ / บันทึกเกียรติบัตรเป็น PDF
               </button>
-
-              <button
-                type="button"
-                onClick={handleShareToBoard}
-                disabled={isSharedToBoard || sharedLoading}
-                className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow ${
-                  isSharedToBoard
-                    ? "bg-emerald-600 text-white border-0 cursor-default"
-                    : "bg-[#15329c] hover:bg-[#11297e] text-white border-0"
-                }`}
-              >
-                {sharedLoading ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    กำลังโพสต์ขึ้นบอร์ด...
-                  </>
-                ) : isSharedToBoard ? (
-                  <>
-                    <CheckCircle className="w-3.5 h-3.5" />
-                    แชร์ลงกระดานบริษัทแล้ว 🎉
-                  </>
-                ) : (
-                  <>
-                    <Share2 className="w-3.5 h-3.5" />
-                    แชร์ลงกระดานข่าวสโมสร RMP
-                  </>
-                )}
-              </button>
-
-              {activeTab === "cert" && (
-                <button
-                  type="button"
-                  onClick={handlePrint}
-                  className="w-full bg-slate-800 hover:bg-slate-900 text-white py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  พิมพ์ / เซฟเกียรติบัตรเป็น PDF
-                </button>
-              )}
             </div>
           </div>
 
@@ -619,33 +540,6 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
           )}
         </div>
       </div>
-
-      {/* Simulated Org Feed Toast */}
-      {isSharedToBoard && (
-        <div className="fixed bottom-6 right-6 z-55 max-w-sm bg-slate-900 text-white rounded-2xl border border-slate-700 p-4 shadow-2xl animate-fade-in-up">
-          <div className="flex items-start gap-3">
-            <span className="p-2 bg-emerald-500/20 text-emerald-400 rounded-full">
-              <Check className="w-5 h-5" />
-            </span>
-            <div className="space-y-0.5 text-left">
-              <div className="font-extrabold text-xs">
-                แชร์ลงกระดานสโมสรสำเร็จ!
-              </div>
-              <p className="text-[10px] text-slate-350 leading-relaxed">
-                เหรียญตราและข้อความรับรองความรู้ของคุณถูกส่งไปประกาศในช่องประกาศ
-                RMP News & Accomplishment Board แล้ว
-                เพื่อนพนักงานสามารถตรวจสอบเกียรติประวัติได้ค่ะ
-              </p>
-            </div>
-            <button
-              onClick={() => setIsSharedToBoard(false)}
-              className="text-slate-400 hover:text-white"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
