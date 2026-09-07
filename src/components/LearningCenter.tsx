@@ -35,6 +35,7 @@ import {
   ArrowRight,
   ShieldCheck,
   FileSpreadsheet,
+  Printer,
 } from "lucide-react";
 import {
   Course,
@@ -46,6 +47,7 @@ import {
   UserCertificate,
   KMContributionLog,
   DocumentItem,
+  AttendanceLog,
 } from "../types";
 import { getUserBadges } from "../utils/badgeUtils";
 import { api } from "../services/api";
@@ -449,56 +451,36 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
   const [scannedCourseTitle, setScannedCourseTitle] = useState<string>("");
   const [scannedCourseId, setScannedCourseId] = useState<string>("");
 
-  const [attendanceLogs, setAttendanceLogs] = useState<any[]>(() => {
-    const saved = localStorage.getItem("rm_attendance_logs");
-    if (saved) return JSON.parse(saved);
-    return [
-      {
-        id: "att-init-1",
-        userId: "u-2",
-        userName: "สมชาย รักเรียน (ช่างสมชาย)",
-        employeeId: "RMP-1052",
-        department: "ฝ่ายผลิต (Production)",
-        position: "Senior Production Engineer",
-        sessionId: "off-2",
-        sessionName:
-          "ภาคปฏิบัติการขับขี่รถยกและการจัดวางพาเลททรงสูง (Forklift Maneuvering & Racking Practice)",
-        courseId: "c-3",
-        courseTitle: "ความปลอดภัยในการใช้รถยกไฟฟ้า (Forklift Operation Safety)",
-        timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-      },
-      {
-        id: "att-init-2",
-        userId: "u-3",
-        userName: "ดารินทร์ แซ่ตั้ง (คุณหญิง)",
-        employeeId: "RMP-3122",
-        department: "ฝ่ายประกอและควบคุมคุณภาพ (QA/QC)",
-        position: "QA/QC supervisor",
-        sessionId: "off-1",
-        sessionName:
-          "คลาสปฏิบัติการเครื่อง Sartorius และเป่าฟิล์มสุ่ม (Moisture Analyzer Practical Lab)",
-        courseId: "c-2",
-        courseTitle:
-          "การตรวจรับเคมีวัตถุดิบและจัดทำรายงานคุณภาพด้วยเครื่องวิเคราะห์ความชื้น (QC Inspection Cert)",
-        timestamp: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-      },
-    ];
-  });
+  const [attendanceLogs, setAttendanceLogs] = useState<AttendanceLog[]>([]);
+  const [isLoadingAttendance, setIsLoadingAttendance] =
+    useState<boolean>(false);
 
-  // Save logs to localStorage
-  React.useEffect(() => {
-    localStorage.setItem("rm_attendance_logs", JSON.stringify(attendanceLogs));
-  }, [attendanceLogs]);
+  // โหลด Attendance logs จาก Backend API เมื่อเปิดแท็บหรือ Component mount
+  const fetchAttendanceLogs = async () => {
+    try {
+      setIsLoadingAttendance(true);
+      const logs = await api.getAttendanceLogs();
+      setAttendanceLogs(logs || []);
+    } catch (err) {
+      console.error("Failed to load attendance logs from server:", err);
+    } finally {
+      setIsLoadingAttendance(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAttendanceLogs();
+  }, []);
 
   // Execute Simulated Scan
-  const handlePerformSimulatedScan = (sessionId: string) => {
+  const handlePerformSimulatedScan = async (sessionId: string) => {
     const session = OFFLINE_TRAINING_SESSIONS.find((s) => s.id === sessionId);
     if (!session) return;
 
     setIsScanning(true);
     setScanSuccess(false);
 
-    setTimeout(() => {
+    setTimeout(async () => {
       setIsScanning(false);
       setScanSuccess(true);
       setScannedSessionName(session.sessionName);
@@ -507,12 +489,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
       playBeep();
 
-      const isDup = attendanceLogs.some(
-        (l) => l.userId === currentUser.id && l.sessionId === session.id,
-      );
-
-      const newLog = {
-        id: `att-${Date.now()}`,
+      const newLogPayload: Partial<AttendanceLog> = {
         userId: currentUser.id,
         userName: currentUser.name,
         employeeId: currentUser.employeeId,
@@ -527,10 +504,18 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
         timestamp: new Date().toISOString(),
       };
 
-      setAttendanceLogs((prev) => {
-        if (isDup) return prev;
-        return [newLog, ...prev];
-      });
+      try {
+        const savedLog = await api.createAttendanceLog(newLogPayload);
+        setAttendanceLogs((prev) => {
+          const isDup = prev.some(
+            (l) => l.userId === currentUser.id && l.sessionId === session.id,
+          );
+          if (isDup) return prev;
+          return [savedLog, ...prev];
+        });
+      } catch (err) {
+        console.error("Failed to save attendance log to API:", err);
+      }
 
       // Update progress
       onUpdateUserProgress(currentUser.id, session.courseId, "Completed", 100);
@@ -1464,7 +1449,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
               {/* Real Certificate Frame based on course types */}
               {isOnboardingCert ? (
                 /* ONBOARDING CERTIFICATE */
-                <div className="bg-gradient-to-br from-[#ffffff] via-[#fffdf9] to-[#ffffff] p-8 rounded-2xl border-4 border-double border-amber-300 shadow-lg max-w-xl mx-auto space-y-6 relative overflow-hidden text-slate-800">
+                <div id="printable-learning-cert" className="bg-gradient-to-br from-[#ffffff] via-[#fffdf9] to-[#ffffff] p-8 rounded-2xl border-4 border-double border-amber-300 shadow-lg max-w-xl mx-auto space-y-6 relative overflow-hidden text-slate-800">
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-3 pointer-events-none text-6xl font-extrabold uppercase font-sans select-none tracking-widest leading-normal">
                     ROYAL MEIWA PAX
                   </div>
@@ -1535,7 +1520,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 </div>
               ) : (
                 /* GENERAL QUALITY COMPLIANCE CERTIFICATE */
-                <div className="bg-gradient-to-br from-[#ffffff] via-[#f7fbfd] to-[#ffffff] p-8 rounded-2xl border-4 border-double border-teal-500 shadow-lg max-w-xl mx-auto space-y-6 relative overflow-hidden text-slate-800">
+                <div id="printable-learning-cert" className="bg-gradient-to-br from-[#ffffff] via-[#f7fbfd] to-[#ffffff] p-8 rounded-2xl border-4 border-double border-teal-500 shadow-lg max-w-xl mx-auto space-y-6 relative overflow-hidden text-slate-800">
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-3 pointer-events-none text-6xl font-extrabold uppercase font-sans select-none tracking-widest leading-normal">
                     ROYAL MEIWA PAX
                   </div>
@@ -1611,15 +1596,51 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
               <div className="flex justify-center gap-3 text-xs font-semibold">
                 <button
-                  onClick={() =>
-                    alert(
-                      `สั่งพิมพ์เกียรติบัตรรับรองสำหรับคุณ ${currentUser.name} เพื่อบันทึกลงแฟ้มประเมินทักษะบุคคลและจัดเตรียมหลักฐานรับ ISO`,
-                    )
-                  }
-                  className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                  type="button"
+                  onClick={() => {
+                    const printContent = document.getElementById("printable-learning-cert");
+                    if (!printContent) {
+                      window.print();
+                      return;
+                    }
+                    const printWindow = window.open("", "_blank");
+                    if (printWindow) {
+                      const printHTML = `
+                        <!DOCTYPE html>
+                        <html>
+                          <head>
+                            <title>Certificate - ${currentUser.name}</title>
+                            <style>
+                              @media print {
+                                body { background: white; margin: 0; padding: 20px; font-family: sans-serif; }
+                                #printable-learning-cert { border: 10px double #d97706 !important; padding: 30px !important; text-align: center !important; }
+                              }
+                              * { box-sizing: border-box; }
+                              body { margin: 0; font-family: sans-serif; background: #fff; padding: 20px; }
+                            </style>
+                          </head>
+                          <body>
+                            <div style="max-width: 650px; margin: 0 auto;">
+                              ${printContent.outerHTML}
+                            </div>
+                          </body>
+                        </html>
+                      `;
+                      printWindow.document.write(printHTML);
+                      printWindow.document.close();
+                      printWindow.focus();
+                      setTimeout(() => {
+                        printWindow.print();
+                        printWindow.close();
+                      }, 500);
+                    } else {
+                      window.print();
+                    }
+                  }}
+                  className="bg-[#15329c] hover:bg-[#11297e] text-white px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow"
                 >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  พิมพ์เอกสารรับการรับรอง (Export PDF)
+                  <Printer className="w-4 h-4" />
+                  พิมพ์ / บันทึกเกียรติบัตรเป็น PDF
                 </button>
                 <button
                   onClick={() => {
@@ -2479,13 +2500,18 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   ลำดับเวลา ล็อกการบันทึกเอกสาร Audit ISO 9001
                 </span>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (
                       confirm(
                         "คุณแน่ใจว่าต้องการล้างล็อกข้อมูลทั้งหมดหรือไม่? (เพื่อความสะดวกในการสาธิต)",
                       )
                     ) {
-                      setAttendanceLogs([]);
+                      try {
+                        await api.clearAttendanceLogs();
+                        setAttendanceLogs([]);
+                      } catch (err) {
+                        console.error("Failed to clear attendance logs:", err);
+                      }
                     }
                   }}
                   className="text-rose-600 hover:underline text-[10px] font-bold cursor-pointer"
@@ -3978,66 +4004,30 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                     const base64String = (
                                       reader.result as string
                                     ).split(",")[1];
-                                    const response = await fetch(
-                                      "/api/upload",
-                                      {
-                                        method: "POST",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({
-                                          filename: base.name,
-                                          fileData: base64String,
-                                          mimeType: base.type,
-                                        }),
-                                      },
+                                    // ใช้ api.uploadFile() เพื่อแนบ Auth Header อัตโนมัติ ป้องกันปัญหา 401 Unauthorized
+                                    const data = await api.uploadFile(
+                                      base.name,
+                                      base64String,
+                                      base.type || "application/octet-stream",
                                     );
-                                    if (response.ok) {
-                                      const data = await response.json();
-                                      setNewCourseState((prev) => ({
-                                        ...prev,
-                                        isSimulatedUploading: false,
-                                        simulatedFileName: base.name,
-                                        lessonMediaUrl: data.url,
-                                      }));
-                                    } else {
-                                      throw new Error("Server upload failed");
-                                    }
+                                    setNewCourseState((prev) => ({
+                                      ...prev,
+                                      isSimulatedUploading: false,
+                                      simulatedFileName: base.name,
+                                      lessonMediaUrl: data.url, // ใช้ URL จริงที่ได้จาก Server
+                                    }));
                                   } catch (error) {
                                     console.error(
                                       "Upload error, using local object url fallback:",
                                       error,
                                     );
                                     const localUrl = URL.createObjectURL(base);
-
-                                    try {
-                                      // ใช้ api.uploadFile() เพื่อแนบ Auth Header อัตโนมัติ ป้องกันปัญหา 401 Unauthorized
-                                      const data = await api.uploadFile(
-                                        base.name,
-                                        base64String,
-                                        base.type || "application/octet-stream",
-                                      );
-
-                                      setNewCourseState((prev) => ({
-                                        ...prev,
-                                        isSimulatedUploading: false,
-                                        simulatedFileName: base.name,
-                                        lessonMediaUrl: data.url, // ใช้ URL จริงที่ได้จาก Server
-                                      }));
-                                    } catch (error) {
-                                      console.error(
-                                        "Upload error, using local object url fallback:",
-                                        error,
-                                      );
-
-                                      // Fallback ไปใช้ localUrl ชั่วคราวกรณี Server มีปัญหา
-                                      setNewCourseState((prev) => ({
-                                        ...prev,
-                                        isSimulatedUploading: false,
-                                        simulatedFileName: base.name,
-                                        lessonMediaUrl: localUrl,
-                                      }));
-                                    }
+                                    setNewCourseState((prev) => ({
+                                      ...prev,
+                                      isSimulatedUploading: false,
+                                      simulatedFileName: base.name,
+                                      lessonMediaUrl: localUrl,
+                                    }));
                                   }
                                 };
                                 reader.readAsDataURL(base);

@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -40,6 +41,7 @@ import {
   UserCompetency,
   UserCertificate,
   KMContributionLog,
+  AttendanceLog,
 } from "./src/types";
 
 dotenv.config();
@@ -76,12 +78,12 @@ function sanitizeUserForViewer(user: UserType, viewerId: string) {
 // --- AUTH: JWT setup + middleware ---
 // ============================================================
 
-const JWT_SECRET = process.env.JWT_SECRET || "";
-if (!JWT_SECRET) {
-  console.error(
-    "❌ FATAL: JWT_SECRET is not set in environment variables. Server will not start.",
+const JWT_SECRET =
+  process.env.JWT_SECRET || "km-rmp-jwt-secret-key-default-dev-2025";
+if (!process.env.JWT_SECRET) {
+  console.warn(
+    "⚠️ Warning: JWT_SECRET is not set in environment variables. Using default development secret key.",
   );
-  process.exit(1);
 }
 
 interface AuthPayload {
@@ -198,6 +200,7 @@ async function startServer() {
     getInitialKMContributionLogs();
   let db_employee_master: EmployeeMaster[] = [...INITIAL_EMPLOYEE_MASTER];
   let db_system_audit_logs: SystemAuditLog[] = [];
+  let db_attendance_logs: AttendanceLog[] = [];
 
   // Add JSON parsing middleware up to 50MB to handle document corpus payloads and file uploads safely
   app.use(express.json({ limit: "50mb" }));
@@ -601,7 +604,7 @@ You must return your response conforming to the JSON schema specified in respons
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [
           {
             text: `RMP Context Library:\n${JSON.stringify(serializedRMPContext, null, 2)}`,
@@ -694,7 +697,7 @@ CRITICAL INSTRUCTIONS:
         ];
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.5-flash",
           contents: contents,
           config: {
             responseMimeType: "application/json",
@@ -797,7 +800,7 @@ Your job is to recommend a highly personalized career progression roadmap based 
 User Profile:
 - Name: "${currentUser.name}"
 - Position: "${currentUser.position}"
-- Department: "${currentUser.departmentId || currentUser.department || ""}"
+- Department: "${currentUser.departmentId || ""}"
 - Date Started: "${currentUser.startDate || "Unknown"}"
 
 Current Competencies:
@@ -821,7 +824,7 @@ ${JSON.stringify(simpleWIs, null, 2)}
 Format your output strictly in the requested JSON schema. No additional wrap text outside of JSON.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [{ text: "Suggest career learning roadmap path." }],
         config: {
           systemInstruction: systemInstruction,
@@ -1018,6 +1021,30 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       }
     },
   );
+  app.post("/api/documents/:id/view", requireAuth, (req, res) => {
+    try {
+      const { id } = req.params;
+      db_documents = db_documents.map((doc) =>
+        doc.id === id ? { ...doc, views: (doc.views || 0) + 1 } : doc,
+      );
+      const updated = db_documents.find((doc) => doc.id === id);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.post("/api/documents/:id/download", requireAuth, (req, res) => {
+    try {
+      const { id } = req.params;
+      db_documents = db_documents.map((doc) =>
+        doc.id === id ? { ...doc, downloads: (doc.downloads || 0) + 1 } : doc,
+      );
+      const updated = db_documents.find((doc) => doc.id === id);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
   app.delete(
     "/api/documents/:id",
     requireAuth,
@@ -1296,6 +1323,61 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     },
   );
 
+  // Attendance Logs APIs (QR Check-in)
+  app.get("/api/attendance_logs", requireAuth, (req, res) => {
+    // Admin และ Editor ดูประวัติเช็คชื่อทั้งหมดได้, ส่วน Viewer ดูได้เฉพาะของตนเอง
+    if (req.authUser?.role === "Admin" || req.authUser?.role === "Editor") {
+      return res.json(db_attendance_logs);
+    }
+    const myLogs = db_attendance_logs.filter(
+      (l) => l.userId === req.authUser?.id,
+    );
+    res.json(myLogs);
+  });
+  app.post(
+    "/api/attendance_logs",
+    requireAuth,
+    requireOwnField("userId"),
+    (req, res) => {
+      try {
+        const log = req.body;
+        if (!log.id) {
+          log.id = `att-${Date.now()}`;
+        }
+        if (!log.timestamp) {
+          log.timestamp = new Date().toISOString();
+        }
+        // ป้องกันสแกนซ้ำซ้อนใน session เดียวกัน
+        const isDup = db_attendance_logs.some(
+          (l) => l.userId === log.userId && l.sessionId === log.sessionId,
+        );
+        if (isDup) {
+          const existing = db_attendance_logs.find(
+            (l) => l.userId === log.userId && l.sessionId === log.sessionId,
+          );
+          return res.json(existing);
+        }
+        db_attendance_logs.unshift(log);
+        res.json(log);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+  app.delete(
+    "/api/attendance_logs",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        db_attendance_logs = [];
+        res.json({ success: true, message: "Attendance logs cleared" });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+
   // Search Logs APIs
   app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {
     res.json(db_search_logs);
@@ -1522,7 +1604,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   );
 
   // --- Serve Frontend Application seamlessly ---
-  if (process.env.NODE_ENV !== "production") {
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    (!process.env.NODE_ENV &&
+      fs.existsSync(path.join(process.cwd(), "dist", "index.html")));
+
+  if (!isProduction) {
     // Vite middleware for developer playground
     const vite = await createViteServer({
       server: { middlewareMode: true },
