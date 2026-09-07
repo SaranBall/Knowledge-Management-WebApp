@@ -48,6 +48,7 @@ import {
   DocumentItem,
 } from "../types";
 import { getUserBadges } from "../utils/badgeUtils";
+import { api } from "../services/api";
 import { BadgePill, UserBadgesGrid } from "./BadgeDisplay";
 import { BadgeCertificateModal } from "./BadgeCertificateModal";
 import {
@@ -4008,12 +4009,35 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                       error,
                                     );
                                     const localUrl = URL.createObjectURL(base);
-                                    setNewCourseState((prev) => ({
-                                      ...prev,
-                                      isSimulatedUploading: false,
-                                      simulatedFileName: base.name,
-                                      lessonMediaUrl: localUrl,
-                                    }));
+
+                                    try {
+                                      // ใช้ api.uploadFile() เพื่อแนบ Auth Header อัตโนมัติ ป้องกันปัญหา 401 Unauthorized
+                                      const data = await api.uploadFile(
+                                        base.name,
+                                        base64String,
+                                        base.type || "application/octet-stream",
+                                      );
+
+                                      setNewCourseState((prev) => ({
+                                        ...prev,
+                                        isSimulatedUploading: false,
+                                        simulatedFileName: base.name,
+                                        lessonMediaUrl: data.url, // ใช้ URL จริงที่ได้จาก Server
+                                      }));
+                                    } catch (error) {
+                                      console.error(
+                                        "Upload error, using local object url fallback:",
+                                        error,
+                                      );
+
+                                      // Fallback ไปใช้ localUrl ชั่วคราวกรณี Server มีปัญหา
+                                      setNewCourseState((prev) => ({
+                                        ...prev,
+                                        isSimulatedUploading: false,
+                                        simulatedFileName: base.name,
+                                        lessonMediaUrl: localUrl,
+                                      }));
+                                    }
                                   }
                                 };
                                 reader.readAsDataURL(base);

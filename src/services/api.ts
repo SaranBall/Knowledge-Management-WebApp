@@ -62,6 +62,18 @@ export const api = {
       body: JSON.stringify({ employeeId, password }),
     }),
   getUsers: () => request<UserType[]>("/api/users"),
+  // Real file upload — ผูก Authorization header ให้อัตโนมัติผ่าน request()
+  // ต่างจากการยิง fetch() ตรงๆ ที่ไม่มี token แนบไป (บั๊กเดิมใน LearningCenter.tsx)
+  uploadFile: (
+    filename: string,
+    fileData: string, // base64 (ไม่รวม prefix "data:...;base64,")
+    mimeType: string,
+    restricted?: boolean,
+  ) =>
+    request<{ url: string; filename: string }>("/api/upload", {
+      method: "POST",
+      body: JSON.stringify({ filename, fileData, mimeType, restricted }),
+    }),
   createUser: (user: UserType) =>
     request<UserType>("/api/users", {
       method: "POST",

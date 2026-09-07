@@ -155,6 +155,16 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const [parsedEmployees, setParsedEmployees] = useState<EmployeeMaster[]>([]);
   const [showImportPreview, setShowImportPreview] = useState(false);
 
+  // --- Approve Employee (Employee Master → User) Modal State ---
+  // ต้องเลือกแผนกจริงก่อนสร้างบัญชี เพราะ emp.departmentId ที่มาจากไฟล์นำเข้า
+  // อาจเป็น free-text ที่แมปกับรหัสแผนกจริงในระบบไม่ได้ (ดู emp.isDeptResolved)
+  const [approvingEmployeeIdx, setApprovingEmployeeIdx] = useState<
+    number | null
+  >(null);
+  const [approveDeptId, setApproveDeptId] = useState<string>("");
+  const [approvePin, setApprovePin] = useState<string>("");
+  const [approveError, setApproveError] = useState<string>("");
+
   // Edit User Form State
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -635,6 +645,67 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
   const handleRoleChange = (userId: string, newRole: Role) => {
     onUpdateUserRole(userId, newRole);
+  };
+
+  const handleApproveEmployeeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setApproveError("");
+
+    if (approvingEmployeeIdx === null) return;
+    const emp = employeeMaster[approvingEmployeeIdx];
+    if (!emp) return;
+
+    if (!approveDeptId) {
+      setApproveError("⚠️ กรุณาเลือกแผนกจริงของพนักงานก่อนอนุมัติ");
+      return;
+    }
+
+    const cleanPin = approvePin.trim().replace(/\D/g, "");
+    if (cleanPin.length !== 6) {
+      setApproveError("❌ รหัสผ่านความปลอดภัย PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นค่ะ");
+      return;
+    }
+
+    let assignedRole: Role = "Viewer";
+    if (
+      emp.level.toLowerCase().includes("senior") ||
+      emp.position.toLowerCase().includes("engineer") ||
+      emp.position.toLowerCase().includes("supervisor")
+    ) {
+      assignedRole = "Editor";
+    }
+
+    const createdUser: User = {
+      id: `usr-${Date.now()}`,
+      name: emp.name,
+      employeeId: emp.employeeId,
+      departmentId: approveDeptId, // ← เลือกจริงจาก modal แทนการ hardcode
+      position: emp.position,
+      role: assignedRole,
+      email:
+        emp.email || `${emp.employeeId.toLowerCase()}@royalmeiwa.co.th`,
+      phone: emp.phone || "02-1234567",
+      password: cleanPin,
+      avatarUrl: DEFAULT_AVATAR_URL,
+      startDate: emp.startDate,
+    };
+    onAddUser(createdUser);
+
+    const updatedMaster = employeeMaster.map((item, i) =>
+      i === approvingEmployeeIdx
+        ? { ...item, status: "Registered" as const }
+        : item,
+    );
+    onUpdateEmployeeMaster(updatedMaster);
+
+    alert(
+      `🎉 อนุมัติสิทธิ์และเปิดบัญชีให้คุณ "${emp.name}" (ID: ${emp.employeeId}) สำเร็จ!\nแผนก: ${getDepartmentById(approveDeptId)?.name || approveDeptId} | PIN: ${cleanPin}`,
+    );
+
+    setApprovingEmployeeIdx(null);
+    setApproveDeptId("");
+    setApprovePin("");
+    setApproveError("");
   };
 
   // Helper competency matrix lists
@@ -3195,63 +3266,17 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const customPin = window.prompt(
-                                        `🔒 กำหนดรหัสผ่านสำหรับการอนุมัติเปิดบัญชีเข้าสู่ระบบ (PIN ตัวเลข 6 หลัก) ของคุณ ${emp.name}:`,
-                                        "123456",
+                                      // เปิด modal ให้เลือกแผนกจริงก่อนสร้างบัญชีเสมอ
+                                      // ถ้าตอน import ระบบ auto-match แผนกได้แล้ว (isDeptResolved)
+                                      // ให้ prefill ไว้ แต่ Admin ยังต้องกดยืนยันผ่าน modal นี้อยู่ดี
+                                      setApprovingEmployeeIdx(idx);
+                                      setApproveDeptId(
+                                        emp.isDeptResolved
+                                          ? emp.departmentId
+                                          : "",
                                       );
-                                      if (customPin === null) return;
-                                      const cleanPin = customPin
-                                        .trim()
-                                        .replace(/\D/g, "");
-                                      if (cleanPin.length !== 6) {
-                                        alert(
-                                          "❌ รหัสผ่านความปลอดภัย PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นค่ะ",
-                                        );
-                                        return;
-                                      }
-                                      let assignedRole: Role = "Viewer";
-                                      if (
-                                        emp.level
-                                          .toLowerCase()
-                                          .includes("senior") ||
-                                        emp.position
-                                          .toLowerCase()
-                                          .includes("engineer") ||
-                                        emp.position
-                                          .toLowerCase()
-                                          .includes("supervisor")
-                                      ) {
-                                        assignedRole = "Editor";
-                                      }
-                                      const createdUser: User = {
-                                        id: `usr-${Date.now()}`,
-                                        name: emp.name,
-                                        employeeId: emp.employeeId,
-                                        departmentId: "ระบุแผนก", // ⚠️ ชั่วคราว — emp.department เป็น free-text จากไฟล์นำเข้า แมปอัตโนมัติไม่ได้ ควรทำ modal ให้เลือกแผนกจริงก่อน (แนะนำทำต่อ)
-                                        position: emp.position,
-                                        role: assignedRole,
-                                        email:
-                                          emp.email ||
-                                          `${emp.employeeId.toLowerCase()}@royalmeiwa.co.th`,
-                                        phone: emp.phone || "02-1234567",
-                                        password: cleanPin,
-                                        avatarUrl: DEFAULT_AVATAR_URL,
-                                        startDate: emp.startDate,
-                                      };
-                                      onAddUser(createdUser);
-                                      const updatedMaster = employeeMaster.map(
-                                        (item, i) =>
-                                          i === idx
-                                            ? {
-                                                ...item,
-                                                status: "Registered" as const,
-                                              }
-                                            : item,
-                                      );
-                                      onUpdateEmployeeMaster(updatedMaster);
-                                      alert(
-                                        `🎉 อนุมัติสิทธิ์และเปิดบัญชีให้คุณ "${emp.name}" (ID: ${emp.employeeId}) สำเร็จด้วย PIN: ${cleanPin}!\n⚠️ กรุณาเข้าไปแก้ไขแผนกที่ถูกต้องในหน้าจัดการสมาชิกภายหลัง`,
-                                      );
+                                      setApprovePin("123456");
+                                      setApproveError("");
                                     }}
                                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-2.5 py-1 rounded-lg cursor-pointer transition flex items-center gap-1 shrink-0 shadow-xs"
                                     title="อนุมัติเปิดสิทธิ์ใช้งานระบบแบบทันที"
@@ -3290,6 +3315,142 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             </div>
           </div>
         ))}
+
+      {/* APPROVE EMPLOYEE MODAL — เลือกแผนกจริง + กำหนด PIN ก่อนเปิดบัญชี */}
+      {approvingEmployeeIdx !== null &&
+        employeeMaster[approvingEmployeeIdx] && (
+          <div className="fixed inset-0 bg-slate-900/60 overflow-y-auto flex items-start sm:items-center justify-center p-4 sm:p-6 md:p-10 z-50 animate-fade-in">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden flex flex-col my-auto">
+              <div className="bg-emerald-700 text-white p-4.5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-white" />
+                  <h3 className="font-extrabold text-sm">
+                    อนุมัติเปิดบัญชี:{" "}
+                    {employeeMaster[approvingEmployeeIdx].name}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApprovingEmployeeIdx(null);
+                    setApproveError("");
+                  }}
+                  className="text-white hover:text-slate-200 font-bold font-mono text-xs px-2 py-1 rounded hover:bg-white/10 cursor-pointer"
+                >
+                  ปิด
+                </button>
+              </div>
+
+              <form
+                onSubmit={handleApproveEmployeeSubmit}
+                className="p-6 space-y-4"
+              >
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-150 text-[11px] text-slate-500 space-y-0.5">
+                  <p>
+                    รหัสพนักงาน:{" "}
+                    <strong className="text-slate-800 font-mono">
+                      {employeeMaster[approvingEmployeeIdx].employeeId}
+                    </strong>
+                  </p>
+                  <p>
+                    ตำแหน่ง:{" "}
+                    <strong className="text-slate-800">
+                      {employeeMaster[approvingEmployeeIdx].position}
+                    </strong>
+                  </p>
+                  {!employeeMaster[approvingEmployeeIdx].isDeptResolved && (
+                    <p className="text-amber-600 font-bold pt-1">
+                      ⚠️ ระบบไม่สามารถจับคู่แผนกจากไฟล์นำเข้าได้อัตโนมัติ (
+                      {employeeMaster[approvingEmployeeIdx].departmentId ||
+                        "ไม่ระบุ"}
+                      ) กรุณาเลือกแผนกจริงด้านล่างด้วยตนเอง
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 block">
+                    แผนกจริงในระบบ (Department): <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={approveDeptId}
+                    onChange={(e) => setApproveDeptId(e.target.value)}
+                    required
+                    className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs focus:ring-1 focus:ring-emerald-600"
+                  >
+                    <option value="">-- กรุณาเลือกแผนก --</option>
+                    {getMainDepartments().map((dept) => {
+                      const subs = getSubDepartments(dept.id);
+                      if (subs.length === 0) {
+                        return (
+                          <option key={dept.id} value={dept.id}>
+                            {dept.name} ({dept.code})
+                          </option>
+                        );
+                      }
+                      return (
+                        <optgroup
+                          key={dept.id}
+                          label={`${dept.name} (${dept.code})`}
+                        >
+                          <option value={dept.id}>
+                            — {dept.name} (ส่วนกลาง)
+                          </option>
+                          {subs.map((sub) => (
+                            <option key={sub.id} value={sub.id}>
+                              　└ {sub.name} ({sub.code})
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 block">
+                    กำหนดรหัสผ่าน PIN (6 หลัก):
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    pattern="\d*"
+                    value={approvePin}
+                    onChange={(e) =>
+                      setApprovePin(e.target.value.replace(/\D/g, ""))
+                    }
+                    className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-center text-lg font-mono font-black tracking-widest text-emerald-700 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                  />
+                </div>
+
+                {approveError && (
+                  <p className="text-[11px] text-rose-600 font-medium bg-rose-50 p-2.5 rounded-xl border border-rose-100 leading-normal">
+                    {approveError}
+                  </p>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setApprovingEmployeeIdx(null);
+                      setApproveError("");
+                    }}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg text-xs cursor-pointer"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2 rounded-lg text-xs cursor-pointer transition shadow"
+                  >
+                    ยืนยันอนุมัติและเปิดบัญชี
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
       {/* ADMIN EXCLUSIVE: Add new Member Modal Dialog */}
       {isAddOpen && (
