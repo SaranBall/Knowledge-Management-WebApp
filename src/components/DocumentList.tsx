@@ -1301,11 +1301,13 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => {
-                      onUpdateDocument({
-                        ...selectedDoc,
-                        views: selectedDoc.views + 1,
-                      });
+                    onClick={async () => {
+                      try {
+                        const updated = await api.viewDocument(selectedDoc.id);
+                        onUpdateDocument(updated);
+                      } catch (err) {
+                        console.error("Failed to record view count:", err);
+                      }
                       setIsSecureViewerOpen(true);
                     }}
                     className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition text-[11px] shadow-xs hover:shadow-sm"
@@ -1346,11 +1348,18 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                             href={selectedDoc.realFileUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            onClick={() => {
-                              onUpdateDocument({
-                                ...selectedDoc,
-                                downloads: selectedDoc.downloads + 1,
-                              });
+                            onClick={async () => {
+                              try {
+                                const updated = await api.downloadDocument(
+                                  selectedDoc.id,
+                                );
+                                onUpdateDocument(updated);
+                              } catch (err) {
+                                console.error(
+                                  "Failed to record download count:",
+                                  err,
+                                );
+                              }
                             }}
                             className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition text-[10px] uppercase shrink-0 font-sans"
                           >
@@ -1374,7 +1383,15 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               {selectedDoc.type === "QP" && (
                 <button
                   type="button"
-                  onClick={() => setIsSecureViewerOpen(true)}
+                  onClick={async () => {
+                    try {
+                      const updated = await api.viewDocument(selectedDoc.id);
+                      onUpdateDocument(updated);
+                    } catch (err) {
+                      console.error("Failed to record view count:", err);
+                    }
+                    setIsSecureViewerOpen(true);
+                  }}
                   className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition text-[10px] cursor-pointer border border-slate-200"
                 >
                   <Eye className="w-3.5 h-3.5" />
