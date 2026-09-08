@@ -24,8 +24,6 @@ import {
   ShieldAlert,
   ZoomIn,
   ZoomOut,
-  ChevronLeft,
-  ChevronRight,
   X,
 } from "lucide-react";
 import { DocumentItem, DocType, User, RatingAndComment } from "../types";
@@ -149,342 +147,6 @@ export const autoTagDocumentType = (title: string): DocType => {
   return "QP";
 };
 
-/**
- * Generates highly realistic and authentic Quality Procedure document content
- * for Royal Meiwa Pax Co., Ltd. standards.
- */
-const getSecureQPContent = (docId: string, docTitle: string) => {
-  if (docId === "doc-1") {
-    return {
-      docNo: "QP-PUR-001",
-      title:
-        "ขั้นตอนการจัดซื้อวัตถุดิบและพลาสติกคอมพาวด์ (Raw Materials Procurement)",
-      purpose:
-        "เพื่อกำหนดกรอบขั้นตอนและวิธีปฏิบัติงานในการสำรวจราคา จัดหา คัดเลือกคู่ค้าสั่งซื้อเม็ดพลาสติก สารเติมแต่ง และส่วนผสมต่างๆ ให้มีความถูกต้องเหมาะสม โปร่งใส ได้คุณภาพตามสเปก และสอดคล้องตามเกณฑ์มาตรฐานสากล ISO 9001:2015",
-      scope:
-        "ขอบเขตงานตั้งแต่ฝ่ายวางแผนหรือฝ่ายผลิตจัดทำใบขอซื้อ (Purchase Requisition - PR) การเปรียบเทียบข้อเสนอราคา การเจรจาต่อรอง การเสนอพิจารณาพับลิชอนุมัติในระบบ ตลอดจนการออกเอกสารใบสั่งซื้อ (Purchase Order - PO) และการประสานงานจัดส่งตรวจสอบรับเข้าโดยฝ่ายควบคุมคุณภาพ คลังสินค้า บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด",
-      definitions: [
-        {
-          term: "AVL (Approved Vendor List)",
-          definition:
-            "ทำเนียบรายชื่อคู่ค้าที่ผ่านการรับรองและตรวจประเมินคุณภาพโดยคณะกรรมการคุมเอกสาร RMP",
-        },
-        {
-          term: "PR (Purchase Requisition)",
-          definition:
-            "เอกสารขออนุมัติจัดซื้อสินค้าจากหน่วยงานภายในที่ได้รับการตรวจพิจารณาเบื้องต้น",
-        },
-        {
-          term: "PO (Purchase Order)",
-          definition:
-            "เอกสารยืนยันสั่งซื้อที่เป็นทางการ ออกโดยฝ่ายจัดซื้อส่งผู้ค้า เพื่อใช้เป็นหลักฐานรับเข้าคลังสินค้า",
-        },
-      ],
-      steps: [
-        {
-          id: "1.0",
-          action:
-            "ฝ่ายผลิต/คลังสินค้าคำนวณและเสนอใบขอซื้อ PR เมื่อวัตถุดิบลดลงถึงเกณฑ์ Reorder Point",
-          resp: "เจ้าหน้าที่วางแผน / คุมคลังสินค้า",
-          ref: "เช็คลิสต์ตรวจความต้องการเม็ดพลาสติกประจำสัปดาห์",
-        },
-        {
-          id: "2.0",
-          action:
-            "ฝ่ายจัดซื้อตรวจสอบรหัส AVL และส่งขอใบเสนอราคา (RFQ) เทียบเคียงอย่างน้อย 3 คู่ค้า",
-          resp: "พนักงานจัดซื้อ",
-          ref: "Request for Quote (RFQ) Form",
-        },
-        {
-          id: "3.0",
-          action:
-            "จัดทำตารางเปรียบเทียบราคา สเปกสินค้า เงื่อนไขการชำระเงิน และระยะเวลาการส่งมอบ",
-          resp: "พนักงานจัดซื้อ",
-          ref: "แบบฟอร์ม Sourcing & Comparison Matrix",
-        },
-        {
-          id: "4.0",
-          action:
-            "เสนอผู้บริหารพิจารณาลงนามอนุมัติตามพิกัดวงเงินและระดับความสำคัญผู้ใช้งาน",
-          resp: "Managing Director (คุณก้อย)",
-          ref: "เอกสารสั่งจัดซื้อพิเศษตามแผนงาน",
-        },
-        {
-          id: "5.0",
-          action:
-            "ออกใบสั่งซื้อ PO จากระบบพร้อมส่งให้ผู้จำหน่ายลงนามยืนยัน และโอนบันทึกเตรียมรับเข้าคลัง",
-          resp: "พนักงานจัดซื้อ",
-          ref: "Purchase Order (PO)",
-        },
-      ],
-      references: [
-        "WI-QC-205 มาตรฐานตรวจรับเม็ดพลาสติก",
-        "FM-PUR-05 ใบเปรียบเทียบราคาคู่ค้า",
-      ],
-      history: [
-        {
-          rev: 1,
-          date: "2021-05-10",
-          change: "จัดตั้งระเบียบปฏิบัติฉบับแรกสำหรับ ISO9001:2015",
-          author: "ผู้บริหารระบบคุณภาพ",
-        },
-        {
-          rev: 2,
-          date: "2023-08-14",
-          change:
-            "ปรับปรุงเกณฑ์ AVL และเปลี่ยนเกณฑ์การขอใบเสนอราคาขั้นต่ำเป็น 3 ราย",
-          author: "สิริมา แสงสะอาด",
-        },
-        {
-          rev: 3,
-          date: "2025-01-15",
-          change:
-            "อัพเดตกระบวนการและกำหนดสิทธิ์ผู้พิจารณาอนุมัติสั่งจัดซื้อผ่านระบบออนไลน์",
-          author: "สิริมา แสงสะอาด (คุณก้อย)",
-        },
-      ],
-    };
-  }
-
-  if (docId === "doc-2") {
-    return {
-      docNo: "QP-PRD-001",
-      title:
-        "มาตรฐานควบคุมกระบวนการขึ้นรูปฟิล์มเป่าและลามิเนต (Film Blowing & Laminating)",
-      purpose:
-        "เพื่อควบคุมพารามิเตอร์ กระบวนการผลิต และอุณหภูมิของเม็ดพลาสติกหลอมเหลวระหว่างเดินเครื่องเป่าฟิล์ม (Co-Extrusion Film Blowing) และเดินระบบเครื่องลามิเนตแบบไร้ตัวทำละลาย ให้คงความสม่ำเสมอ ลดของเสีย และตรงตามเป้าหมายของคู่ค้าบรรจุภัณฑ์อาหารปลอดภัย",
-      scope:
-        "ครอบคลุมตั้งแต่ขั้นตอนการรับตรวจสอบสภาพหัวแม่พิมพ์ การตักป้อนเม็ดสูตร LDPE/HDPE การตั้งอุณหภูมิ Barrel และเกลียวรีด การควบคุมความหนา ความกว้างของหน้าฟิล์ม ตลอดจนการโอนย้ายม้วนจัมโบ้ไปประกบกาว ณ พื้นที่ปฏิบัติงานผลิต RMP",
-      definitions: [
-        {
-          term: "BUR (Blow-up Ratio)",
-          definition:
-            "อัตราส่วนการขยายขนาดของฟองลมฟิล์มพลาสติกเทียบกับหน้าสัมผัสของ Die Diameter",
-        },
-        {
-          term: "Frost Line",
-          definition:
-            "เส้นแนวระเหยเปลี่ยนสถานะซึ่งฟิล์มพลาสติกเริ่มเปลี่ยนรูปจากสภาวะหลอมเหลวเป็นรูปทรงแข็งตัว",
-        },
-        {
-          term: "Lamination",
-          definition:
-            "การเชื่อมประกบเนื้อฟิล์มต่างคุณสมบัติเข้าด้วยกันเพื่อต้านความชื้นและเพิ่มความทนทานสัมผัส",
-        },
-      ],
-      steps: [
-        {
-          id: "1.0",
-          action:
-            "ตรวจอุปกรณ์ และทำความสะอาดรอบปากดายน์ ป้องกันจุดไหม้ดำ (Die Lines) ที่ส่งผลต่อฟิล์ม",
-          resp: "พนักงานผู้เดินเครื่องเป่าฟิล์ม",
-          ref: "เช็คลิสต์ตรวจเช็คหน้าเครื่องจักรรายรอบกะ",
-        },
-        {
-          id: "2.0",
-          action:
-            "ผสมเม็ดพลาสติกและสี/สารเติมแต่งพิเศษตามอัตราส่วนเปอร์เซ็นต์ในใบสั่งสูตรการผลิตที่กำหนด",
-          resp: "ช่างเทคนิคตักป้อนวัตถุดิบ",
-          ref: "ใบสูตรผสมวัตถุดิบควบคุม (Recipe Sheet)",
-        },
-        {
-          id: "3.0",
-          action:
-            "ตั้งอุณหภูมิกระบอกสูบ (Barrel Zone 1 - 4) ตามช่วงที่กำหนด 165°C - 190°C รออุณหภูมิเสถียร 30 นาที",
-          resp: "ช่างเทคนิคควบคุมเครื่องจักร",
-          ref: "หน้าจอควบคุมอุณหภูมิระบบดิจิทัล",
-        },
-        {
-          id: "4.0",
-          action:
-            "เริ่มกระบวนการเป่าดึงฟองฟิล์ม ตรวจวัดค่าความหนา และระดับแรงตึงผิวสารโคโรน่าเพื่อการติดกาว",
-          resp: "ช่างเทคนิคควบคุมเครื่องจักร",
-          ref: "แบบบันทึกผลการผลิตและสุ่มขนาด (In-process QC)",
-        },
-        {
-          id: "5.0",
-          action:
-            "บันทึกความตึงของการม้วนเก็บ และคัดแยกติดแท็กป้ายบาร์โค้ดประจำม้วนส่งเข้าสโตร์รับถัดไป",
-          resp: "พนักงานแพ็คเกจจิ้งสายผลิต",
-          ref: "แบบบันทึกประวัติการผลิตรายวัน (Daily Log)",
-        },
-      ],
-      references: [
-        "WI-PRD-102 การตั้งเครื่องจักรเป่าฟิล์ม",
-        "FM-PRD-12 รายงานปริมาณผลผลิตรายกะ",
-      ],
-      history: [
-        {
-          rev: 1,
-          date: "2020-04-18",
-          change: "จัดตั้งมาตรฐานเริ่มแรกสำหรับสายเป่าฟิล์มเดี่ยว",
-          author: "สมชาย รักเรียน",
-        },
-        {
-          rev: 2,
-          date: "2022-10-12",
-          change: "เพิ่มขอบเขตการทำงานร่วมกับเครื่องจักรลามิเนต 3 ชั้น",
-          author: "สมชาย รักเรียน",
-        },
-        {
-          rev: 3,
-          date: "2023-11-05",
-          change:
-            "ปรับปรุงพารามิเตอร์อุณหภูมิสำหรับสูตรฟิล์ม Food Grade บรรจุภัณฑ์สุญญากาศ",
-          author: "สมชาย รักเรียน (ช่างสมชาย)",
-        },
-        {
-          rev: 4,
-          date: "2025-02-20",
-          change:
-            "เพิ่มขั้นตอนการวัดโคโรน่าทรีตเมนต์และการปรับความตึงม้วน (Tension Control) หน้าเครื่องลามิเนต",
-          author: "สมชาย รักเรียน (ช่างสมชาย)",
-        },
-      ],
-    };
-  }
-
-  if (docId === "doc-3") {
-    return {
-      docNo: "QP-QC-001",
-      title:
-        "การควบคุมคุณภาพการรับวัตถุดิบและการสุ่มตรวจเม็ดพลาสติก (Incoming Quality Control)",
-      purpose:
-        "เพื่อกำหนดแนวทางการสุ่มเก็บตัวอย่าง ตรวจประเมิน และตรวจสอบคุณสมบัติกายภาพรวมถึงอัตราการหลอมไหลของพลาสติก (Melt Flow Index) และระดับความชื้นสะสม ป้องกันการปนเปื้อนความเสียหายของเม็ดพลาสติกก่อนส่งจ่ายเข้าระบบผลิต",
-      scope:
-        "ครอบคลุมเจ้าหน้าที่ฝ่ายตรวจสอบคุณภาพ คลังสินค้าในการสกัดสุ่มเก็บตัวอย่างจากถุงบรรจุขนาดใหญ่ (Jumbo Bag) ทุกคู่ค้าตามระดับมาตรฐานสุ่มตัวอย่าง MIL-STD-105E ระดับ II ณ จุดพักคัดแยกรับวัตถุดิบ RMP",
-      definitions: [
-        {
-          term: "MFI (Melt Flow Index)",
-          definition:
-            "ดัชนีการไหลของพลาสติกเหลวภายใต้แรงกดดันและอุณหภูมิควบคุม เพื่อทดสอบคุณสมบัติความเหนียวของพอลิเมอร์",
-        },
-        {
-          term: "MIL-STD-105E",
-          definition:
-            "มาตรฐานการสุ่มตัวอย่างระดับสากล เพื่อตัดสินว่าควรปฏิเสธหรืออนุมัติรับเข้าผลิตภัณฑ์ในล็อตนั้นๆ",
-        },
-        {
-          term: "NCR (Non-Conformance Report)",
-          definition:
-            "ใบแจ้งของบกพร่องกรณีตรวจสอบสินค้าพบค่าไม่อยู่ในมาตรฐาน เพื่อยื่นเรื่องให้ผู้ขายตรวจสอบชี้แจงแก้ไข",
-        },
-      ],
-      steps: [
-        {
-          id: "1.0",
-          action:
-            "ตรวจสอบความถูกต้องของใบส่งสินค้า เอกสารสลากข้างถุง และเช็คใบ COA จากผู้ค้าให้ตรงตามมาตรฐาน",
-          resp: "พนักงานคลังสินค้า / เจ้าหน้าที่สุ่มตรวจ",
-          ref: "Delivery Slip & Cert. of Analysis (COA)",
-        },
-        {
-          id: "2.0",
-          action:
-            "สุ่มเก็บตัวอย่างจากส่วนต่างๆ ของล็อตด้วยกระบอกเก็บแบบแหลมตามเกณฑ์ตาราง MIL-STD-105E",
-          resp: "เจ้าหน้าที่ตรวจสอบคุณภาพ QC",
-          ref: "ตารางแผนการสุ่มตัวอย่างมาตรฐานทั่วไป",
-        },
-        {
-          id: "3.0",
-          action:
-            "นำตัวอย่างเข้าทำการทดสอบหาค่าความชื้น และเปรียบเทียบค่าพิกัดการไหล MFI สเปกหน้าเอกสารควบคุม",
-          resp: "ช่างแล็บวิเคราะห์คุณภาพกลาง",
-          ref: "เครื่องทดสอบการไหลพลาสติก และเครื่องอบตรวจความชื้น",
-        },
-        {
-          id: "4.0",
-          action:
-            "บันทึกผลลงชีตรายงานรับเข้า หากเกิดความบกพร่องนอกขอบเขต ให้ดำเนินการออกเอกสารออกใบ NCR แก่จัดซื้อ",
-          resp: "ผู้บริหารตรวจสอบคุณภาพ",
-          ref: "NCR Log / ระบบรายงานของเสียควบคุม",
-        },
-        {
-          id: "5.0",
-          action:
-            'ดำเนินการติดป้ายระบุสถานะ "PASS" สีเขียว หรือ "REJECT" สีแดง พร้อมระบุเลขที่ตรวจเช็คโอนส่งคลังจัดวาง',
-          resp: "เจ้าหน้าที่ควบคุมคุณภาพ QC",
-          ref: "ฉลากคุมสถานะผ่าน QC (QA Status Tag)",
-        },
-      ],
-      references: [
-        "WI-QC-205 มาตรฐานวัดความชื้นด้วยเครื่อง Moisture Tester",
-        "FM-QC-05 เช็คลิสต์ตรวจสอบวัตถุดิบขาเข้า",
-      ],
-      history: [
-        {
-          rev: 1,
-          date: "2022-02-14",
-          change: "จัดตั้งคู่มือมาตรฐานคุมรับเข้าแบบสุ่มตัวอย่างทั่วไป",
-          author: "ดารินทร์ แซ่ตั้ง",
-        },
-        {
-          rev: 2,
-          date: "2025-03-01",
-          change:
-            "ปรับเกณฑ์การจำกัดความชื้นขั้นสูงสุดของเม็ดพลาสติก LDPE เป็นไม่เกิน 0.05% และเพิ่มขั้นตอนสุ่มตัวอย่างระดับเข้มงวดเมื่อพบคู่ค้าประวัติบกพร่อง",
-          author: "ดารินทร์ แซ่ตั้ง (คุณหญิง)",
-        },
-      ],
-    };
-  }
-
-  // Fallback for custom uploaded documents
-  const prefix = docTitle.split(" ")[0] || "QP-GEN-999";
-  return {
-    docNo: prefix.includes("-")
-      ? prefix
-      : `QP-${prefix.substring(0, 4).toUpperCase()}-999`,
-    title: docTitle,
-    purpose: `วัตถุประสงค์เพื่อรักษามาตรฐานการปฏิบัติงานและกำหนดระเบียบขั้นตอนสำหรับดูแลหัวข้อการดำเนินงานเรื่อง "${docTitle}" ให้ได้ความถูกต้อง ปลอดภัยสูงสุด และสอดคล้องกับระเบียบควบคุมของโรงงาน`,
-    scope: `ขอบเขตงานครอบคลุมผู้รับผิดชอบ ช่างเทคนิค ผู้ปฏิบัติการสายการผลิต และผู้เกี่ยวข้องในแผนกต่างๆ ในการปฏิบัติตามแนวทาง ตรวจสอบพารามิเตอร์ และควบคุมคุณภาพให้ได้เกณฑ์สากลของ บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด`,
-    definitions: [
-      {
-        term: "Standard Practice",
-        definition:
-          "ระเบียบหรือแนวทางการทำงานที่ดีที่สุดที่ผ่านการทบทวนรับรองโดยทีม ISO",
-      },
-      {
-        term: "Audit Evidence",
-        definition:
-          "เอกสารหรือหลักฐานที่ใช้พิสูจน์การทำงานจริงต่อคณะผู้ตรวจรับรองระบบคุณภาพ",
-      },
-    ],
-    steps: [
-      {
-        id: "1.0",
-        action:
-          "เตรียมเครื่องมือ อุปกรณ์ตรวจสอบ และแต่งกายด้วยอุปกรณ์คุ้มภัยส่วนบุคคล (PPE) ให้เรียบร้อยถูกต้อง",
-        resp: "พนักงานผู้สวมหน้ากากหน้างาน",
-        ref: "เช็คลิสต์เครื่องแต่งกายและความปลอดภัยทั่วไป",
-      },
-      {
-        id: "2.0",
-        action:
-          "เริ่มตั้งค่า คัดแยก หรือเตรียมแนวทางวิเคราะห์พารามิเตอร์ควบคุมตามมาตรฐานรายละเอียดที่ระบุ",
-        resp: "ช่างควบคุมสายงานผลิต",
-        ref: "ตารางพารามิเตอร์ของระบบงานที่เกี่ยวข้อง",
-      },
-      {
-        id: "3.0",
-        action:
-          "บันทึกค่าที่ได้จากการวัด คีย์ลงระบบออนไลน์ หรือประมวลผลนำเสนอแอดมินหรือหัวหน้ากะเพื่อตรวจสอบรับรอง",
-        resp: "พนักงานผู้รับผิดชอบหลัก",
-        ref: "รายงานบันทึกประวัติการเดินเครื่องจักรและของเสีย",
-      },
-    ],
-    references: ["WI-GEN-101 มาตรฐานงานทั่วไป", "FM-GEN-01 แบบบันทึกความรู้"],
-    history: [
-      {
-        rev: 1,
-        date: "2026-06-24",
-        change: "สร้างและพับลิชเอกสารระเบียบปฏิบัติมาตรฐานโดยผู้ใช้เข้าระบบ",
-        author: "ผู้ดูแลระบบควบคุมเอกสาร RMP",
-      },
-    ],
-  };
-};
-
 export const DocumentList: React.FC<DocumentListProps> = ({
   currentUser,
   documents,
@@ -501,7 +163,6 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
   // Security controls inside the portal viewer
   const [isSecureViewerOpen, setIsSecureViewerOpen] = useState(false);
-  const [secureViewerPage, setSecureViewerPage] = useState(1);
   const [secureViewerZoom, setSecureViewerZoom] = useState(100);
   const [securityNotice, setSecurityNotice] = useState<string | null>(null);
 
@@ -2255,10 +1916,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     <div className="flex justify-between">
                       <span className="text-slate-500">รหัสเอกสาร:</span>
                       <span className="font-mono text-white font-semibold">
-                        {
-                          getSecureQPContent(selectedDoc.id, selectedDoc.title)
-                            .docNo
-                        }
+                        {selectedDoc.title.split(" ")[0] || "ไม่ระบุรหัส"}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -2355,16 +2013,10 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                       </div>
                       <div className="text-right shrink-0">
                         <span className="block font-mono font-bold text-xs text-slate-800">
-                          {
-                            getSecureQPContent(
-                              selectedDoc.id,
-                              selectedDoc.title,
-                            ).docNo
-                          }
+                          {selectedDoc.title.split(" ")[0] || "ไม่ระบุรหัส"}
                         </span>
                         <span className="block text-[9px] text-slate-400 font-mono">
-                          Rev. {selectedDoc.revision} • Page {secureViewerPage}{" "}
-                          of 2
+                          Rev. {selectedDoc.revision}
                         </span>
                       </div>
                     </div>
@@ -2672,179 +2324,16 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                         </div>
                       </div>
                     ) : (
-                      // TYPE 4: PRELOADED PDF / CUSTOM DETAILED QUALITY MANUAL VIEW
-                      <div className="space-y-6">
-                        {/* Page 1 of simulated PDF */}
-                        {secureViewerPage === 1 ? (
-                          <div className="space-y-5">
-                            {/* Metadata Table */}
-                            <div className="border border-slate-300 rounded-lg overflow-hidden">
-                              <table className="w-full text-[10.5px] border-collapse">
-                                <tbody>
-                                  <tr className="border-b border-slate-200">
-                                    <td className="p-2.5 bg-slate-100 font-bold border-r border-slate-200 w-32">
-                                      ขอบเขตบังคับใช้:
-                                    </td>
-                                    <td className="p-2.5">
-                                      {
-                                        getSecureQPContent(
-                                          selectedDoc.id,
-                                          selectedDoc.title,
-                                        ).scope
-                                      }
-                                    </td>
-                                  </tr>
-                                  <tr>
-                                    <td className="p-2.5 bg-slate-100 font-bold border-r border-slate-200 w-32">
-                                      วัตถุประสงค์งาน:
-                                    </td>
-                                    <td className="p-2.5">
-                                      {
-                                        getSecureQPContent(
-                                          selectedDoc.id,
-                                          selectedDoc.title,
-                                        ).purpose
-                                      }
-                                    </td>
-                                  </tr>
-                                </tbody>
-                              </table>
-                            </div>
-
-                            {/* Section 1.0 - Definitions */}
-                            <div>
-                              <h3 className="font-extrabold text-xs text-slate-900 border-b border-slate-300 pb-1.5 uppercase tracking-wider mb-2">
-                                1.0 คำจำกัดความ (Definitions & Standard Terms)
-                              </h3>
-                              <div className="space-y-2">
-                                {getSecureQPContent(
-                                  selectedDoc.id,
-                                  selectedDoc.title,
-                                ).definitions.map((def: any, idx: number) => (
-                                  <div
-                                    key={idx}
-                                    className="pl-4 border-l-2 border-slate-300"
-                                  >
-                                    <span className="font-bold text-slate-800 font-mono text-[11px] block">
-                                      {idx + 1}. {def.term}
-                                    </span>
-                                    <p className="text-[10.5px] text-slate-600 mt-0.5">
-                                      {def.definition}
-                                    </p>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Section 2.0 - General Guideline */}
-                            <div>
-                              <h3 className="font-extrabold text-xs text-slate-900 border-b border-slate-300 pb-1.5 uppercase tracking-wider mb-2">
-                                2.0 ข้อมูลอ้างอิงทั่วไป (General Audited
-                                References)
-                              </h3>
-                              <div className="flex flex-wrap gap-2">
-                                {getSecureQPContent(
-                                  selectedDoc.id,
-                                  selectedDoc.title,
-                                ).references.map((ref: string, idx: number) => (
-                                  <span
-                                    key={idx}
-                                    className="bg-slate-100 text-slate-700 font-mono font-semibold px-2.5 py-1 rounded text-[10px] border border-slate-200"
-                                  >
-                                    {ref}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          // Page 2 of simulated PDF
-                          <div className="space-y-5">
-                            {/* Section 3.0 - Action Steps table */}
-                            <div>
-                              <h3 className="font-extrabold text-xs text-slate-900 border-b border-slate-300 pb-1.5 uppercase tracking-wider mb-3">
-                                3.0 ขั้นตอนการดำเนินงานอย่างละเอียด (Standard
-                                Process Steps)
-                              </h3>
-                              <div className="border border-slate-300 rounded-lg overflow-hidden">
-                                <table className="w-full text-[10.5px] text-left border-collapse">
-                                  <thead>
-                                    <tr className="bg-slate-100 border-b border-slate-300 font-bold text-slate-700">
-                                      <th className="p-2 border-r border-slate-200 text-center w-12 font-mono">
-                                        Step
-                                      </th>
-                                      <th className="p-2 border-r border-slate-200">
-                                        รายละเอียดระเบียบปฏิบัติ (Action
-                                        Details)
-                                      </th>
-                                      <th className="p-2 border-r border-slate-200 w-36">
-                                        ผู้รับผิดชอบ (Role)
-                                      </th>
-                                      <th className="p-2 w-36">
-                                        เอกสารแนบอ้างอิง
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {getSecureQPContent(
-                                      selectedDoc.id,
-                                      selectedDoc.title,
-                                    ).steps.map((step: any, idx: number) => (
-                                      <tr
-                                        key={idx}
-                                        className="border-b border-slate-200 last:border-0 hover:bg-slate-50"
-                                      >
-                                        <td className="p-2 border-r border-slate-200 font-mono text-center font-bold text-slate-800">
-                                          {step.id}
-                                        </td>
-                                        <td className="p-2 border-r border-slate-200 leading-relaxed text-slate-700">
-                                          {step.action}
-                                        </td>
-                                        <td className="p-2 border-r border-slate-200 font-semibold text-slate-600">
-                                          {step.resp}
-                                        </td>
-                                        <td className="p-2 text-slate-400 italic text-[10px]">
-                                          {step.ref}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-
-                            {/* Section 4.0 - Revision History */}
-                            <div>
-                              <h3 className="font-extrabold text-xs text-slate-900 border-b border-slate-300 pb-1.5 uppercase tracking-wider mb-2.5">
-                                4.0 ประวัติการปรับปรุงฉบับ (Revision Change
-                                logs)
-                              </h3>
-                              <div className="space-y-2">
-                                {getSecureQPContent(
-                                  selectedDoc.id,
-                                  selectedDoc.title,
-                                ).history.map((h: any, idx: number) => (
-                                  <div
-                                    key={idx}
-                                    className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex justify-between gap-4"
-                                  >
-                                    <div>
-                                      <span className="font-bold text-slate-800">
-                                        Rev.{h.rev} ({h.date})
-                                      </span>
-                                      <p className="text-slate-500 text-[10px] mt-0.5">
-                                        {h.change}
-                                      </p>
-                                    </div>
-                                    <span className="font-mono text-slate-400 text-[10px] shrink-0">
-                                      {h.author}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                      // TYPE 4: NO REAL FILE ATTACHED — empty state
+                      <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
+                        <FileText className="w-14 h-14 text-slate-300" />
+                        <h4 className="font-bold text-slate-700 text-sm">
+                          เอกสารนี้ยังไม่มีไฟล์จริงแนบอยู่ในระบบ
+                        </h4>
+                        <p className="text-slate-400 text-xs max-w-sm">
+                          กรุณาแนบไฟล์ PDF ต้นฉบับผ่านหน้าแก้ไขเอกสาร (Admin
+                          Edit Mode) เพื่อให้ระบบแสดงเนื้อหาจริงในหน้าต่างนี้ได้
+                        </p>
                       </div>
                     )}
                   </div>
@@ -2858,30 +2347,6 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                       <span className="font-mono text-[10px]">
                         WATERMARK: {currentUser.name} ({currentUser.email})
                       </span>
-
-                      {/* Pagination buttons */}
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={secureViewerPage === 1}
-                          onClick={() => setSecureViewerPage(1)}
-                          className={`p-1.5 rounded transition ${secureViewerPage === 1 ? "text-slate-600 cursor-not-allowed" : "hover:bg-slate-800 text-white cursor-pointer"}`}
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                        </button>
-                        <span className="font-mono text-[11px]">
-                          หน้า {secureViewerPage} / 2
-                        </span>
-                        <button
-                          type="button"
-                          disabled={secureViewerPage === 2}
-                          onClick={() => setSecureViewerPage(2)}
-                          className={`p-1.5 rounded transition ${secureViewerPage === 2 ? "text-slate-600 cursor-not-allowed" : "hover:bg-slate-800 text-white cursor-pointer"}`}
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
-                      </div>
-
                       <span className="text-[10px] text-slate-500">
                         บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด
                       </span>

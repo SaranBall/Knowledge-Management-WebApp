@@ -219,7 +219,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )
       : 89;
 
-  const totalTrainingHours = 3250; // Requested organization target metrics
+  // คำนวณชั่วโมงสะสมจริงจากจำนวนคอร์สที่พนักงานเรียนจบแล้ว (ประมาณ 3 ชม./คอร์ส)
+  const totalTrainingHours = totalCompleted * 3;
 
   // 3. Gap Analysis calculation
   // Find search queries where hasResult is false, grouped by count
@@ -241,6 +242,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const sortedExpertsBySkill = [...experts].sort(
     (a, b) => b.experienceYears - a.experienceYears,
   );
+  // หาผู้เชี่ยวชาญที่มีประสบการณ์สูงสุด (จริง) แทนชื่อ hardcode
+  const topExpert = sortedExpertsBySkill[0];
+
+  // หาคำค้นหาที่ถูกค้นบ่อยที่สุดจาก searchLogs จริง
+  const topSearchKeyword = (() => {
+    if (searchLogs.length === 0) return null;
+    const counts: { [key: string]: number } = {};
+    searchLogs.forEach((log) => {
+      counts[log.keyword] = (counts[log.keyword] || 0) + 1;
+    });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+  })();
 
   // Competency Rules
   // QC requires QC Certification
@@ -396,15 +409,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-center">
               <div className="border-r border-slate-100">
                 <span className="text-amber-600 font-bold text-sm">
-                  ช่างสมชาย
+                  {topExpert ? topExpert.name : "ยังไม่มีข้อมูล"}
                 </span>
                 <span className="block text-[9px] text-slate-400">
-                  เข้าชมทักษะสูงสุด
+                  ประสบการณ์สูงสุด
                 </span>
               </div>
               <div>
                 <span className="text-slate-800 font-bold text-sm">
-                  Film Blowing
+                  {topSearchKeyword || "ยังไม่มีข้อมูล"}
                 </span>
                 <span className="block text-[9px] text-slate-400">
                   หัวข้อถูกค้นหาหลัก
@@ -426,7 +439,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div>
               <div className="text-3xl font-black text-white tracking-tight">
-                96.8%
+                {documents.length > 0
+                  ? Math.round(
+                      (documents.filter((d) => d.status === "Published")
+                        .length /
+                        documents.length) *
+                        100,
+                    )
+                  : 0}
+                %
               </div>
               <p className="text-indigo-100 text-[11px] mt-1">
                 ดัชนีความพร้อมรับผู้ตรวจประเมิน ISO 9001
@@ -435,18 +456,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="space-y-1.5 pt-2">
               <div className="flex justify-between text-[10px] text-indigo-200">
                 <span>QP/WI Approval Rate</span>
-                <span>100% Verified</span>
+                <span>
+                  {documents.length > 0
+                    ? Math.round(
+                        (documents.filter((d) => d.status === "Published")
+                          .length /
+                          documents.length) *
+                          100,
+                      )
+                    : 0}
+                  % Verified
+                </span>
               </div>
               <div className="h-1.5 w-full bg-white/20 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-emerald-400 rounded-full"
-                  style={{ width: "100%" }}
+                  style={{
+                    width: `${
+                      documents.length > 0
+                        ? Math.round(
+                            (documents.filter((d) => d.status === "Published")
+                              .length /
+                              documents.length) *
+                              100,
+                          )
+                        : 0
+                    }%`,
+                  }}
                 ></div>
               </div>
               <p className="text-[10.5px] text-indigo-300 italic">
                 เอกสารมาตรฐาน{" "}
                 {documents.filter((d) => d.status === "Published").length}{" "}
-                ฉบับผ่านเกณฑ์อนุมัติพับลิชครบถ้วน ไม่มีรุ่นร่างตกหล่น
+                ฉบับจากทั้งหมด {documents.length} ฉบับ
+                ผ่านเกณฑ์อนุมัติพับลิชแล้ว
               </p>
             </div>
           </div>
@@ -467,7 +510,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         searchLogs.length) *
                         100,
                     )
-                  : 91}
+                  : 0}
                 %
               </div>
               <p className="text-slate-500 text-[11px] mt-1">
@@ -479,19 +522,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="flex items-center gap-1">
                   จำนวนการสืบค้นผ่าน AI
                 </span>
-                <span className="font-bold">{searchLogs.length + 8} ครั้ง</span>
+                <span className="font-bold">{searchLogs.length} ครั้ง</span>
               </div>
               <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-indigo-600 rounded-full"
                   style={{
-                    width: `${searchLogs.length > 0 ? (searchLogs.filter((s) => s.hasResult).length / searchLogs.length) * 100 : 91}%`,
+                    width: `${searchLogs.length > 0 ? (searchLogs.filter((s) => s.hasResult).length / searchLogs.length) * 100 : 0}%`,
                   }}
                 ></div>
               </div>
               <p className="text-[10px] text-slate-400">
-                หัวข้อสืบค้นยอดฮิต: "เครื่องจักรไม่ทำงาน", "Forklift",
-                "สไลด์ลามิเนต"
+                {searchLogs.length > 0
+                  ? `หัวข้อสืบค้นล่าสุด: "${searchLogs[0].keyword}"`
+                  : "ยังไม่มีประวัติการสืบค้นในระบบ"}
               </p>
             </div>
           </div>
@@ -506,7 +550,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div>
               <div className="text-3xl font-black text-slate-800 tracking-tight">
-                84.5%
+                {kbArticles.length > 0
+                  ? Math.round(
+                      (kbArticles.filter((k) => k.status === "Approved")
+                        .length /
+                        kbArticles.length) *
+                        100,
+                    )
+                  : 0}
+                %
               </div>
               <p className="text-slate-500 text-[11px] mt-1">
                 ดัชนีแปลง Tacit Knowledge สู่ระบบ (Retention)
@@ -523,12 +575,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-amber-500 rounded-full"
-                  style={{ width: "84.5%" }}
+                  style={{
+                    width: `${
+                      kbArticles.length > 0
+                        ? Math.round(
+                            (kbArticles.filter((k) => k.status === "Approved")
+                              .length /
+                              kbArticles.length) *
+                              100,
+                          )
+                        : 0
+                    }%`,
+                  }}
                 ></div>
               </div>
               <p className="text-[10px] text-slate-400">
-                เซฟชั่วโมงช่อมบำรุงสะสมจากการสืบค้นหน้าไลน์ผลิตไปแล้วกว่า 120
-                ชม./ปี
+                จากบทความ Kaizen ที่ผ่านการอนุมัติเผยแพร่แล้วในระบบ
               </p>
             </div>
           </div>
@@ -601,15 +663,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             </div>
 
-            <div className="bg-[#fcfbf9] p-3 rounded-xl text-xs text-slate-600 border border-[#e1ded5] leading-relaxed">
-              <strong>💡 คำแนะนำ 2S/改善:</strong> หัวข้อ{" "}
-              <span className="text-[#1e3a8a] font-bold">Lamination</span> และ{" "}
-              <span className="text-[#1e3a8a] font-bold">เป่าขวด PET</span>{" "}
-              มีความเสี่ยงความรู้สูญหายระดับ{" "}
-              <strong className="text-[#e51a24]">สูงมาก (Critical)</strong>{" "}
-              เนื่องจากมีช่างเทคนิคที่เชี่ยวชาญงานแท่นเพียง 1
-              ท่านและกำลังจะครบวาระเกษียณในพ.ศ. นี้
-            </div>
+            {gapAnalysisList.length > 0 && (
+              <div className="bg-[#fcfbf9] p-3 rounded-xl text-xs text-slate-600 border border-[#e1ded5] leading-relaxed">
+                <strong>💡 คำแนะนำ 2S/改善:</strong> หัวข้อ{" "}
+                <span className="text-[#1e3a8a] font-bold">
+                  "{gapAnalysisList[0].keyword}"
+                </span>{" "}
+                ถูกค้นหาไม่พบข้อมูลบ่อยที่สุด ({gapAnalysisList[0].count} ครั้ง)
+                แนะนำให้เร่งจัดทำองค์ความรู้เพิ่มเติมในหัวข้อนี้
+              </div>
+            )}
           </div>
 
           {/* Training Success Rates & KPI Breakdown (Course Progress visual list) */}
@@ -632,48 +695,50 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
 
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs font-semibold">
-                    <span>
-                      1. Onboarding for Warehouse Staff (พนักงานคลังสินค้า)
-                    </span>
-                    <span className="text-[#15329c] font-bold">
-                      90% Pass Rate
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-[#15329c] rounded-full"
-                      style={{ width: "90%" }}
-                    ></div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs font-semibold">
-                    <span>2. Raw Materials Inspection (ตรวจเคมีวัตถุดิบ)</span>
-                    <span className="text-emerald-600">89% Pass Rate</span>
-                  </div>
-                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-500 rounded-full"
-                      style={{ width: "89%" }}
-                    ></div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs font-semibold">
-                    <span>3. Forklift Operation Safety (ขับรถยกเซฟตี้)</span>
-                    <span className="text-amber-600">92% Pass Rate</span>
-                  </div>
-                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 rounded-full"
-                      style={{ width: "92%" }}
-                    ></div>
-                  </div>
-                </div>
+                {["c-1", "c-2", "c-3"].map((courseId, idx) => {
+                  const courseObj = courses.find((c) => c.id === courseId);
+                  const attempts = examResults.filter(
+                    (e) => e.courseId === courseId,
+                  );
+                  const passRate =
+                    attempts.length > 0
+                      ? Math.round(
+                          (attempts.filter((e) => e.pass).length /
+                            attempts.length) *
+                            100,
+                        )
+                      : null;
+                  const barColors = [
+                    "bg-[#15329c]",
+                    "bg-emerald-500",
+                    "bg-amber-500",
+                  ];
+                  const textColors = [
+                    "text-[#15329c]",
+                    "text-emerald-600",
+                    "text-amber-600",
+                  ];
+                  return (
+                    <div key={courseId} className="space-y-2">
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span>
+                          {idx + 1}. {courseObj?.title || "หลักสูตรมาตรฐาน"}
+                        </span>
+                        <span className={`font-bold ${textColors[idx]}`}>
+                          {passRate !== null
+                            ? `${passRate}% Pass Rate`
+                            : "ยังไม่มีข้อมูลสอบ"}
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${barColors[idx]}`}
+                          style={{ width: `${passRate ?? 0}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
