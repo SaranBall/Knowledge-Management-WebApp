@@ -142,8 +142,14 @@ export default function App() {
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Load all entities from real API on mount
+  // Load all entities from real API on mount or when logged in
   useEffect(() => {
+    const token = localStorage.getItem("rm_auth_token");
+    if (!isLogged || !token) {
+      setIsLoading(false);
+      return;
+    }
+
     const fetchAllData = async () => {
       try {
         setIsLoading(true);
@@ -210,7 +216,7 @@ export default function App() {
     };
 
     fetchAllData();
-  }, []);
+  }, [isLogged]);
 
   // --- Registration Flow States ---
   const [isRegistering, setIsRegistering] = useState<boolean>(false);
@@ -1250,7 +1256,10 @@ export default function App() {
                                   <strong className="text-indigo-650 font-bold text-xs">
                                     {emp.employeeId}
                                   </strong>{" "}
-                                  - {emp.name.split(" (")[0]}
+                                  -{" "}
+                                  {emp.name
+                                    ? emp.name.split(" (")[0]
+                                    : emp.employeeId}
                                 </span>
                                 <span className="text-[9px] text-[#e51a24] opacity-80 group-hover:underline">
                                   เลือก &rarr;
@@ -1523,21 +1532,25 @@ export default function App() {
             >
               <div className="flex items-center gap-2.5">
                 <img
-                  src={currentUser.avatarUrl || DEFAULT_AVATAR_URL}
-                  alt={currentUser.name}
+                  src={currentUser?.avatarUrl || DEFAULT_AVATAR_URL}
+                  alt={currentUser?.name || "User"}
                   referrerPolicy="no-referrer"
                   className="w-8 h-8 rounded-full border border-slate-250 object-cover shrink-0"
                 />
 
                 <div className="min-w-0 flex-1">
                   <div className="font-extrabold text-xs text-slate-800 truncate flex items-center gap-1 leading-none">
-                    <span>{currentUser.name.split(" ")[0]}</span>
+                    <span>
+                      {currentUser?.name
+                        ? currentUser.name.split(" ")[0]
+                        : "ผู้ใช้งาน"}
+                    </span>
                     <span className="bg-[#e51a24] text-white font-mono text-[7px] px-1 rounded uppercase tracking-wider font-bold">
-                      {currentUser.role}
+                      {currentUser?.role || "Viewer"}
                     </span>
                   </div>
                   <span className="block text-[8px] text-slate-500 font-mono truncate mt-1">
-                    ID: {currentUser.employeeId}
+                    ID: {currentUser?.employeeId || "-"}
                   </span>
                 </div>
 
@@ -1558,9 +1571,10 @@ export default function App() {
                   <strong className="text-slate-700">
                     {
                       (
-                        getDepartmentById(currentUser.departmentId)?.name ||
-                        currentUser.departmentId ||
-                        ""
+                        (currentUser?.departmentId &&
+                          getDepartmentById(currentUser.departmentId)?.name) ||
+                        currentUser?.departmentId ||
+                        "ทั่วไป"
                       ).split(" ")[0]
                     }
                   </strong>

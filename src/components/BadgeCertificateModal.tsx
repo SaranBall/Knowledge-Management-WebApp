@@ -437,21 +437,25 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
               {/* Official Signatures Panel */}
               <div className="grid grid-cols-2 gap-4 pt-6 border-t border-slate-100 text-[10px] font-sans">
                 <div className="text-left pl-3 space-y-1">
-                  <span className="italic text-slate-400 font-serif font-bold text-[11px] leading-none block">
-                    Sirima S.
+                  <span className="text-slate-400 font-mono text-[9px] block">
+                    (....................................................)
                   </span>
+                  {/* TODO: ใส่ชื่อจริงของ Managing Director เมื่อมี User จริงในระบบ */}
                   <p className="font-bold text-slate-800">
-                    คุณหญิง สิริมา แสงสะอาด
+                    ผู้อำนวยการฝ่ายบริหาร
                   </p>
                   <p className="text-[8.5px] text-slate-400">
                     Managing Director (MD) - รอแยล เมอิวะ แพ็คซ์
                   </p>
                 </div>
                 <div className="text-right pr-3 space-y-1">
-                  <span className="block italic text-slate-400 font-serif font-bold text-[11px] leading-none">
-                    Darin Saetang
+                  <span className="text-slate-400 font-mono text-[9px] block">
+                    (....................................................)
                   </span>
-                  <p className="font-bold text-slate-800">ดารินทร์ แซ่ตั้ง</p>
+                  {/* TODO: ใส่ชื่อจริงของ QA/QC Supervisor เมื่อมี User จริงในระบบ */}
+                  <p className="font-bold text-slate-800">
+                    ผู้จัดการฝ่ายควบคุมคุณภาพ
+                  </p>
                   <p className="text-[8.5px] text-slate-400">
                     QA/QC Supervisor (Lead Auditor 9001)
                   </p>

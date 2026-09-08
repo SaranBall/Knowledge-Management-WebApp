@@ -46,15 +46,25 @@ import {
 
 dotenv.config();
 
-// Initialize Gemini SDK with telemetry header requested by standard guidelines
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build",
-    },
-  },
-});
+// Initialize Gemini SDK lazily with telemetry header requested by standard guidelines
+let aiClient: GoogleGenAI | null = null;
+function getAI(): GoogleGenAI {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY environment variable is required");
+    }
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+  }
+  return aiClient;
+}
 
 const SALT_ROUNDS = 10;
 
@@ -169,7 +179,7 @@ function requireOwnField(field: "userId" | "employeeId") {
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
 
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
   let db_users: UserType[] = await Promise.all(
@@ -573,7 +583,7 @@ You must return your response conforming to the JSON schema specified in respons
   ]
 }`;
 
-      const response = await ai.models.generateContent({
+      const response = await getAI().models.generateContent({
         model: "gemini-2.5-flash",
         contents: [
           {
@@ -666,7 +676,7 @@ CRITICAL INSTRUCTIONS:
           },
         ];
 
-        const response = await ai.models.generateContent({
+        const response = await getAI().models.generateContent({
           model: "gemini-2.5-flash",
           contents: contents,
           config: {
@@ -793,7 +803,7 @@ ${JSON.stringify(simpleWIs, null, 2)}
 
 Format your output strictly in the requested JSON schema. No additional wrap text outside of JSON.`;
 
-      const response = await ai.models.generateContent({
+      const response = await getAI().models.generateContent({
         model: "gemini-2.5-flash",
         contents: [{ text: "Suggest career learning roadmap path." }],
         config: {
@@ -1574,12 +1584,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   );
 
   // --- Serve Frontend Application seamlessly ---
-  const isProduction =
-    process.env.NODE_ENV === "production" ||
-    (!process.env.NODE_ENV &&
-      fs.existsSync(path.join(process.cwd(), "dist", "index.html")));
-
-  if (!isProduction) {
+  if (process.env.NODE_ENV !== "production") {
     // Vite middleware for developer playground
     const vite = await createViteServer({
       server: { middlewareMode: true },

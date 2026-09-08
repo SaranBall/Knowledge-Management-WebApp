@@ -1449,7 +1449,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
               {/* Real Certificate Frame based on course types */}
               {isOnboardingCert ? (
                 /* ONBOARDING CERTIFICATE */
-                <div id="printable-learning-cert" className="bg-gradient-to-br from-[#ffffff] via-[#fffdf9] to-[#ffffff] p-8 rounded-2xl border-4 border-double border-amber-300 shadow-lg max-w-xl mx-auto space-y-6 relative overflow-hidden text-slate-800">
+                <div
+                  id="printable-learning-cert"
+                  className="bg-gradient-to-br from-[#ffffff] via-[#fffdf9] to-[#ffffff] p-8 rounded-2xl border-4 border-double border-amber-300 shadow-lg max-w-xl mx-auto space-y-6 relative overflow-hidden text-slate-800"
+                >
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-3 pointer-events-none text-6xl font-extrabold uppercase font-sans select-none tracking-widest leading-normal">
                     ROYAL MEIWA PAX
                   </div>
@@ -1520,7 +1523,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 </div>
               ) : (
                 /* GENERAL QUALITY COMPLIANCE CERTIFICATE */
-                <div id="printable-learning-cert" className="bg-gradient-to-br from-[#ffffff] via-[#f7fbfd] to-[#ffffff] p-8 rounded-2xl border-4 border-double border-teal-500 shadow-lg max-w-xl mx-auto space-y-6 relative overflow-hidden text-slate-800">
+                <div
+                  id="printable-learning-cert"
+                  className="bg-gradient-to-br from-[#ffffff] via-[#f7fbfd] to-[#ffffff] p-8 rounded-2xl border-4 border-double border-teal-500 shadow-lg max-w-xl mx-auto space-y-6 relative overflow-hidden text-slate-800"
+                >
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-3 pointer-events-none text-6xl font-extrabold uppercase font-sans select-none tracking-widest leading-normal">
                     ROYAL MEIWA PAX
                   </div>
@@ -1580,11 +1586,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                     </div>
 
                     <div className="space-y-1 text-right pr-4">
-                      <span className="block italic text-slate-405 font-serif">
-                        Darin Saetang
+                      <span className="text-slate-400 font-mono text-[9px] block">
+                        (............................................)
                       </span>
+                      {/* TODO: ใส่ชื่อจริงของ QA/QC Supervisor เมื่อมี User จริงในระบบ */}
                       <p className="font-extrabold text-slate-800">
-                        ดารินทร์ แซ่ตั้ง
+                        ผู้ควบคุมระบบคุณภาพ
                       </p>
                       <p className="text-[8.5px] text-slate-405">
                         QA/QC supervisor (Lead Auditor)
@@ -1598,7 +1605,9 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const printContent = document.getElementById("printable-learning-cert");
+                    const printContent = document.getElementById(
+                      "printable-learning-cert",
+                    );
                     if (!printContent) {
                       window.print();
                       return;
@@ -2073,7 +2082,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                             className="bg-teal-100 hover:bg-teal-150 font-bold text-teal-950 px-2 py-0.5 rounded transition-colors cursor-pointer"
                           >
                             📄 ดาวน์ไฟล์ ISO:{" "}
-                            {recommendedDoc.title.split(" // ")[0]}
+                            {(recommendedDoc.title || "").split(" // ")[0]}
                           </button>
                         )}
                         {!recommendedCourse && !recommendedDoc && (
@@ -2836,11 +2845,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         </p>
                       </div>
                       <div className="text-right pr-3 space-y-1">
-                        <span className="block italic text-slate-400 font-serif leading-none">
-                          Darin Saetang
+                        <span className="text-slate-400 font-mono text-[9px] block">
+                          (............................................)
                         </span>
+                        {/* TODO: ใส่ชื่อจริงของ QA/QC Supervisor เมื่อมี User จริงในระบบ */}
                         <p className="font-extrabold text-slate-800">
-                          ดารินทร์ แซ่ตั้ง
+                          ผู้ควบคุมระบบคุณภาพ
                         </p>
                         <p className="text-[9px] text-slate-405">
                           QA/QC supervisor (Lead Auditor)

@@ -1916,7 +1916,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     <div className="flex justify-between">
                       <span className="text-slate-500">รหัสเอกสาร:</span>
                       <span className="font-mono text-white font-semibold">
-                        {selectedDoc.title.split(" ")[0] || "ไม่ระบุรหัส"}
+                        {(selectedDoc.title || "").split(" ")[0] ||
+                          "ไม่ระบุรหัส"}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -2013,7 +2014,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                       </div>
                       <div className="text-right shrink-0">
                         <span className="block font-mono font-bold text-xs text-slate-800">
-                          {selectedDoc.title.split(" ")[0] || "ไม่ระบุรหัส"}
+                          {(selectedDoc.title || "").split(" ")[0] ||
+                            "ไม่ระบุรหัส"}
                         </span>
                         <span className="block text-[9px] text-slate-400 font-mono">
                           Rev. {selectedDoc.revision}

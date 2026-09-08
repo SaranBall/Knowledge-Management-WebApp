@@ -117,7 +117,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
   const filteredExperts = experts.filter((exp) => {
     // Dept filter
     if (selectedDept !== "ALL") {
-      const cleanSelected = selectedDept.split(" (")[0].toLowerCase();
+      const cleanSelected = (selectedDept || "").split(" (")[0].toLowerCase();
       const expDeptName =
         getDepartmentById(exp.departmentId)?.name || exp.departmentId || "";
       const cleanExpDept = expDeptName.toLowerCase();
@@ -347,7 +347,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                           {exp.name}
                         </h4>
                         <span className="text-[10px] text-slate-400 font-mono mt-1 block truncate">
-                          {exp.position.split(" / ")[0]}
+                          {exp.position ? exp.position.split(" / ")[0] : ""}
                         </span>
                       </div>
 

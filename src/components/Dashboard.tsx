@@ -186,7 +186,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalKnowledgeCount =
     documents.filter((d) => d.status === "Published").length +
     kbArticles.filter((k) => k.status === "Approved").length;
-  const newKnowledgeThisMonth = 5; // Static context representation
+  const newKnowledgeThisMonth = 0; // Static context representation
 
   const totalViews =
     documents.reduce((sum, d) => sum + d.views, 0) +
@@ -201,7 +201,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const completionRate =
     totalAssignedCount > 0
       ? Math.round((totalCompleted / totalAssignedCount) * 100)
-      : 88;
+      : 0;
 
   const totalCompletedCountForScore =
     examResults.length +
@@ -217,7 +217,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           ].reduce((sum, u) => sum + (u.score || 0), 0) /
             totalCompletedCountForScore,
         )
-      : 89;
+      : 0;
 
   // คำนวณชั่วโมงสะสมจริงจากจำนวนคอร์สที่พนักงานเรียนจบแล้ว (ประมาณ 3 ชม./คอร์ส)
   const totalTrainingHours = totalCompleted * 3;
@@ -259,7 +259,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // QC requires QC Certification
   // Production requires Forklift Operations
   // Warehouse Staff requires Onboarding Warehouse
-  const getRequiredCoursesForPosition = (position: string) => {
+  const getRequiredCoursesForPosition = (position?: string) => {
+    if (!position) return ["c-1"];
     if (position.includes("QA") || position.includes("QC")) {
       return ["c-2", "c-3"]; // Chemistry Inspections & Forklift
     }
@@ -806,7 +807,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         {u.name}
                       </div>
                       <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
-                        {u.employeeId} • {u.position.split(" / ")[0]}
+                        {u.employeeId} •{" "}
+                        {u.position ? u.position.split(" / ")[0] : "พนักงาน"}
                       </div>
                     </div>
                   </button>
@@ -1210,7 +1212,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5">
                               ระดับความจำเป็น: สำคัญระดับวิกฤตสำหรับตำแหน่ง{" "}
-                              {selectedUserTranscript.position.split(" / ")[0]}
+                              {selectedUserTranscript.position
+                                ? selectedUserTranscript.position.split(
+                                    " / ",
+                                  )[0]
+                                : "พนักงาน"}
                             </div>
                           </div>
                           <div className="flex items-center gap-3 self-end sm:self-auto font-mono text-right text-xs">
@@ -1375,12 +1381,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <p className="text-slate-400">
                         ผู้ประเมินมาตรฐานโรงงาน (ISO Auditor)
                       </p>
+                      {/* TODO: ใส่ชื่อจริงของผู้ตรวจประเมิน (QA/QC Auditor) เมื่อมี User จริงในระบบ */}
                       <p className="font-bold text-slate-600 mt-1">
-                        คุณดารินทร์ แซ่ตั้ง
+                        ผู้ตรวจประเมินระบบคุณภาพ (Lead Auditor)
                       </p>
                     </div>
-                    <div className="border-b border-dashed border-slate-300 w-3/4 mx-auto pb-1 font-serif text-[#15329c] italic font-bold">
-                      Darin S.
+                    <div className="border-b border-dashed border-slate-300 w-3/4 mx-auto pb-1 text-slate-400 font-mono text-[10px]">
+                      (....................................................)
                     </div>
                     <p className="text-[10px] text-slate-500 font-mono">
                       ลงนามสัญญา (Signature) & วันประเมิน
@@ -1392,12 +1399,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <p className="text-slate-400">
                         ตัวแทนกวดวิชาวิชาชีพและพัฒนาบุคคล
                       </p>
+                      {/* TODO: ใส่ชื่อจริงของผู้บริหารฝ่ายพัฒนาบุคคลเมื่อมี User จริงในระบบ */}
                       <p className="font-bold text-slate-600 mt-1">
-                        คุณสิริมา แสงสะอาด
+                        ผู้บริหารฝ่ายพัฒนาองค์กรและบุคคล
                       </p>
                     </div>
-                    <div className="border-b border-dashed border-slate-300 w-3/4 mx-auto pb-1 font-serif text-[#15329c] italic font-bold">
-                      Sirima S.
+                    <div className="border-b border-dashed border-slate-300 w-3/4 mx-auto pb-1 text-slate-400 font-mono text-[10px]">
+                      (....................................................)
                     </div>
                     <p className="text-[10px] text-slate-500 font-mono">
                       ลงนามสัญญา (Signature) & ตราประทับ
