@@ -461,54 +461,6 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                         </span>
                       ))}
                     </div>
-
-                    {/* Skill levels indicator bars */}
-                    <div className="space-y-2 mt-3 bg-slate-50 p-3.5 rounded-xl border border-slate-100">
-                      <span className="block text-[9px] font-extrabold text-slate-400 uppercase">
-                        ระดับความเชี่ยวชาญเชิงเทคนิค (Expertise Skill Rating)
-                      </span>
-
-                      <div className="space-y-1.5 text-[10px]">
-                        <div>
-                          <div className="flex justify-between font-bold text-slate-700 mb-0.5">
-                            <span>ISO / HACCP Auditing Standards</span>
-                            <span>95%</span>
-                          </div>
-                          <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                            <div
-                              className="bg-indigo-600 h-2 rounded-full"
-                              style={{ width: "95%" }}
-                            ></div>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="flex justify-between font-bold text-slate-700 mb-0.5">
-                            <span>สายงานผลิต & Loss Prevention</span>
-                            <span>100%</span>
-                          </div>
-                          <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                            <div
-                              className="bg-emerald-600 h-2 rounded-full"
-                              style={{ width: "100%" }}
-                            ></div>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="flex justify-between font-bold text-slate-700 mb-0.5">
-                            <span>การแก้ไขปัญหาขัดข้องหน้าเครื่องจักร</span>
-                            <span>92%</span>
-                          </div>
-                          <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                            <div
-                              className="bg-amber-500 h-2 rounded-full"
-                              style={{ width: "92%" }}
-                            ></div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
                   <div className="space-y-2 text-slate-650 pt-2">
@@ -527,20 +479,6 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                 </div>
 
                 <div className="space-y-4">
-                  {/* Verified badge status */}
-                  <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-100 space-y-1.5 text-[11px]">
-                    <span className="text-[9px] font-bold text-emerald-800 uppercase block tracking-wider">
-                      📜 ใบรับรองความรู้ทางวิชาชีพ (Credentials)
-                    </span>
-                    <p className="font-bold text-slate-800 flex items-center gap-1.5 text-emerald-950">
-                      ✅ ISO 9001:2015 / ISO 14001:2015 certified Lead Auditor
-                    </p>
-                    <p className="text-slate-500 text-[10px]">
-                      ผ่านการอบรมรับรองโดยสถาบันมาตรฐานกลาง RMP Board Of
-                      Directors ปี 2025
-                    </p>
-                  </div>
-
                   <div>
                     <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
                       เวลาให้การตอบข้อมูลวิกฤต: (Availability Schedules)
@@ -561,10 +499,11 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                   <div className="p-3.5 bg-indigo-50/40 rounded-xl border border-indigo-100 flex items-center justify-between">
                     <div>
                       <strong className="block text-slate-800 text-[10px]">
-                        ชาร์จชั่วโมงฝึกอบรมและช่วยเหลือ:
+                        ประสบการณ์ทำงาน:
                       </strong>
                       <span className="text-slate-500 text-[10px]">
-                        สะสมกว่า 80 ชั่วโมงช่วยเหลือหน้างานจริง
+                        {selectedExpert.experienceYears} ปี
+                        ในสายงานที่เกี่ยวข้อง
                       </span>
                     </div>
                     <span className="bg-[#15329c] text-white font-mono font-bold text-[10px] px-2.5 py-0.5 rounded-md flex items-center gap-1">

@@ -85,10 +85,10 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
 
   // Quick recommend list for search tests (REQUIRED BY SPECIFICATION)
   const quickSearches = [
-    { text: "เครื่องจักรไม่ทำงาน", label: "🔥 ค้นหารวมกรณีเครื่องหยุดทำงาน" },
+    /*{ text: "เครื่องจักรไม่ทำงาน", label: "🔥 ค้นหารวมกรณีเครื่องหยุดทำงาน" },
     { text: "ความชื้นเม็ดพลาสติก", label: "ฟิล์มเป่าความชื้น" },
     { text: "เซ็นเซอร์", label: "Photoelectric Sensor" },
-    { text: "WMS", label: "ระบบบาร์โค้ดสแกน" },
+    { text: "WMS", label: "ระบบบาร์โค้ดสแกน" },*/
   ];
 
   const handleCreateArticleSubmit = (e: React.FormEvent) => {
@@ -240,20 +240,6 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
     return true;
   });
 
-  // SPECIFIC MATCHING REQUIREMENTS: If search is "เครื่องจักรไม่ทำงาน"
-  // Find linked documents & specialists for display
-  const isSpecSearchActive = searchQuery.trim() === "เครื่องจักรไม่ทำงาน";
-
-  const specQPs = isSpecSearchActive
-    ? documents.filter((d) => d.id === "doc-2" || d.id === "doc-6")
-    : [];
-  const specWIs = isSpecSearchActive
-    ? documents.filter((d) => d.id === "doc-4" || d.id === "doc-6")
-    : [];
-  const specExperts = isSpecSearchActive
-    ? experts.filter((e) => e.id === "exp-1" || e.id === "exp-2")
-    : [];
-
   const selectedArticle = articles.find((a) => a.id === selectedArticleId);
 
   return (
@@ -340,103 +326,6 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
           )}
         </div>
       </div>
-
-      {/* SPECIAL GROUNDED MAPPING CONTAINER (SPECIFICATION MANDATORY SHOWCASE) */}
-      {isSpecSearchActive && (
-        <div
-          id="grounded-search-results-panel"
-          className="bg-indigo-50 border border-indigo-300 rounded-2xl p-5 space-y-4 animate-in fade-in duration-200"
-        >
-          <div className="flex items-center gap-2 pb-2 border-b border-indigo-200">
-            <span className="bg-indigo-600 text-white p-1 rounded font-bold text-[10px] font-mono">
-              SEARCH Mapped Match
-            </span>
-            <h4 className="text-xs sm:text-sm font-bold text-indigo-950">
-              ผลลัพธ์การค้นหาอัจฉริยะสำหรับ "เครื่องจักรไม่ทำงาน"
-            </h4>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* 1. Related QP & WI list */}
-            <div className="bg-white p-4 rounded-xl border border-indigo-150 space-y-2.5">
-              <span className="text-[10px] font-bold text-indigo-800 uppercase block">
-                📄 1. เอกสาร WI & QP อ้างอิง
-              </span>
-              <div className="space-y-1.5">
-                {specWIs.concat(specQPs as any).map((doc: any) => (
-                  <div
-                    key={doc.id}
-                    className="p-2 bg-slate-50 rounded border border-slate-100 flex items-center justify-between text-[11px]"
-                  >
-                    <div>
-                      <span className="font-bold text-slate-800 block truncate max-w-[200px]">
-                        {doc.title}
-                      </span>
-                      <span className="text-[9px] text-slate-400 font-mono">
-                        รหัส: {doc.id.toUpperCase()} ({doc.type})
-                      </span>
-                    </div>
-                    <span className="text-[9px] text-indigo-600 font-bold">
-                      เปิดคู่มือ
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 2. Troubleshooting knowledge */}
-            <div className="bg-white p-4 rounded-xl border border-indigo-150 space-y-2.5">
-              <span className="text-[10px] font-bold text-indigo-800 uppercase block">
-                🛠️ 2. เทคนิคแก้ปัญหาจาก Tacit KB
-              </span>
-              <div className="space-y-1.5 text-[11px]">
-                <p className="font-bold text-slate-800">
-                  หัวข้อ: ปัญหาสายการผลิตหยุดบ่อยจาก photoelectric sensor
-                </p>
-                <div className="text-[10px] text-slate-600 space-y-1 bg-red-50 p-2 rounded border border-red-100">
-                  <p>
-                    <strong>ปัญหา:</strong>{" "}
-                    เครื่องเป่าฟิล์มชิลสตรีมความเร็วสูงตัด Alarm Stop
-                  </p>
-                  <p>
-                    <strong>วิธีแก้ด่วน:</strong> เช็ดหน้าเลนส์ด้วยไมโครไฟเบอร์
-                    ทำมุม 15 องศาป้องกันฝุ่นตกทับ
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Experts lists */}
-            <div className="bg-white p-4 rounded-xl border border-indigo-150 space-y-2.5">
-              <span className="text-[10px] font-bold text-indigo-800 uppercase block">
-                👤 3. ผู้เชี่ยวชาญที่คุณต้องติดต่อถาม
-              </span>
-              <div className="space-y-1.5">
-                {specExperts.map((exp) => (
-                  <div
-                    key={exp.id}
-                    className="p-2 bg-slate-50 rounded border border-slate-100 flex items-center gap-2 text-[11px]"
-                  >
-                    <img
-                      src={exp.avatarUrl}
-                      alt={exp.name}
-                      className="w-7 h-7 rounded-full object-cover border"
-                    />
-                    <div>
-                      <strong className="text-slate-800 block leading-tight">
-                        {exp.name}
-                      </strong>
-                      <span className="text-[9px] text-slate-500 font-mono">
-                        {exp.position ? exp.position.split(" / ")[0] : ""}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Main Board filters */}
       <div className="flex border-b border-slate-200">

@@ -49,6 +49,7 @@ import { INITIAL_EMPLOYEE_MASTER } from "../data/initialData";
 import { getUserBadges } from "../utils/badgeUtils";
 import { BadgePill } from "./BadgeDisplay";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
+import { getRequiredCoursesForPosition } from "../utils/courseutils";
 import {
   getMainDepartments,
   getSubDepartments,
@@ -662,7 +663,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
     const cleanPin = approvePin.trim().replace(/\D/g, "");
     if (cleanPin.length !== 6) {
-      setApproveError("❌ รหัสผ่านความปลอดภัย PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นค่ะ");
+      setApproveError(
+        "❌ รหัสผ่านความปลอดภัย PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นค่ะ",
+      );
       return;
     }
 
@@ -682,8 +685,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       departmentId: approveDeptId, // ← เลือกจริงจาก modal แทนการ hardcode
       position: emp.position,
       role: assignedRole,
-      email:
-        emp.email || `${emp.employeeId.toLowerCase()}@royalmeiwa.co.th`,
+      email: emp.email || `${emp.employeeId.toLowerCase()}@royalmeiwa.co.th`,
       phone: emp.phone || "02-1234567",
       password: cleanPin,
       avatarUrl: DEFAULT_AVATAR_URL,
@@ -706,20 +708,6 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     setApproveDeptId("");
     setApprovePin("");
     setApproveError("");
-  };
-
-  // Helper competency matrix lists
-  const getRequiredCoursesForPosition = (position: string) => {
-    if (position.includes("QA") || position.includes("QC")) {
-      return ["c-2", "c-3"]; // Chemistry Inspections & Forklift
-    }
-    if (position.includes("Production") || position.includes("Engineer")) {
-      return ["c-3"]; // Forklift
-    }
-    if (position.includes("Warehouse")) {
-      return ["c-1", "c-3"]; // Onboarding Warehouse & Forklift
-    }
-    return ["c-1"];
   };
 
   const handleExportCsv = (
@@ -944,7 +932,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             resolutionText =
               "ปิดช่องว่างเรียบร้อย: อนุมัติคู่มือการแก้ปัญหาและนำขึ้น Knowledge Base สำเร็จ";
             expertAssigned =
-              "ช่างสมชาย (Senior Production Engineer) & ทีมแอดมินกลาง";
+              "ทีมผู้เชี่ยวชาญประจำแผนกที่เกี่ยวข้อง & ทีมแอดมินกลาง";
           } else {
             resolutionText =
               "รอดำเนินการทบทวน: ต้องประสานงานผู้เชี่ยวชาญเพิ่มเติมเพื่อกำหนดเอกสาร SOP";
@@ -2440,8 +2428,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                           พร้อมเพิ่มเข้าหน้าบทความ KB แล้ว
                                         </p>
                                         <p className="text-[9.5px] text-[#15329c] font-black mt-1">
-                                          ผู้เชี่ยวชาญร่วมปิด: ช่างสมชาย (Senior
-                                          Production Engineer)
+                                          ผู้เชี่ยวชาญร่วมปิด:{" "}
+                                          {assignedExpert !== "Select Employee"
+                                            ? assignedExpert
+                                            : "ทีมผู้เชี่ยวชาญประจำแผนก"}
                                         </p>
                                       </div>
                                     ) : assigningGap === item.keyword ? (
@@ -3370,7 +3360,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-500 block">
-                    แผนกจริงในระบบ (Department): <span className="text-rose-500">*</span>
+                    แผนกจริงในระบบ (Department):{" "}
+                    <span className="text-rose-500">*</span>
                   </label>
                   <select
                     value={approveDeptId}

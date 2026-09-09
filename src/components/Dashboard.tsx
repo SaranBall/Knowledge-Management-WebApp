@@ -33,6 +33,7 @@ import { getUserBadges } from "../utils/badgeUtils";
 import { BadgePill } from "./BadgeDisplay";
 import { BadgeCertificateModal } from "./BadgeCertificateModal";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
+import { getRequiredCoursesForPosition } from "../utils/courseutils";
 
 interface DashboardProps {
   currentUser: User;
@@ -254,24 +255,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     });
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
   })();
-
-  // Competency Rules
-  // QC requires QC Certification
-  // Production requires Forklift Operations
-  // Warehouse Staff requires Onboarding Warehouse
-  const getRequiredCoursesForPosition = (position?: string) => {
-    if (!position) return ["c-1"];
-    if (position.includes("QA") || position.includes("QC")) {
-      return ["c-2", "c-3"]; // Chemistry Inspections & Forklift
-    }
-    if (position.includes("Production") || position.includes("Engineer")) {
-      return ["c-3"]; // Forklift
-    }
-    if (position.includes("Warehouse")) {
-      return ["c-1", "c-3"]; // Onboarding Warehouse & Forklift
-    }
-    return ["c-1"];
-  };
 
   return (
     <>

@@ -1509,11 +1509,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                     </div>
 
                     <div className="space-y-1 text-right leading-normal pr-4">
-                      <div className="text-[#a21217] text-xs italic font-semibold leading-none font-serif">
-                        Sirima S.
-                      </div>
+                      <span className="text-slate-400 font-mono text-[9px] block">
+                        (............................................)
+                      </span>
+                      {/* TODO: ใส่ชื่อจริงของ Managing Director เมื่อมี User จริงในระบบ */}
                       <p className="font-extrabold text-slate-800">
-                        สิริมา แสงสะอาด
+                        ผู้อำนวยการฝ่ายบริหาร
                       </p>
                       <p className="text-[8.5px] text-slate-405">
                         Managing Director (MD)
@@ -2779,11 +2780,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         </p>
                       </div>
                       <div className="text-right pr-3 space-y-1">
-                        <p className="italic text-slate-400 font-serif leading-none">
-                          Sirima S.
-                        </p>
+                        <span className="text-slate-400 font-mono text-[9px] block">
+                          (............................................)
+                        </span>
+                        {/* TODO: ใส่ชื่อจริงของ Managing Director เมื่อมี User จริงในระบบ */}
                         <p className="font-bold text-slate-850">
-                          คุณหญิง สิริมา แสงสะอาด
+                          ผู้อำนวยการฝ่ายบริหาร
                         </p>
                         <p className="text-[8.5px] text-slate-405">
                           Managing Director (MD)
