@@ -253,7 +253,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                 setNewExpert({
                   name: "",
                   position: "",
-                  department: ">Select Department<",
+                  departmentId: ">Select Department<",
                   skills: "",
                   phone: "",
                   email: "",

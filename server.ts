@@ -90,12 +90,12 @@ function sanitizeUserForViewer(user: UserType, viewerId: string) {
 // --- AUTH: JWT setup + middleware ---
 // ============================================================
 
-const JWT_SECRET =
-  process.env.JWT_SECRET || "km-rmp-jwt-secret-key-default-dev-2025";
-if (!process.env.JWT_SECRET) {
-  console.warn(
-    "⚠️ Warning: JWT_SECRET is not set in environment variables. Using default development secret key.",
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error(
+    "❌ JWT_SECRET environment variable is required. Refusing to start server — set JWT_SECRET in .env before deploying.",
   );
+  process.exit(1);
 }
 
 interface AuthPayload {
@@ -499,18 +499,26 @@ async function startServer() {
         restricted: restricted === true,
       });
 
-      // Also try to write to filesystem (in public/uploads and dist/uploads) for persistence if possible
+      // เขียนลง filesystem จริง (ทั้ง buffer และ metadata) เพื่อให้ restricted flag
+      // รอดตอน server restart — ก่อนหน้านี้ uploadedFiles (in-memory Map) หายหมดตอน
+      // restart ทำให้ QP ที่ตั้งใจ restrict กลับอ่านได้แบบไม่จำกัดสิทธิ์
       const fs = require("fs");
       const uploadsDirs = [
         path.join(process.cwd(), "public", "uploads"),
         path.join(process.cwd(), "dist", "uploads"),
       ];
+      const metaJson = JSON.stringify({
+        restricted: restricted === true,
+        uploadedBy: req.authUser!.employeeId,
+        mimeType: mimeType || "application/octet-stream",
+      });
       uploadsDirs.forEach((dir) => {
         try {
           if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
           }
           fs.writeFileSync(path.join(dir, cleanName), buffer);
+          fs.writeFileSync(path.join(dir, `${cleanName}.json`), metaJson);
         } catch (e) {
           console.warn("Failed to write file to directory:", dir, e);
         }
@@ -541,14 +549,37 @@ async function startServer() {
       res.setHeader("Content-Type", file.mimeType);
       return res.send(file.buffer);
     }
-    // Try to read from filesystem
+    // Try to read from filesystem (server restart case) — ต้องเช็ค restricted
+    // จาก sidecar .meta.json ด้วย ไม่งั้นไฟล์ QP ที่ restricted จะเปิดอ่านได้ฟรี
     const fs = require("fs");
-    const filePath = path.join(process.cwd(), "public", "uploads", filename);
-    const distFilePath = path.join(process.cwd(), "dist", "uploads", filename);
-    if (fs.existsSync(filePath)) {
+    const candidateDirs = [
+      +path.join(process.cwd(), "public", "uploads"),
+      +path.join(process.cwd(), "dist", "uploads"),
+    ];
+    for (const dir of candidateDirs) {
+      const filePath = path.join(dir, filename);
+      if (!fs.existsSync(filePath)) continue;
+
+      const metaPath = path.join(dir, `${filename}.meta.json`);
+      if (fs.existsSync(metaPath)) {
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+          if (
+            meta.restricted &&
+            req.authUser!.role !== "Admin" &&
+            meta.uploadedBy !== req.authUser!.employeeId
+          ) {
+            return res.status(403).json({
+              error: "FORBIDDEN",
+              message:
+                "ไฟล์นี้จำกัดสิทธิ์เฉพาะผู้ดูแลระบบหรือผู้อัปโหลดเท่านั้น",
+            });
+          }
+        } catch (e) {
+          console.warn("Failed to parse upload metadata:", metaPath, e);
+        }
+      }
       return res.sendFile(filePath);
-    } else if (fs.existsSync(distFilePath)) {
-      return res.sendFile(distFilePath);
     }
     res.status(404).send("File not found");
   });
@@ -1304,7 +1335,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.get("/api/ratings", requireAuth, (req, res) => {
     res.json(db_ratings);
   });
-  app.post("/api/ratings", requireAuth, (req, res) => {
+  app.post("/api/ratings", requireAuth, requireOwnField("userId"), (req, res) => {
     try {
       const rating = req.body;
       if (!rating.id) {
@@ -1427,7 +1458,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {
     res.json(db_search_logs);
   });
-  app.post("/api/search_logs", requireAuth, (req, res) => {
+  app.post("/api/search_logs", requireAuth, requireOwnField("userId"), (req, res) => {
     try {
       const log = req.body;
       if (!log.id) {
@@ -1449,7 +1480,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     // Viewer เห็นเฉพาะคำถามที่ตนเองเป็นคนส่งเท่านั้น
     res.json(db_contact_requests.filter((r) => r.userId === req.authUser!.id));
   });
-  app.post("/api/contact_requests", requireAuth, (req, res) => {
+  app.post("/api/contact_requests", requireAuth, requireOwnField("userId"), (req, res) => {
     try {
       const contactReq = req.body;
       if (!contactReq.id) {
@@ -1582,7 +1613,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.get("/api/km_contribution_logs", requireAuth, (req, res) => {
     res.json(db_km_contribution_logs);
   });
-  app.post("/api/km_contribution_logs", requireAuth, (req, res) => {
+  app.post("/api/km_contribution_logs", requireAuth, requireOwnField("userId"), (req, res) => {
     try {
       const log = req.body;
       if (!log.id) {
