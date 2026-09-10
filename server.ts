@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -20,6 +21,7 @@ import {
   INITIAL_CONTACT_REQUESTS,
   INITIAL_EMPLOYEE_MASTER,
 } from "./src/data/initialData";
+import { DEFAULT_AVATAR_URL } from "./src/utils/assets";
 import {
   getInitialCompetencies,
   getInitialCertificates,
@@ -177,19 +179,82 @@ function requireOwnField(field: "userId" | "employeeId") {
   };
 }
 
+/**
+ * Seed บัญชี Admin คนแรกของระบบตอน startup
+ * - ถ้าตั้ง INITIAL_ADMIN_EMPLOYEE_ID + INITIAL_ADMIN_PASSWORD ใน .env → ใช้ค่านั้น
+ * - ถ้าไม่ตั้งเลย → generate รหัสผ่านสุ่มปลอดภัย แล้ว log ออก console ครั้งเดียว
+ *   (ต้อง copy ไปใช้ login ครั้งแรกแล้วรีบเปลี่ยนรหัสผ่านทันทีผ่านหน้า Edit User)
+ * ไม่ทำถ้ามี user ใน DB อยู่แล้ว (กันไม่ให้ reset ทับบัญชีที่มีคนใช้งานจริงแล้ว)
+ */
+async function seedInitialAdmin(
+  existingUsers: UserType[],
+): Promise<UserType[]> {
+  if (existingUsers.length > 0) {
+    return existingUsers;
+  }
+
+  const envEmployeeId = process.env.INITIAL_ADMIN_EMPLOYEE_ID;
+  const envPassword = process.env.INITIAL_ADMIN_PASSWORD;
+  const envName = process.env.INITIAL_ADMIN_NAME || "ผู้ดูแลระบบเริ่มต้น";
+  const envEmail = process.env.INITIAL_ADMIN_EMAIL || "admin@royalmeiwa.com";
+  const envPhone = process.env.INITIAL_ADMIN_PHONE || "02-000-0000";
+  const envDeptId = process.env.INITIAL_ADMIN_DEPARTMENT_ID || "d-it";
+  const envPosition = process.env.INITIAL_ADMIN_POSITION || "ผู้ดูแลระบบ";
+
+  let employeeId = envEmployeeId;
+  let plainPassword = envPassword;
+  let generated = false;
+
+  if (!employeeId || !plainPassword) {
+    // ไม่ได้ตั้งค่าผ่าน .env — generate ให้ระบบยังใช้งานได้ ไม่ hardcode ในซอร์ส
+    employeeId = employeeId || "ADMIN001";
+    plainPassword = plainPassword || crypto.randomBytes(6).toString("hex");
+    generated = true;
+  }
+
+  const hashedPassword = await bcrypt.hash(plainPassword, SALT_ROUNDS);
+  const adminUser: UserType = {
+    id: `usr-${Date.now()}`,
+    name: envName,
+    employeeId,
+    departmentId: envDeptId,
+    position: envPosition,
+    role: "Admin",
+    email: envEmail,
+    phone: envPhone,
+    avatarUrl: DEFAULT_AVATAR_URL,
+    password: hashedPassword,
+    startDate: new Date().toISOString().split("T")[0],
+  };
+
+  console.log("");
+  console.log("========================================================");
+  console.log("🔐 ไม่พบบัญชีผู้ใช้ในระบบ — สร้างบัญชี Admin เริ่มต้นแล้ว");
+  console.log(`   Employee ID: ${employeeId}`);
+  if (generated) {
+    console.log(`   Password:    ${plainPassword}`);
+    console.log(
+      "   ⚠️  รหัสผ่านนี้ generate อัตโนมัติ กรุณา login แล้วเปลี่ยนรหัสผ่านทันที",
+    );
+    console.log(
+      "   💡 ตั้งค่า INITIAL_ADMIN_EMPLOYEE_ID / INITIAL_ADMIN_PASSWORD ใน .env",
+    );
+    console.log("      เพื่อกำหนดค่าที่ต้องการเองในการ deploy ครั้งถัดไป");
+  } else {
+    console.log("   Password:    (ตามที่ตั้งไว้ใน .env)");
+  }
+  console.log("========================================================");
+  console.log("");
+
+  return [adminUser];
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
-  let db_users: UserType[] = await Promise.all(
-    INITIAL_USERS.map(async (u) => ({
-      ...u,
-      password: u.password
-        ? await bcrypt.hash(u.password, SALT_ROUNDS)
-        : undefined,
-    })),
-  );
+  let db_users: UserType[] = await seedInitialAdmin(INITIAL_USERS);
   let db_documents: DocumentItem[] = [...INITIAL_DOCUMENTS];
   let db_courses: Course[] = [...INITIAL_COURSES];
   let db_kb_articles: KBArticle[] = [...INITIAL_KB_ARTICLES];

@@ -62,6 +62,8 @@ import { getDepartmentById } from "../utils/departmentUtils";
 import { DEFAULT_LESSON_IMAGE_URL } from "../utils/assets";
 
 // Interface for offline scanning sessions
+// TODO: ปัจจุบันยังไม่มีหน้า Admin สำหรับสร้าง/แก้ไขคาบอบรมออฟไลน์จริง
+// เมื่อมีฟีเจอร์นั้นแล้ว ให้ดึงข้อมูลจาก API แทนการ hardcode array นี้
 export interface OfflineTrainingSession {
   id: string;
   courseId: string;
@@ -73,44 +75,7 @@ export interface OfflineTrainingSession {
   qrValue: string;
 }
 
-export const OFFLINE_TRAINING_SESSIONS: OfflineTrainingSession[] = [
-  {
-    id: "off-1",
-    courseId: "c-2",
-    courseTitle:
-      "การตรวจรับเคมีวัตถุดิบและจัดทำรายงานคุณภาพด้วยเครื่องวิเคราะห์ความชื้น (QC Inspection Cert)",
-    sessionName:
-      "คลาสปฏิบัติการเครื่อง Sartorius และเป่าฟิล์มสุ่ม (Moisture Analyzer Practical Lab)",
-    location: "ห้องปฏิบัติการควบคุมคุณภาพ (Quality Control Lab - Room 2)",
-    instructor: "คุณหญิง ดารินทร์ แซ่ตั้ง (QA/QC supervisor)",
-    date: "ทุกวันพุธและศุกร์ เวลา 14:00 - 15:30 น.",
-    qrValue: "QR_OFFLINE_SESSION_QC_MOISTURE",
-  },
-  {
-    id: "off-2",
-    courseId: "c-3",
-    courseTitle: "ความปลอดภัยในการใช้รถยกไฟฟ้า (Forklift Operation Safety)",
-    sessionName:
-      "ภาคปฏิบัติการขับขี่รถยกและการจัดวางพาเลททรงสูง (Forklift Maneuvering & Racking Practice)",
-    location:
-      "ลานโหลดคลังสินค้าประตูดำ โซนเอ (Warehouse Zone A - Racking Area)",
-    instructor: "ช่างสมชาย สมชาย รักเรียน (Senior Production Engineer)",
-    date: "ทุกวันอังคารและพฤหัสบดี เวลา 09:00 - 11:30 น.",
-    qrValue: "QR_OFFLINE_SESSION_FORKLIFT_SAFETY",
-  },
-  {
-    id: "off-3",
-    courseId: "c-1",
-    courseTitle:
-      "หลักสูตรปูพื้นฐานพนักงานคลังสินค้าใหม่ (Onboarding for Warehouse Staff)",
-    sessionName:
-      "ฝึกเดินเส้นนำทาง ตีความป้ายบาร์โค้ด และจัดระเบียบ 5ส หน้างานจริง (WMS & 5S Ground Induction)",
-    location: "หน้าจุดรับของแผนกคลังสินค้า (Receiving Docks - Warehouse)",
-    instructor: "คุณก้อย สิริมา แสงสะอาด (Managing Director)",
-    date: "ทุกวันเสาร์ เวลา 10:00 - 12:00 น.",
-    qrValue: "QR_OFFLINE_SESSION_WAREHOUSE_ONBOARDING",
-  },
-];
+export const OFFLINE_TRAINING_SESSIONS: OfflineTrainingSession[] = [];
 
 // Comforable tone audio beep speaker
 export const playBeep = () => {
@@ -444,7 +409,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
   // QR/Offline Attendance logs state
   const [showQRScannerMode, setShowQRScannerMode] = useState<boolean>(false);
   const [qrTab, setQrTab] = useState<"scan" | "generate" | "logs">("scan");
-  const [selectedSessionId, setSelectedSessionId] = useState<string>("off-1");
+  const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanSuccess, setScanSuccess] = useState<boolean>(false);
   const [scannedSessionName, setScannedSessionName] = useState<string>("");
@@ -2369,139 +2334,152 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           </div>
 
           {qrTab === "scan" ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-              <div className="space-y-4">
-                <div className="p-4 bg-indigo-50/40 rounded-xl border border-[#15329c]/10 text-xs leading-relaxed">
-                  <h4 className="font-extrabold text-[#15329c] mb-1 flex items-center gap-1">
-                    <Landmark className="w-4 h-4" />{" "}
-                    นวัตกรรมสแกนสอบแบบเช็คอินออนไซต์ (Class Check-In System)
-                  </h4>
-                  <p className="text-slate-600">
-                    เพื่ออำนวยความสะดวกในการอบรมเชิงทดลองปฏิบัติงานจริง ณ ห้อง
-                    Lab หรือคลังสินค้าประตูดำพนักงานสามารถพรีสแกน QR Code
-                    หน้าชั้นเรียนจริงเพื่อบันทึกประวัติเข้าระบบ ERP
-                    อัปประเมินและเกรด 100%
-                    สอบผ่านทันทีโดยไม่ต้องเข้าสอบข้อเขียน!
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 block">
-                    โปรดเลือกคาบอบรมที่ต้องการสแกนจำลอง:
-                  </label>
-                  <select
-                    value={selectedSessionId}
-                    onChange={(e) => {
-                      setSelectedSessionId(e.target.value);
-                      setScanSuccess(false);
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs"
-                  >
-                    {OFFLINE_TRAINING_SESSIONS.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.id}: {s.sessionName.substring(0, 45)}...
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="p-3 bg-slate-50 rounded-xl space-y-1 border text-xs">
-                  <p>
-                    <strong>ผู้สอน:</strong>{" "}
-                    {
-                      OFFLINE_TRAINING_SESSIONS.find(
-                        (s) => s.id === selectedSessionId,
-                      )?.instructor
-                    }
-                  </p>
-                  <p>
-                    <strong>สถานที่:</strong>{" "}
-                    {
-                      OFFLINE_TRAINING_SESSIONS.find(
-                        (s) => s.id === selectedSessionId,
-                      )?.location
-                    }
-                  </p>
-                  <p>
-                    <strong>เวลา:</strong>{" "}
-                    {
-                      OFFLINE_TRAINING_SESSIONS.find(
-                        (s) => s.id === selectedSessionId,
-                      )?.date
-                    }
-                  </p>
-                </div>
-
-                <div className="pt-2">
-                  <button
-                    onClick={() =>
-                      handlePerformSimulatedScan(selectedSessionId)
-                    }
-                    disabled={isScanning}
-                    className="w-full bg-gradient-to-r from-[#15329c] to-indigo-705 text-white py-2.5 px-4 rounded-xl font-bold text-xs hover:from-[#11297e] hover:to-indigo-805 disabled:bg-slate-300 cursor-pointer shadow flex items-center justify-center gap-2"
-                  >
-                    <QrCode className="w-4 h-4" />
-                    {isScanning
-                      ? "กำลังจับโฟกัสสบเรดาร์รหัสสแกน..."
-                      : "กดเริ่มสแกน QR ออนไซต์จำลอง (Start Cam Scan)"}
-                  </button>
-                </div>
-
-                {scanSuccess && (
-                  <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs space-y-1 animate-fade-in">
-                    <p className="font-extrabold flex items-center gap-1">
-                      <CheckCircle className="w-4 h-4 text-emerald-600" />{" "}
-                      สแกนลงชื่อเข้าร่วมออนไซต์ได้รับการรับรองสำเร็จ!
-                    </p>
-                    <p className="text-[11px] text-slate-700">
-                      รายชื่อคาบ: {scannedSessionName}
-                    </p>
-                    <p className="text-[10px] text-indigo-700 font-mono font-bold">
-                      บันทึกวุฒิความรู้คอร์ส: {scannedCourseTitle} เกรด 100%
-                      เรียบร้อย
+            OFFLINE_TRAINING_SESSIONS.length === 0 ? (
+              <div className="text-center py-16 space-y-3">
+                <QrCode className="w-12 h-12 text-slate-300 mx-auto" />
+                <h4 className="font-bold text-slate-700 text-sm">
+                  ยังไม่มีคาบอบรมออฟไลน์ที่ตั้งค่าไว้ในระบบ
+                </h4>
+                <p className="text-slate-400 text-xs max-w-sm mx-auto">
+                  กรุณาติดต่อผู้ดูแลระบบเพื่อเพิ่มคาบอบรมภาคปฏิบัติ
+                  พร้อมกำหนดสถานที่ ผู้สอน และเวลาให้ตรงกับตารางจริงของโรงงาน
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                <div className="space-y-4">
+                  <div className="p-4 bg-indigo-50/40 rounded-xl border border-[#15329c]/10 text-xs leading-relaxed">
+                    <h4 className="font-extrabold text-[#15329c] mb-1 flex items-center gap-1">
+                      <Landmark className="w-4 h-4" />{" "}
+                      นวัตกรรมสแกนสอบแบบเช็คอินออนไซต์ (Class Check-In System)
+                    </h4>
+                    <p className="text-slate-600">
+                      เพื่ออำนวยความสะดวกในการอบรมเชิงทดลองปฏิบัติงานจริง ณ ห้อง
+                      Lab หรือคลังสินค้าประตูดำพนักงานสามารถพรีสแกน QR Code
+                      หน้าชั้นเรียนจริงเพื่อบันทึกประวัติเข้าระบบ ERP
+                      อัปประเมินและเกรด 100%
+                      สอบผ่านทันทีโดยไม่ต้องเข้าสอบข้อเขียน!
                     </p>
                   </div>
-                )}
-              </div>
 
-              {/* QR Visual representation */}
-              <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-6 bg-slate-50/50 relative">
-                {isScanning && (
-                  <div className="absolute inset-0 bg-slate-900/5 backdrop-blur-xs flex items-center justify-center rounded-3xl z-10">
-                    <div className="p-4 bg-white rounded-2xl shadow-lg border flex items-center gap-3 text-xs font-bold text-[#15329c]">
-                      <RefreshCw className="w-5 h-5 animate-spin" />{" "}
-                      ค้นหาพอร์ตรหัสอ้างอิง...
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 block">
+                      โปรดเลือกคาบอบรมที่ต้องการสแกนจำลอง:
+                    </label>
+                    <select
+                      value={selectedSessionId}
+                      onChange={(e) => {
+                        setSelectedSessionId(e.target.value);
+                        setScanSuccess(false);
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs"
+                    >
+                      {OFFLINE_TRAINING_SESSIONS.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.id}: {s.sessionName.substring(0, 45)}...
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1 border text-xs">
+                    <p>
+                      <strong>ผู้สอน:</strong>{" "}
+                      {
+                        OFFLINE_TRAINING_SESSIONS.find(
+                          (s) => s.id === selectedSessionId,
+                        )?.instructor
+                      }
+                    </p>
+                    <p>
+                      <strong>สถานที่:</strong>{" "}
+                      {
+                        OFFLINE_TRAINING_SESSIONS.find(
+                          (s) => s.id === selectedSessionId,
+                        )?.location
+                      }
+                    </p>
+                    <p>
+                      <strong>เวลา:</strong>{" "}
+                      {
+                        OFFLINE_TRAINING_SESSIONS.find(
+                          (s) => s.id === selectedSessionId,
+                        )?.date
+                      }
+                    </p>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      onClick={() =>
+                        handlePerformSimulatedScan(selectedSessionId)
+                      }
+                      disabled={isScanning}
+                      className="w-full bg-gradient-to-r from-[#15329c] to-indigo-705 text-white py-2.5 px-4 rounded-xl font-bold text-xs hover:from-[#11297e] hover:to-indigo-805 disabled:bg-slate-300 cursor-pointer shadow flex items-center justify-center gap-2"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      {isScanning
+                        ? "กำลังจับโฟกัสสบเรดาร์รหัสสแกน..."
+                        : "กดเริ่มสแกน QR ออนไซต์จำลอง (Start Cam Scan)"}
+                    </button>
+                  </div>
+
+                  {scanSuccess && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs space-y-1 animate-fade-in">
+                      <p className="font-extrabold flex items-center gap-1">
+                        <CheckCircle className="w-4 h-4 text-emerald-600" />{" "}
+                        สแกนลงชื่อเข้าร่วมออนไซต์ได้รับการรับรองสำเร็จ!
+                      </p>
+                      <p className="text-[11px] text-slate-700">
+                        รายชื่อคาบ: {scannedSessionName}
+                      </p>
+                      <p className="text-[10px] text-indigo-700 font-mono font-bold">
+                        บันทึกวุฒิความรู้คอร์ส: {scannedCourseTitle} เกรด 100%
+                        เรียบร้อย
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* QR Visual representation */}
+                <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-6 bg-slate-50/50 relative">
+                  {isScanning && (
+                    <div className="absolute inset-0 bg-slate-900/5 backdrop-blur-xs flex items-center justify-center rounded-3xl z-10">
+                      <div className="p-4 bg-white rounded-2xl shadow-lg border flex items-center gap-3 text-xs font-bold text-[#15329c]">
+                        <RefreshCw className="w-5 h-5 animate-spin" />{" "}
+                        ค้นหาพอร์ตรหัสอ้างอิง...
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-4 bg-white rounded-2xl border-4 border-[#15329c] shadow-md flex justify-center items-center">
+                    <div className="grid grid-cols-17 gap-0.5 bg-white">
+                      {generateMockQRGrid(selectedSessionId).map((row, rIdx) =>
+                        row.map((cell, cIdx) => (
+                          <div
+                            key={`${rIdx}-${cIdx}`}
+                            className={`w-2.5 h-2.5 transition-colors duration-150 ${cell ? "bg-slate-950" : "bg-white"}`}
+                          />
+                        )),
+                      )}
                     </div>
                   </div>
-                )}
 
-                <div className="p-4 bg-white rounded-2xl border-4 border-[#15329c] shadow-md flex justify-center items-center">
-                  <div className="grid grid-cols-17 gap-0.5 bg-white">
-                    {generateMockQRGrid(selectedSessionId).map((row, rIdx) =>
-                      row.map((cell, cIdx) => (
-                        <div
-                          key={`${rIdx}-${cIdx}`}
-                          className={`w-2.5 h-2.5 transition-colors duration-150 ${cell ? "bg-slate-950" : "bg-white"}`}
-                        />
-                      )),
-                    )}
+                  <div className="text-center mt-3 space-y-0.5">
+                    <p className="text-xs font-mono font-bold text-slate-505">
+                      {
+                        OFFLINE_TRAINING_SESSIONS.find(
+                          (s) => s.id === selectedSessionId,
+                        )?.qrValue
+                      }
+                    </p>
+                    <p className="text-[9.5px] text-slate-400">
+                      QR Code เช็กชื่อสอบอ้างอิง (ISO Internal Track No.)
+                    </p>
                   </div>
                 </div>
-
-                <div className="text-center mt-3 space-y-0.5">
-                  <p className="text-xs font-mono font-bold text-slate-505">
-                    {
-                      OFFLINE_TRAINING_SESSIONS.find(
-                        (s) => s.id === selectedSessionId,
-                      )?.qrValue
-                    }
-                  </p>
-                  <p className="text-[9.5px] text-slate-400">
-                    QR Code เช็กชื่อสอบอ้างอิง (ISO Internal Track No.)
-                  </p>
-                </div>
               </div>
-            </div>
+            )
           ) : (
             /* ATTENDANCE LOGS LIST */
             <div className="space-y-4">

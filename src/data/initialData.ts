@@ -4,24 +4,12 @@
  */
 
 import { User, DocumentItem, Course, KBArticle, Expert, SearchLog, UserCourseProgress, RatingAndComment, ContactRequest, EmployeeMaster } from '../types';
-import { DEFAULT_AVATAR_URL } from '../utils/assets';
 
-export const INITIAL_USERS: User[] = [
-  {
-    id: 'u-1',
-    name: 'ศรัณย์ โตพิสิฐ (บอล)',
-    employeeId: 'SM319',
-    departmentId: 'd-it',
-    position: 'เจ้าหน้าที่ Programmer',
-    role: 'Admin',
-    email: 'saran@royalmeiwa.com',
-    phone: '02-749-4100 ต่อ 2111',
-    // TODO: seed data ควรมีรูปโปรไฟล์จริงในระยะยาว — ใช้ placeholder ชั่วคราวเพื่อเลี่ยง external CDN
-    avatarUrl: DEFAULT_AVATAR_URL,
-    password: '120246',
-    startDate: '2026-04-01'
-  } as User
-];
+// INITIAL_USERS ว่างเปล่าโดยตั้งใจ — ห้าม hardcode credential ของแอดมินไว้ในซอร์สโค้ด
+// บัญชีแอดมินคนแรกจะถูก seed ที่ server.ts ตอน startup โดยอ่านค่าจาก
+// environment variable (INITIAL_ADMIN_EMPLOYEE_ID / INITIAL_ADMIN_PASSWORD ฯลฯ)
+// ดู .env.example และ README.md สำหรับวิธีตั้งค่า
+export const INITIAL_USERS: User[] = [];
 
 export const INITIAL_DOCUMENTS: DocumentItem[] = [];
 
