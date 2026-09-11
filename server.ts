@@ -518,7 +518,7 @@ async function startServer() {
             fs.mkdirSync(dir, { recursive: true });
           }
           fs.writeFileSync(path.join(dir, cleanName), buffer);
-          fs.writeFileSync(path.join(dir, `${cleanName}.json`), metaJson);
+          fs.writeFileSync(path.join(dir, `${cleanName}.meta.json`), metaJson);
         } catch (e) {
           console.warn("Failed to write file to directory:", dir, e);
         }
@@ -553,8 +553,8 @@ async function startServer() {
     // จาก sidecar .meta.json ด้วย ไม่งั้นไฟล์ QP ที่ restricted จะเปิดอ่านได้ฟรี
     const fs = require("fs");
     const candidateDirs = [
-      +path.join(process.cwd(), "public", "uploads"),
-      +path.join(process.cwd(), "dist", "uploads"),
+      path.join(process.cwd(), "public", "uploads"),
+      path.join(process.cwd(), "dist", "uploads"),
     ];
     for (const dir of candidateDirs) {
       const filePath = path.join(dir, filename);
@@ -1335,18 +1335,23 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.get("/api/ratings", requireAuth, (req, res) => {
     res.json(db_ratings);
   });
-  app.post("/api/ratings", requireAuth, requireOwnField("userId"), (req, res) => {
-    try {
-      const rating = req.body;
-      if (!rating.id) {
-        rating.id = `r-${Date.now()}`;
+  app.post(
+    "/api/ratings",
+    requireAuth,
+    requireOwnField("userId"),
+    (req, res) => {
+      try {
+        const rating = req.body;
+        if (!rating.id) {
+          rating.id = `r-${Date.now()}`;
+        }
+        db_ratings.unshift(rating);
+        res.json(rating);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_ratings.unshift(rating);
-      res.json(rating);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
 
   // User Progress APIs — เขียนได้ทุก login (เป็นข้อมูลของตัวเอง)
   app.get("/api/user_progress", requireAuth, (req, res) => {
@@ -1458,18 +1463,23 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {
     res.json(db_search_logs);
   });
-  app.post("/api/search_logs", requireAuth, requireOwnField("userId"), (req, res) => {
-    try {
-      const log = req.body;
-      if (!log.id) {
-        log.id = `sl-${Date.now()}`;
+  app.post(
+    "/api/search_logs",
+    requireAuth,
+    requireOwnField("userId"),
+    (req, res) => {
+      try {
+        const log = req.body;
+        if (!log.id) {
+          log.id = `sl-${Date.now()}`;
+        }
+        db_search_logs.unshift(log);
+        res.json(log);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_search_logs.unshift(log);
-      res.json(log);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
 
   // Contact Requests APIs
   app.get("/api/contact_requests", requireAuth, (req, res) => {
@@ -1480,18 +1490,23 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     // Viewer เห็นเฉพาะคำถามที่ตนเองเป็นคนส่งเท่านั้น
     res.json(db_contact_requests.filter((r) => r.userId === req.authUser!.id));
   });
-  app.post("/api/contact_requests", requireAuth, requireOwnField("userId"), (req, res) => {
-    try {
-      const contactReq = req.body;
-      if (!contactReq.id) {
-        contactReq.id = `cr-${Date.now()}`;
+  app.post(
+    "/api/contact_requests",
+    requireAuth,
+    requireOwnField("userId"),
+    (req, res) => {
+      try {
+        const contactReq = req.body;
+        if (!contactReq.id) {
+          contactReq.id = `cr-${Date.now()}`;
+        }
+        db_contact_requests.unshift(contactReq);
+        res.json(contactReq);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_contact_requests.unshift(contactReq);
-      res.json(contactReq);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
   app.post(
     "/api/contact_requests/:id/reply",
     requireAuth,
@@ -1613,18 +1628,23 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.get("/api/km_contribution_logs", requireAuth, (req, res) => {
     res.json(db_km_contribution_logs);
   });
-  app.post("/api/km_contribution_logs", requireAuth, requireOwnField("userId"), (req, res) => {
-    try {
-      const log = req.body;
-      if (!log.id) {
-        log.id = `km-log-${Date.now()}`;
+  app.post(
+    "/api/km_contribution_logs",
+    requireAuth,
+    requireOwnField("userId"),
+    (req, res) => {
+      try {
+        const log = req.body;
+        if (!log.id) {
+          log.id = `km-log-${Date.now()}`;
+        }
+        db_km_contribution_logs.unshift(log);
+        res.json(log);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
       }
-      db_km_contribution_logs.unshift(log);
-      res.json(log);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+    },
+  );
 
   // Employee Master APIs — เฉพาะ Admin/Editor เห็นและจัดการได้ (ตรงกับ UI)
   app.get(
