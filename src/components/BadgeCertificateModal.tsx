@@ -13,6 +13,7 @@ import {
   Check,
 } from "lucide-react";
 import { User, Course } from "../types";
+import { getDepartmentById } from "../utils/departmentUtils";
 
 interface BadgeCertificateModalProps {
   isOpen: boolean;
@@ -403,7 +404,9 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                   </span>
                 </p>
                 <p className="text-[9px] text-slate-400">
-                  สำนักงานปฏิบัติการโรงงาน: {user.department}
+                  สำนักงานปฏิบัติการโรงงาน:{" "}
+                  {getDepartmentById(user.departmentId)?.name ||
+                    user.departmentId}
                 </p>
               </div>
 

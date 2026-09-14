@@ -414,20 +414,18 @@ async function startServer() {
       const employeeRecord = db_employee_master.find(
         (e) => e.employeeId.toLowerCase() === employeeId.toLowerCase(),
       );
-      if (!employeeRecord) {
+      const alreadyRegistered = db_users.some(
+        (u) => u.employeeId.toLowerCase() === employeeId.toLowerCase(),
+      );
+
+      // รวม error ทั้ง "ไม่พบรหัส" และ "ซ้ำ" ให้เป็นข้อความ/สถานะเดียวกัน
+      // เพื่อไม่ให้ใครใช้ endpoint นี้ตรวจสอบ (enumerate) ว่ารหัสพนักงานไหนมีอยู่จริงในระบบได้
+      if (!employeeRecord || alreadyRegistered) {
         return res.status(400).json({
-          error: "NOT_FOUND",
-          message: "ไม่พบรหัสพนักงานนี้ในฐานข้อมูลกลาง",
+          error: "REGISTRATION_FAILED",
+          message:
+            "ไม่สามารถลงทะเบียนด้วยข้อมูลนี้ได้ กรุณาตรวจสอบรหัสพนักงานอีกครั้ง หรือติดต่อผู้ดูแลระบบ",
         });
-      }
-      if (
-        db_users.some(
-          (u) => u.employeeId.toLowerCase() === employeeId.toLowerCase(),
-        )
-      ) {
-        return res
-          .status(409)
-          .json({ error: "DUPLICATE", message: "รหัสพนักงานนี้ลงทะเบียนแล้ว" });
       }
 
       // คำนวณ role เองจากข้อมูล employeeRecord เท่านั้น ห้ามรับจาก client
@@ -502,7 +500,6 @@ async function startServer() {
       // เขียนลง filesystem จริง (ทั้ง buffer และ metadata) เพื่อให้ restricted flag
       // รอดตอน server restart — ก่อนหน้านี้ uploadedFiles (in-memory Map) หายหมดตอน
       // restart ทำให้ QP ที่ตั้งใจ restrict กลับอ่านได้แบบไม่จำกัดสิทธิ์
-      const fs = require("fs");
       const uploadsDirs = [
         path.join(process.cwd(), "public", "uploads"),
         path.join(process.cwd(), "dist", "uploads"),
@@ -551,7 +548,6 @@ async function startServer() {
     }
     // Try to read from filesystem (server restart case) — ต้องเช็ค restricted
     // จาก sidecar .meta.json ด้วย ไม่งั้นไฟล์ QP ที่ restricted จะเปิดอ่านได้ฟรี
-    const fs = require("fs");
     const candidateDirs = [
       path.join(process.cwd(), "public", "uploads"),
       path.join(process.cwd(), "dist", "uploads"),
@@ -1063,6 +1059,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Documents APIs
   app.get("/api/documents", requireAuth, (req, res) => {
+    // Viewer เห็นเฉพาะเอกสารที่ Published เท่านั้น — ก่อนหน้านี้กรองแค่ฝั่ง client
+    // (DocumentList.tsx) ทำให้ title/description/exampleText ของ Draft & Pending
+    // หลุดไปถึง browser ของ Viewer อยู่ดี ต้องกรองที่ server ด้วย
+    if (req.authUser!.role === "Viewer") {
+      return res.json(db_documents.filter((d) => d.status === "Published"));
+    }
     res.json(db_documents);
   });
   app.post(
@@ -1179,6 +1181,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Courses APIs
   app.get("/api/courses", requireAuth, (req, res) => {
+    // Viewer ไม่ควรเห็นคอร์สที่ยังไม่อนุมัติเลย (รวมถึง quiz.correctAnswer ที่แนบมาด้วย)
+    // เดิมกรองแค่ฝั่ง client (LearningCenter.tsx) ซึ่งข้อมูลจริงถูกส่งมาแล้วตั้งแต่ API
+    if (req.authUser!.role === "Viewer") {
+      return res.json(db_courses.filter((c) => c.isApproved !== false));
+    }
     res.json(db_courses);
   });
   app.post(
@@ -1241,6 +1248,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // KB Articles APIs
   app.get("/api/kb_articles", requireAuth, (req, res) => {
+    // Viewer เห็นเฉพาะบทความที่ Approved แล้ว — เดิมกรองแค่ฝั่ง client (TechnicalKB.tsx)
+    if (req.authUser!.role === "Viewer") {
+      return res.json(
+        db_kb_articles.filter((art) => art.status === "Approved"),
+      );
+    }
     res.json(db_kb_articles);
   });
   app.post("/api/kb_articles", requireAuth, (req, res) => {
@@ -1691,8 +1704,29 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     (req, res) => {
       try {
         const { employeeMaster } = req.body;
-        if (Array.isArray(employeeMaster)) {
+        if (!Array.isArray(employeeMaster)) {
+          return res.status(400).json({ error: "INVALID_PAYLOAD" });
+        }
+
+        if (req.authUser!.role === "Admin") {
+          // Admin เท่านั้นที่ full-replace ได้ (รองรับ "เคลียร์ทั้งหมด" และ
+          // import ที่ตั้งใจแทนที่ฐานทั้งก้อน)
           db_employee_master = employeeMaster;
+        } else {
+          // Editor: merge/upsert ตาม employeeId เท่านั้น ห้ามลบ record ที่มีอยู่เดิม
+          // ป้องกัน Editor ล้างฐานพนักงานทั้งหมดโดยไม่ได้ตั้งใจหรือมีเจตนาร้าย
+          const merged = [...db_employee_master];
+          employeeMaster.forEach((incoming) => {
+            const idx = merged.findIndex(
+              (e) => e.employeeId === incoming.employeeId,
+            );
+            if (idx !== -1) {
+              merged[idx] = incoming;
+            } else {
+              merged.push(incoming);
+            }
+          });
+          db_employee_master = merged;
         }
         res.json(db_employee_master);
       } catch (err: any) {

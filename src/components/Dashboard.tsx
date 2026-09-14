@@ -32,6 +32,7 @@ import {
 import { getUserBadges } from "../utils/badgeUtils";
 import { BadgePill } from "./BadgeDisplay";
 import { BadgeCertificateModal } from "./BadgeCertificateModal";
+import { getDepartmentById } from "../utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
 import { getRequiredCoursesForPosition } from "../utils/courseutils";
 
@@ -810,7 +811,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </h4>
                     <p className="text-xs text-slate-400 font-mono mt-1">
                       รหัสพนักงาน: {selectedUserTranscript.employeeId} | สังกัด:{" "}
-                      {selectedUserTranscript.department}
+                      {getDepartmentById(selectedUserTranscript.departmentId)
+                        ?.name || selectedUserTranscript.departmentId}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1115,7 +1117,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         ฝ่ายสังกัด (Dept):
                       </span>{" "}
                       <span className="font-medium text-slate-800">
-                        {selectedUserTranscript.department}
+                        {getDepartmentById(selectedUserTranscript.departmentId)
+                          ?.name || selectedUserTranscript.departmentId}
                       </span>
                     </div>
                   </div>
