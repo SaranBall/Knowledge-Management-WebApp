@@ -1075,6 +1075,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         if (!newDoc.id) {
           newDoc.id = `doc-${Date.now()}`;
         }
+        const isAdmin = req.authUser!.role === "Admin";
+        newDoc.status = isAdmin ? "Published" : "Pending Approval";
+        newDoc.approvedBy = isAdmin ? req.authUser!.employeeId : undefined;
+        newDoc.approvedAt = isAdmin ? new Date().toISOString() : undefined;
         db_documents.unshift(newDoc);
         res.json(newDoc);
       } catch (err: any) {
@@ -1089,7 +1093,19 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     (req, res) => {
       try {
         const { id } = req.params;
-        const updatedDoc = req.body;
+        const existing = db_documents.find((d) => d.id === id);
+        if (!existing) {
+          return res.status(404).json({ error: "NOT_FOUND" });
+        }
+        const isAdmin = req.authUser!.role === "Admin";
+        const updatedDoc: DocumentItem = {
+          ...req.body,
+          id,
+          // Editor แก้เนื้อหาเอกสารได้ แต่ห้ามเปลี่ยนสถานะอนุมัติเองผ่านการแก้ไข
+          status: isAdmin ? req.body.status : existing.status,
+          approvedBy: isAdmin ? req.body.approvedBy : existing.approvedBy,
+          approvedAt: isAdmin ? req.body.approvedAt : existing.approvedAt,
+        };
         db_documents = db_documents.map((d) => (d.id === id ? updatedDoc : d));
         res.json(updatedDoc);
       } catch (err: any) {
@@ -1175,6 +1191,8 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         if (!newCourse.id) {
           newCourse.id = `c-${Date.now()}`;
         }
+        newCourse.isApproved = req.authUser!.role === "Admin";
+        newCourse.createdByRole = req.authUser!.role;
         db_courses.unshift(newCourse);
         res.json(newCourse);
       } catch (err: any) {
@@ -1189,7 +1207,16 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     (req, res) => {
       try {
         const { id } = req.params;
-        const updatedCourse = req.body;
+        const existing = db_courses.find((c) => c.id === id);
+        if (!existing) {
+          return res.status(404).json({ error: "NOT_FOUND" });
+        }
+        const isAdmin = req.authUser!.role === "Admin";
+        const updatedCourse: Course = {
+          ...req.body,
+          id,
+          isApproved: isAdmin ? req.body.isApproved : existing.isApproved,
+        };
         db_courses = db_courses.map((c) => (c.id === id ? updatedCourse : c));
         res.json(updatedCourse);
       } catch (err: any) {
@@ -1223,6 +1250,8 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       if (!newArt.id) {
         newArt.id = `kb-${Date.now()}`;
       }
+      // บังคับ status จาก role ที่ server ตรวจสอบเองเท่านั้น ห้ามเชื่อ client
+      newArt.status = req.authUser!.role === "Admin" ? "Approved" : "Pending";
       db_kb_articles.unshift(newArt);
       res.json(newArt);
     } catch (err: any) {
