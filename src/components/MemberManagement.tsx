@@ -187,7 +187,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     // SECURITY BLOCK: Members cannot edit their own data
     if (u.id === currentUser.id) {
       alert(
-        "ข้อกำหนดมาตรฐาน ISO & ความปลอดภัยบุคคล: ไม่อนุญาตให้ท่านแก้ไขสิทธ์หรือรายละเอียดในบัญชีของตนเองได้โดยตรง โปรดแจ้งแอดมินหรือบุคลากรท่านอื่นเป็นผู้ดำเนินการแทน",
+        "ข้อกำหนดมาตรฐาน ISO & ความปลอดภัยบุคคล: ไม่อนุญาตให้ท่านแก้ไขสิทธิ์หรือรายละเอียดในบัญชีของตนเองได้โดยตรง โปรดแจ้งแอดมินหรือบุคลากรท่านอื่นเป็นผู้ดำเนินการแทน",
       );
       return;
     }
@@ -3279,7 +3279,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                 type="button"
                                 onClick={() => {
                                   const confirmed = window.confirm(
-                                    `คุณแน่ใจหรือไม่ว่าต้องการเพิกถอนข้อมูลพนักงาน "${emp.name}" ออกจากสารระบบกลาง?`,
+                                    `คุณแน่ใจหรือไม่ว่าต้องการเพิกถอนข้อมูลพนักงาน "${emp.name}" ออกจากฐานข้อมูลกลาง?`,
                                   );
                                   if (confirmed) {
                                     onUpdateEmployeeMaster(

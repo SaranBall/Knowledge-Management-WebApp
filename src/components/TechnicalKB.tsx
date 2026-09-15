@@ -491,10 +491,10 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
           {!selectedArticle ? (
             <div className="text-center py-20 text-slate-400 text-xs space-y-2">
               <FileText className="w-10 h-10 mx-auto text-slate-300" />
-              <p className="font-bold">กรุณาเลือกทฤษฎีบทความเชิงช่างด้านซ้าย</p>
+              <p className="font-bold">โปรดเลือกบทความเชิงช่างด้านซ้าย</p>
               <p className="text-[10px]">
-                ระบบจะกู่โชว์ปัญหา สาเหตุ วิธีแก้ วิธีป้องกัน
-                บรอกทอรรถประโยชน์ครบวงจร
+                ระบบจะแสดงปัญหา สาเหตุ วิธีแก้ไข และวิธีป้องกัน
+                ให้ครบถ้วนในที่เดียว
               </p>
             </div>
           ) : (
@@ -582,7 +582,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
               <div className="space-y-1 bg-red-50/40 p-4 rounded-xl border border-red-100">
                 <h5 className="font-bold text-red-900 flex items-center gap-1.5 text-xs">
                   <span className="w-1.5 h-1.5 bg-red-650 rounded-full" />
-                  ปัญหาชำรุดเก้อะ: (Problem)
+                  รายละเอียดปัญหา: (Problem)
                 </h5>
                 <p className="text-slate-700 leading-relaxed pl-3 font-medium whitespace-pre-wrap">
                   {selectedArticle.problem}
@@ -781,7 +781,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                 {/* Problem Statement */}
                 <div className="space-y-1">
                   <label className="font-semibold text-slate-600 block">
-                    1. รายละเอียดอาการ ปัญหารั่วซึม / ชำรุดเด้อะ: (Problem)
+                    1. รายละเอียดอาการ/ปัญหาที่พบ (Problem)
                   </label>
                   <textarea
                     id="new-kb-problem"
@@ -1152,7 +1152,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                   {/* Title */}
                   <div className="space-y-1">
                     <label className="font-semibold text-slate-600 block">
-                      หัวข้อเทคนิคคสลัด:
+                      หัวข้อเทคนิค:
                     </label>
                     <input
                       id="edit-kb-title"

@@ -78,7 +78,7 @@ export function getUserBadges(
     {
       id: 'safety-expert',
       title: 'Safety Expert (ดาวเด่นความปลอดภัย)',
-      description: 'ผ่านหลักสูตร "ความปลอดภัยในการใช้รถยกไฟฟ้า (Forklift Operation Safety)" หรือรหัวหลักสูตร c-3',
+      description: 'ผ่านหลักสูตร "ความปลอดภัยในการใช้รถยกไฟฟ้า (Forklift Operation Safety)" หรือรหัสหลักสูตร c-3',
       category: 'Compliance',
       iconName: 'Shield',
       color: 'teal',
@@ -122,7 +122,7 @@ export function getUserBadges(
     {
       id: 'knowledge-guru',
       title: 'Knowledge Guru (ผู้แบ่งปันภูมิปัญญา)',
-      description: 'มีประวัติส่งข้อเสนอโครงการปรับปรุงงาน KM Proposal หรือสอบทดสอบวิชาใดวิชาหนึ่งได้คะแนนเป๊ะเต็ม 100% หรือพิกัดระดับ Admin บุกเบิกคลังสมอง',
+      description: 'มีประวัติส่งข้อเสนอโครงการปรับปรุงงาน KM Proposal หรือสอบทดสอบวิชาใดวิชาหนึ่งได้คะแนนเต็ม 100% หรือมีสิทธิ์ระดับ Admin',
       category: 'Contribution',
       iconName: 'Crown',
       color: 'violet',

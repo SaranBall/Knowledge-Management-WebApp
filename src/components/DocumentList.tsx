@@ -835,7 +835,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                       onClick={() => {
                         if (
                           window.confirm(
-                            `กรุณายืนยันการลบไฟล์เอกสารมาตรฐาน "${selectedDoc.title}" สมบูรณ์พัสดุ?`,
+                            `กรุณายืนยันการลบเอกสารมาตรฐาน "${selectedDoc.title}" อย่างถาวร? การลบนี้ไม่สามารถกู้คืนได้!`,
                           )
                         ) {
                           handleDeleteClick(selectedDoc.id);
@@ -1620,7 +1620,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                 <div className="space-y-2">
                   <div>
                     <label className="text-[10px] text-slate-500 block">
-                      ขัั้นตอนสั้นๆ สาธิตการปฏิบัติงาน:
+                      ขั้นตอนสั้นๆ สาธิตการปฏิบัติงาน:
                     </label>
                     <textarea
                       id="edit-doc-exampletext"

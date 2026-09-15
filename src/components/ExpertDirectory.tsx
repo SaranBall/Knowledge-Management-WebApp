@@ -425,7 +425,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                       onClick={() => {
                         if (
                           window.confirm(
-                            `คุณแน่ใจว่าต้องการลบราชื่อผู้ทำงานระดับเซียน "${selectedExpert.name}" หลุดตำแหน่ง?`,
+                            `คุณแน่ใจว่าต้องการลบข้อมูลผู้เชี่ยวชาญ "${selectedExpert.name}" ออกจากระบบ? การลบนี้ไม่สามารถกู้คืนได้!`,
                           )
                         ) {
                           onDeleteExpert(selectedExpert.id);
@@ -465,7 +465,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
 
                   <div className="space-y-2 text-slate-650 pt-2">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      ขบวนการข้อมูลติดต่อ
+                      ข้อมูลติดต่อ
                     </span>
                     <div className="flex items-center gap-2">
                       <Phone className="w-4 h-4 text-slate-400" />
@@ -517,7 +517,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
               <div className="bg-slate-50/60 p-6 border-t border-slate-200">
                 <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2 mb-4 pb-1.5 border-b">
                   <MessageSquare className="w-4 h-4 text-indigo-600" />
-                  ส่งคำปรึกษาการแก้ไขจุดหยุดชงักทางเทคนิค (Direct Consultation
+                  ส่งคำปรึกษาการแก้ไขจุดหยุดชะงักทางเทคนิค (Direct Consultation
                   Hub)
                 </h4>
 
@@ -564,7 +564,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                       className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded-xl cursor-pointer transition flex items-center justify-center gap-1.5"
                     >
                       <Send className="w-3.5 h-3.5" />
-                      ส่งคำอภิปุจฉาถึงผู้เชี่ยวชาญทันที
+                      ส่งคำถามถึงผู้เชี่ยวชาญทันที
                     </button>
                   </form>
 

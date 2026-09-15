@@ -1164,7 +1164,7 @@ export default function App() {
                 {/* 3.REGISTER BTN */}
                 <div className="p-3 bg-indigo-50/70 rounded-2xl border border-indigo-100 text-left space-y-1">
                   <span className="text-[10px] font-bold text-indigo-950 uppercase block tracking-wider">
-                    🛎️ กำหนดความปลอดภัยสองปัจจัย
+                    🔐 ความปลอดภัยด้วยรหัส PIN
                   </span>
                   <p className="text-[9.5px] text-slate-600 leading-normal">
                     ตามข้อกำหนดมาตรฐานสากล ISO9001

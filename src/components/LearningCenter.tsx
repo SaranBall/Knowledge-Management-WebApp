@@ -1515,7 +1515,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                   <div className="text-center">
                     <p className="text-slate-500 text-[11px] italic">
-                      ด้วยสัตย์พิสูจน์ขอประกาศรับรองทักษะและมาตรฐานงานฉบับนี้บำบัด:
+                      ด้วยสัตย์พิสูจน์ขอประกาศรับรองทักษะและมาตรฐานงานฉบับนี้แก่:
                     </p>
                     <p className="text-slate-900 font-black text-base sm:text-lg underline decoration-double decoration-teal-600 mt-2 font-sans">
                       {currentUser.name}
@@ -1638,7 +1638,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 <div className="flex justify-between items-center bg-[#fbfbf9] p-3 rounded-xl border border-slate-200/60">
                   <h5 className="font-extrabold text-[#15329c] text-xs uppercase tracking-wider flex items-center gap-1.5">
                     <Trophy className="w-4 h-4 text-amber-500 fill-amber-350" />
-                    รังผึ้งปัญญาผู้แบ่งปันความรู้ดีเด่น (Top RMP KM
+                    ผู้แบ่งปันความรู้ดีเด่น (Top RMP KM
                     Contributors)
                   </h5>
                   <span className="bg-amber-100 text-amber-900 font-mono text-[9px] px-2 py-0.5 rounded font-bold">
@@ -2299,8 +2299,9 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                     เริ่มต้นจำลองปั้นแผนงานโรดแมปส่วนบุคคล AI
                   </h3>
                   <p className="text-[11px] text-slate-450 mt-1 max-w-sm">
-                    เลือก Careerเป้าหมายความคืบหน้า แล้วเปิดประเคน Gemimi AI
-                    เตาปั้นแผนงานอายุกรรมศึกษาของคุณที่แท้จริง
+                    เลือกเป้าหมายสายอาชีพ แล้วให้ Gemini AI
+                    ช่วยวางแผนเส้นทางการเรียนรู้ของคุณ
+                    สร้างเส้นทางการเรียนรู้เฉพาะบุคคลของคุณ
                   </p>
                 </div>
               )}
@@ -2790,7 +2791,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                     <div className="pt-2">
                       <p className="text-slate-505 text-[11px] italic">
-                        ด้วยสัตย์พิสูจน์ขอประกาศรับรองทักษะและมาตรฐานงานฉบับนี้บำบัด:
+                        ด้วยสัตย์พิสูจน์ขอประกาศรับรองทักษะและมาตรฐานงานฉบับนี้แก่:
                       </p>
                       <p className="text-[#15329c] font-black text-base sm:text-xl underline decoration-double decoration-teal-600 mt-2 font-sans">
                         {currentUser.name}

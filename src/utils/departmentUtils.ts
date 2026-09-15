@@ -19,21 +19,24 @@ export const DEPARTMENTS_FLAT: Department[] = [
   { id: "d-af", parentId: null, name: "Accounting & Finance", code: "AF" },
   { id: "d-pm", parentId: null, name: "Procurement", code: "PM" },
   { id: "d-qs", parentId: null, name: "Quality & Safety Systems", code: "QS" },
-  { id: "d-fc",
+  {
+    id: "d-fc",
     parentId: null,
     name: "Production Management Office",
     code: "FC",
   },
-  { id: "d-qa",
+  {
+    id: "d-qa",
     parentId: null,
-    name: "Insurance & Quality Control",
+    name: "Quality Assurance & Control",
     code: "QA",
   },
   { id: "d-wh", parentId: null, name: "Warehouse", code: "WH" },
   { id: "d-en", parentId: null, name: "Engineering", code: "EN" },
   { id: "d-sm", parentId: null, name: "Sales & Marketing", code: "SM" },
   { id: "d-tc", parentId: null, name: "Technical", code: "TC" },
-  { id: "d-pc",
+  {
+    id: "d-pc",
     parentId: null,
     name: "Planning & Production Control",
     code: "PC",
@@ -171,7 +174,9 @@ export const POSITIONS_BY_DEPARTMENT: Record<string, string[]> = {
 
 /** คืนเฉพาะ main department (parentId === null) */
 export function getMainDepartments(): Department[] {
-  return DEPARTMENTS_FLAT.filter((d) => d.parentId === null).sort((a, b) => a.name.localeCompare(b.name, "th"));
+  return DEPARTMENTS_FLAT.filter((d) => d.parentId === null).sort((a, b) =>
+    a.name.localeCompare(b.name, "th"),
+  );
 }
 
 /** คืน sub-department ทั้งหมดของ main dept ที่ระบุ (รับได้ทั้ง id หรือ code) */
@@ -180,7 +185,9 @@ export function getSubDepartments(mainDeptIdOrCode: string): Department[] {
     (d) => d.id === mainDeptIdOrCode || d.code === mainDeptIdOrCode,
   );
   if (!main) return [];
-  return DEPARTMENTS_FLAT.filter((d) => d.parentId === main.id).sort((a, b) => a.name.localeCompare(b.name, "th"));
+  return DEPARTMENTS_FLAT.filter((d) => d.parentId === main.id).sort((a, b) =>
+    a.name.localeCompare(b.name, "th"),
+  );
 }
 
 /** หา department object จาก id */
@@ -226,7 +233,9 @@ export function getPositionsForDepartment(departmentId: string): string[] {
 
 /** flat list ของทุกแผนก (main + sub) เอาไว้ทำ dropdown แบบเลือกได้ทุกระดับในช่องเดียว */
 export function getAllDepartmentsFlat(): Department[] {
-  return [...DEPARTMENTS_FLAT].sort((a, b) => a.name.localeCompare(b.name, "th"));
+  return [...DEPARTMENTS_FLAT].sort((a, b) =>
+    a.name.localeCompare(b.name, "th"),
+  );
 }
 
 // เก็บไว้ให้ backward compatible ชั่วคราวระหว่าง migrate โค้ดจุดอื่น

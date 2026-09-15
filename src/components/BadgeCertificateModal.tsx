@@ -334,7 +334,7 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
           </div>
 
           <div className="pt-4 mt-6 border-t font-mono text-[9px] text-slate-400 text-center leading-normal">
-            <div>ครุศิลป์ตรวจสอบ: ISO 9001 REGISTERER</div>
+            <div>ตรวจสอบและรับรองโดย: ISO 9001 REGISTRAR</div>
             <div className="mt-0.5 select-all truncate">{certId}</div>
           </div>
         </div>
