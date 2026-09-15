@@ -518,6 +518,15 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       e.courseId === selectedCourse?.id,
   );
 
+  // คะแนนที่จะแสดงบนใบเซอร์ — ใช้ผลสอบจริงเท่านั้น ห้าม fallback เป็นตัวเลขลวง (เช่น 100)
+  // เพราะจะทำให้ใบเซอร์ที่ยังไม่มีผลสอบจริงดูเหมือนสอบได้เต็มโดยไม่ได้ตั้งใจ
+  const displayScoreText = (): string => {
+    const score = relevantResult?.score ?? quizScore;
+    return score !== undefined && score !== null
+      ? `${score}%`
+      : "ยังไม่มีข้อมูลคะแนน";
+  };
+
   const lessons = selectedCourse?.lessons || [];
   const questions = selectedCourse?.quiz || [];
 
@@ -1457,9 +1466,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       {activeCertificateCourse.title}
                     </p>
                     <p className="text-[10px] text-emerald-600 font-mono font-bold mt-1.5 bg-emerald-50 py-0.5 px-2 rounded-full inline-block border border-emerald-150">
-                      ผ่านหลักประกันระบบด้วยคะแนนสะสม{" "}
-                      {relevantResult?.score || quizScore || 100}% (เกณฑ์ขั้นต่ำ
-                      80%)
+                      ผ่านหลักประกันระบบด้วยคะแนนสะสม {displayScoreText()}{" "}
+                      (เกณฑ์ขั้นต่ำ 80%)
                     </p>
                   </div>
 
@@ -1536,8 +1544,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       {activeCertificateCourse.title}
                     </p>
                     <p className="text-[10px] text-emerald-600 font-bold mt-1 bg-emerald-50/70 inline-block px-2.5 py-0.5 rounded-full">
-                      สอบผ่านด้วยเกณฑ์คะแนนสะสม{" "}
-                      {relevantResult?.score || quizScore || 100}%
+                      สอบผ่านด้วยเกณฑ์คะแนนสะสม {displayScoreText()}
                     </p>
                   </div>
 
@@ -1638,8 +1645,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 <div className="flex justify-between items-center bg-[#fbfbf9] p-3 rounded-xl border border-slate-200/60">
                   <h5 className="font-extrabold text-[#15329c] text-xs uppercase tracking-wider flex items-center gap-1.5">
                     <Trophy className="w-4 h-4 text-amber-500 fill-amber-350" />
-                    ผู้แบ่งปันความรู้ดีเด่น (Top RMP KM
-                    Contributors)
+                    ผู้แบ่งปันความรู้ดีเด่น (Top RMP KM Contributors)
                   </h5>
                   <span className="bg-amber-100 text-amber-900 font-mono text-[9px] px-2 py-0.5 rounded font-bold">
                     LIVE RANK
@@ -2744,8 +2750,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         {activeCertificateCourse.title}
                       </p>
                       <p className="text-[10.5px] text-emerald-600 font-mono font-bold mt-1 shadow-inner inline-block px-1.5 py-0.2 bg-emerald-50 rounded">
-                        สอบผ่านเกณฑ์สำเร็จ:{" "}
-                        {relevantResult?.score || quizScore || 100}%
+                        สอบผ่านเกณฑ์สำเร็จ: {displayScoreText()}
                       </p>
                     </div>
 
@@ -2811,8 +2816,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         {activeCertificateCourse.title}
                       </p>
                       <p className="text-[10px] text-teal-700 font-mono font-bold mt-1 bg-teal-50 inline-block px-2.5 py-0.5 rounded-full border border-teal-150">
-                        ผ่านการวัดผลเทคนิค{" "}
-                        {relevantResult?.score || quizScore || 100}%
+                        ผ่านการวัดผลเทคนิค {displayScoreText()}
                       </p>
                     </div>
 

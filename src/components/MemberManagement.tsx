@@ -685,8 +685,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       departmentId: approveDeptId, // ← เลือกจริงจาก modal แทนการ hardcode
       position: emp.position,
       role: assignedRole,
-      email: emp.email || `${emp.employeeId.toLowerCase()}@royalmeiwa.co.th`,
-      phone: emp.phone || "02-1234567",
+      email: emp.email || "",
+      phone: emp.phone || "",
       password: cleanPin,
       avatarUrl: DEFAULT_AVATAR_URL,
       startDate: emp.startDate,
@@ -3265,7 +3265,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                           ? emp.departmentId
                                           : "",
                                       );
-                                      setApprovePin("123456");
+                                      setApprovePin("");
                                       setApproveError("");
                                     }}
                                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-2.5 py-1 rounded-lg cursor-pointer transition flex items-center gap-1 shrink-0 shadow-xs"
@@ -3410,6 +3410,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     onChange={(e) =>
                       setApprovePin(e.target.value.replace(/\D/g, ""))
                     }
+                    placeholder="กรอกตัวเลข 6 หลัก"
+                    required
                     className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-center text-lg font-mono font-black tracking-widest text-emerald-700 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                   />
                 </div>

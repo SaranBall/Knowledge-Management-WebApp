@@ -730,7 +730,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
               <span className="text-slate-500">
                 จำนวนการสอบผ่านสะสมในระบบ:{" "}
-                <strong className="text-slate-800">12 ค่าย</strong>
+                <strong className="text-slate-800">
+                  {examResults.filter((e) => e.pass).length +
+                    userProgressList.filter((p) => p.status === "Completed")
+                      .length}{" "}
+                  ครั้ง
+                </strong>
               </span>
               <button
                 onClick={() => onNavigateToModule("Learning & Certification")}
@@ -1259,47 +1264,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
 
                     <div className="divide-y divide-slate-100">
-                      <div className="grid grid-cols-4 p-3 items-center text-center">
-                        <div className="font-bold text-slate-800 text-left">
-                          5ส เบื้องต้นเพื่อความปลอดภัยในโรงงาน
+                      {activeTranscriptCompletions.length === 0 ? (
+                        <div className="p-4 text-center text-slate-400 italic text-[11px]">
+                          ยังไม่พบประวัติการอบรมออนไลน์ของพนักงานรายนี้
                         </div>
-                        <div className="text-green-700 font-bold">
-                          ผ่านเกณฑ์ (92%)
-                        </div>
-                        <div className="font-mono">2.5 ชม.</div>
-                        <div className="text-right text-slate-500 font-mono text-[9px] font-bold">
-                          VERIFIED BY QA BOARD
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-4 p-3 items-center text-center">
-                        <div className="font-bold text-slate-800 text-left">
-                          ความปลอดภัยในโรงงานและดับเพลิง 101
-                        </div>
-                        <div className="text-green-700 font-bold">
-                          ผ่านเกณฑ์ (85%)
-                        </div>
-                        <div className="font-mono">3.0 ชม.</div>
-                        <div className="text-right text-slate-500 font-mono text-[9px] font-bold">
-                          VERIFIED BY SHE DEPT
-                        </div>
-                      </div>
-
-                      {selectedUserTranscript.role === "Editor" ||
-                      selectedUserTranscript.id === "u-2" ? (
-                        <div className="grid grid-cols-4 p-3 items-center text-center">
-                          <div className="font-bold text-slate-800 text-left">
-                            การซ้อมรถยก Forklift อย่างมีวิสัยเซฟตี้
+                      ) : (
+                        activeTranscriptCompletions.map((item, idx) => (
+                          <div
+                            key={`${item.course.id}-${idx}`}
+                            className="grid grid-cols-4 p-3 items-center text-center"
+                          >
+                            <div className="font-bold text-slate-800 text-left">
+                              {item.course.title}
+                            </div>
+                            <div className="text-green-700 font-bold">
+                              ผ่านเกณฑ์ ({item.score}%)
+                            </div>
+                            <div className="font-mono">
+                              {item.course.durationHours || "2.0"} ชม.
+                            </div>
+                            <div className="text-right text-slate-500 font-mono text-[9px] font-bold">
+                              VERIFIED BY SYSTEM
+                            </div>
                           </div>
-                          <div className="text-green-700 font-bold">
-                            ผ่านเกณฑ์ (100%)
-                          </div>
-                          <div className="font-mono">4.0 ชม.</div>
-                          <div className="text-right text-slate-500 font-mono text-[9px] font-bold">
-                            VERIFIED BY MAINTENANCE
-                          </div>
-                        </div>
-                      ) : null}
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1406,7 +1395,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <p className="text-[8.5px] text-slate-400 font-mono leading-tight text-center">
                       SECURED COMPLIANCE AUDIT RECORD
                       <br />
-                      HASH_ID: RMP-ISO-9001-95b3dceb
+                      REF: RMP-ISO-9001-
+                      {selectedUserTranscript.employeeId}-
+                      {new Date().toISOString().split("T")[0].replace(/-/g, "")}
                     </p>
                   </div>
                 </div>

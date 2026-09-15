@@ -5,10 +5,6 @@
 
 import { User, DocumentItem, Course, KBArticle, Expert, SearchLog, UserCourseProgress, RatingAndComment, ContactRequest, EmployeeMaster } from '../types';
 
-// INITIAL_USERS ว่างเปล่าโดยตั้งใจ — ห้าม hardcode credential ของแอดมินไว้ในซอร์สโค้ด
-// บัญชีแอดมินคนแรกจะถูก seed ที่ server.ts ตอน startup โดยอ่านค่าจาก
-// environment variable (INITIAL_ADMIN_EMPLOYEE_ID / INITIAL_ADMIN_PASSWORD ฯลฯ)
-// ดู .env.example และ README.md สำหรับวิธีตั้งค่า
 export const INITIAL_USERS: User[] = [];
 
 export const INITIAL_DOCUMENTS: DocumentItem[] = [];

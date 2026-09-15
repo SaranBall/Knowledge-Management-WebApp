@@ -183,8 +183,8 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      phone: newExpert.phone || "02-1234567",
-      email: newExpert.email || "info@royalmeiwa.co.th",
+      phone: newExpert.phone || "",
+      email: newExpert.email || "",
       availability: newExpert.availability,
       experienceYears: Number(newExpert.experienceYears) || 3,
       avatarUrl: newExpert.avatarUrl,
