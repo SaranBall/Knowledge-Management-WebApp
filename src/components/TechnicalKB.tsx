@@ -83,14 +83,6 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
     articles[0]?.id || null,
   );
 
-  // Quick recommend list for search tests (REQUIRED BY SPECIFICATION)
-  const quickSearches = [
-    /*{ text: "เครื่องจักรไม่ทำงาน", label: "🔥 ค้นหารวมกรณีเครื่องหยุดทำงาน" },
-    { text: "ความชื้นเม็ดพลาสติก", label: "ฟิล์มเป่าความชื้น" },
-    { text: "เซ็นเซอร์", label: "Photoelectric Sensor" },
-    { text: "WMS", label: "ระบบบาร์โค้ดสแกน" },*/
-  ];
-
   const handleCreateArticleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newArt.title || !newArt.problem || !newArt.solution) return;
@@ -299,23 +291,6 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-bold text-slate-500">
-            แนะนำค้นหายอดฮิต:
-          </span>
-          {quickSearches.map((rec) => (
-            <button
-              key={rec.text}
-              id={`btn-quick-search-pill-${rec.text}`}
-              onClick={() => setSearchQuery(rec.text)}
-              className={`text-[10px] font-medium px-2.5 py-1 rounded-lg border transition cursor-pointer ${
-                searchQuery === rec.text
-                  ? "bg-indigo-600 text-white border-indigo-600 font-bold"
-                  : "bg-white hover:bg-indigo-50 hover:border-indigo-300 text-slate-600 border-slate-200"
-              }`}
-            >
-              {rec.label}
-            </button>
-          ))}
           {searchQuery && (
             <button
               onClick={() => setSearchQuery("")}

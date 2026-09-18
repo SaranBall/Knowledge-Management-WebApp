@@ -453,10 +453,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
               position: posVal ? posVal.toString().trim() : "",
               startDate: startDateFormatted,
               level: lvlVal ? lvlVal.toString().trim() : "",
-              email: emailVal
-                ? emailVal.toString().trim()
-                : `${nameVal.toString().trim().toLowerCase()}@royalmeiwa.com`,
-              phone: phoneVal ? phoneVal.toString().trim() : "0xx-xxxxxxx",
+              email: emailVal ? emailVal.toString().trim() : "",
+              phone: phoneVal ? phoneVal.toString().trim() : "",
               status: "Imported",
               isDeptResolved: !!matchedDept, // true if departmentId matches known department, false if unresolved
             });
@@ -2885,17 +2883,14 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                           if (parts.length >= 2) {
                             const employeeId = parts[0].trim();
                             const name = parts[1].trim();
-                            const departmentId = parts[2]?.trim() || "d-pd";
-                            const position =
-                              parts[3]?.trim() || "Technician Operative 1";
-                            const level = parts[4]?.trim() || "Junior Staff";
+                            const departmentId = parts[2]?.trim() || "";
+                            const position = parts[3]?.trim() || "";
+                            const level = parts[4]?.trim() || "";
                             const startDate =
                               parts[5]?.trim() ||
                               new Date().toISOString().split("T")[0];
-                            const email =
-                              parts[6]?.trim() ||
-                              `${employeeId.toLowerCase()}@royalmeiwa.co.th`;
-                            const phone = parts[7]?.trim() || "089-000-0000";
+                            const email = parts[6]?.trim() || "";
+                            const phone = parts[7]?.trim() || "";
 
                             newlyImported.push({
                               employeeId,

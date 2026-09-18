@@ -30,6 +30,10 @@ import {
 } from "../utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
 
+// ค่าเริ่มต้นเวลาเข้าเวรของผู้เชี่ยวชาญ — ใช้ constant กลางแทนการพิมพ์ hardcode
+// ซ้ำในหลายจุด (initial state + ตอน reset form ก่อนเปิด modal เพิ่ม)
+const DEFAULT_AVAILABILITY = "วันจันทร์ - ศุกร์ : 08:00 - 17:00 น.";
+
 interface ExpertDirectoryProps {
   currentUser: User;
   experts: Expert[];
@@ -77,11 +81,11 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
   const [newExpert, setNewExpert] = useState({
     name: "",
     position: "",
-    departmentId: "d-pd",
+    departmentId: "",
     skills: "",
     phone: "",
     email: "",
-    availability: "วันจันทร์ - ศุกร์ : 08:00 - 17:00 น.",
+    availability: DEFAULT_AVAILABILITY,
     experienceYears: 5,
     avatarUrl: "",
   });
@@ -144,7 +148,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
     e.preventDefault();
     if (!contactTopic.trim() || !contactMsg.trim()) return;
 
-    const mockReq: ContactRequest = {
+    const contactRequest: ContactRequest = {
       id: `cr-${Date.now()}`,
       userId: currentUser.id,
       userName: currentUser.name,
@@ -157,7 +161,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    onAddContactRequest(mockReq);
+    onAddContactRequest(contactRequest);
     setContactTopic("");
     setContactMsg("");
   };
@@ -167,6 +171,10 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
     setAddError("");
     if (!newExpert.name || !newExpert.position) {
       setAddError("กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน");
+      return;
+    }
+    if (!newExpert.departmentId) {
+      setAddError("กรุณาเลือกแผนกจริงของผู้เชี่ยวชาญก่อนบันทึก");
       return;
     }
     if (!newExpert.avatarUrl) {
@@ -183,10 +191,10 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      phone: newExpert.phone || "",
-      email: newExpert.email || "",
+      phone: newExpert.phone,
+      email: newExpert.email,
       availability: newExpert.availability,
-      experienceYears: Number(newExpert.experienceYears) || 3,
+      experienceYears: Number(newExpert.experienceYears),
       avatarUrl: newExpert.avatarUrl,
     };
 
@@ -216,7 +224,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
               .map((s: string) => s.trim())
               .filter(Boolean)
           : editingExpert.skills,
-      experienceYears: Number(editingExpert.experienceYears) || 3,
+      experienceYears: Number(editingExpert.experienceYears),
     };
 
     onUpdateExpert(updated);
@@ -253,11 +261,11 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                 setNewExpert({
                   name: "",
                   position: "",
-                  departmentId: ">Select Department<",
+                  departmentId: "",
                   skills: "",
                   phone: "",
                   email: "",
-                  availability: "วันจันทร์ - ศุกร์ : 08:00 - 17:00 น.",
+                  availability: DEFAULT_AVAILABILITY,
                   experienceYears: 5,
                   avatarUrl: "",
                 });
@@ -698,6 +706,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                   <select
                     id="add-expert-dept"
                     value={newExpert.departmentId}
+                    required
                     onChange={(e) =>
                       setNewExpert({
                         ...newExpert,
@@ -706,6 +715,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                     }
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700"
                   >
+                    <option value="">-- กรุณาเลือกแผนก --</option>
                     {getAllDepartmentsFlat().map((dept) => (
                       <option key={dept.id} value={dept.id}>
                         {dept.name} ({dept.code})
@@ -758,6 +768,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                   <input
                     id="add-expert-phone"
                     type="text"
+                    required
                     value={newExpert.phone}
                     onChange={(e) =>
                       setNewExpert({ ...newExpert, phone: e.target.value })
@@ -773,6 +784,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                   <input
                     id="add-expert-email"
                     type="email"
+                    required
                     value={newExpert.email}
                     onChange={(e) =>
                       setNewExpert({ ...newExpert, email: e.target.value })
@@ -789,6 +801,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                 <input
                   id="add-expert-availability"
                   type="text"
+                  required
                   value={newExpert.availability}
                   onChange={(e) =>
                     setNewExpert({ ...newExpert, availability: e.target.value })

@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import { DocumentItem, DocType, User, RatingAndComment } from "../types";
 import {
-  DEPARTMENTS,
   getDepartmentById,
   getAllDepartmentsFlat,
 } from "../utils/departmentUtils";
@@ -147,6 +146,15 @@ export const autoTagDocumentType = (title: string): DocType => {
   return "QP";
 };
 
+/**
+ * ดึง "รหัสเอกสาร" แบบประมาณจากคำแรกของชื่อเอกสาร (เช่น "WI-PRD-102 คู่มือ..." -> "WI-PRD-102")
+ * หมายเหตุ: เป็นการเดาจาก title เท่านั้น เนื่องจาก DocumentItem ยังไม่มี field รหัสแยกจริง
+ * TODO: ถ้าต้องการรหัสที่แม่นยำ ควรเพิ่ม field `code` ใน DocumentItem แทนการเดาจาก title
+ */
+export const getDocCode = (title: string): string => {
+  return (title || "").split(" ")[0] || "ไม่ระบุรหัส";
+};
+
 export const DocumentList: React.FC<DocumentListProps> = ({
   currentUser,
   documents,
@@ -235,7 +243,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     title: "",
     description: "",
     type: "QP" as DocType,
-    departmentId: "d-pd",
+    departmentId: "",
     owner: currentUser.name,
     revision: 1,
     effectiveDate: new Date().toISOString().split("T")[0],
@@ -399,65 +407,10 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     }
   };
 
-  const departments = ["ALL", ...DEPARTMENTS];
-
   // Filters combined
   const filteredDocs = documents.filter((doc) => {
     // Tab filter
     if (activeTab !== "ALL" && doc.type !== activeTab) return false;
-    // Dept filter
-    if (deptFilter !== "ALL") {
-      const cleanSelected = deptFilter.split(" (")[0].toLowerCase();
-      const docDeptName =
-        getDepartmentById(doc.departmentId)?.name || doc.departmentId || "";
-      const cleanDocDept = docDeptName.toLowerCase();
-
-      let matched =
-        cleanDocDept.includes(cleanSelected) ||
-        cleanSelected.includes(cleanDocDept);
-
-      // Check common translations / synonyms in our system
-      if (!matched) {
-        if (
-          cleanSelected.includes("executive") &&
-          cleanDocDept.includes("ผู้บริหาร")
-        )
-          matched = true;
-        if (
-          cleanSelected.includes("purchasing") &&
-          (cleanDocDept.includes("จัดซื้อ") ||
-            cleanDocDept.includes("procurement"))
-        )
-          matched = true;
-        if (
-          cleanSelected.includes("quality") &&
-          (cleanDocDept.includes("คุณภาพ") || cleanDocDept.includes("qa/qc"))
-        )
-          matched = true;
-        if (
-          cleanSelected.includes("production") &&
-          cleanDocDept.includes("ผลิต")
-        )
-          matched = true;
-        if (
-          cleanSelected.includes("warehouse") &&
-          cleanDocDept.includes("คลังสินค้า")
-        )
-          matched = true;
-        if (
-          cleanSelected.includes("engineering") &&
-          cleanDocDept.includes("ซ่อมบำรุง")
-        )
-          matched = true;
-        if (
-          cleanSelected.includes("document control") &&
-          cleanDocDept.includes("ควบคุมเอกสาร")
-        )
-          matched = true;
-      }
-
-      if (!matched) return false;
-    }
     // Search query matches: title, description, department or index codes
     const docDeptName =
       getDepartmentById(doc.departmentId)?.name || doc.departmentId || "";
@@ -472,10 +425,12 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
     return true;
   });
-
+  // Dept filter — เทียบ departmentId ตรงๆ แทน fuzzy string matching ชื่อแผนกแบบเดิม
+  if (deptFilter !== "ALL" && doc.departmentId !== deptFilter) return false;
   const handleUploadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDoc.title) return;
+    if (!newDoc.departmentId) return;
     if (isUploadingFile) return; // กันการ submit ก่อนไฟล์อัปโหลดเสร็จ
 
     const mockId = `doc-${Date.now()}`;
@@ -516,7 +471,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       title: "",
       description: "",
       type: "QP",
-      departmentId: "d-pd",
+      departmentId: "",
       owner: currentUser.name,
       revision: 1,
       effectiveDate: new Date().toISOString().split("T")[0],
@@ -650,13 +605,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
             className="w-full bg-white border border-slate-200 py-2.5 px-3.5 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           >
             <option value="ALL">เลือกดูทุกแผนก</option>
-            {departments
-              .filter((d) => d !== "ALL")
-              .map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept}
-                </option>
-              ))}
+            {getAllDepartmentsFlat().map((dept) => (
+              <option key={dept.id} value={dept.id}>
+                {dept.name} ({dept.code})
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -1211,11 +1164,13 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   <select
                     id="upload-doc-dept"
                     value={newDoc.departmentId}
+                    required
                     onChange={(e) =>
                       setNewDoc({ ...newDoc, departmentId: e.target.value })
                     }
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700 text-xs"
                   >
+                    <option value="">-- กรุณาเลือกแผนก --</option>
                     {getAllDepartmentsFlat().map((dept) => (
                       <option key={dept.id} value={dept.id}>
                         {dept.name} ({dept.code})
@@ -1347,7 +1302,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-[10px] text-slate-400 block font-mono">
-                        รูปภาพ Unsplash สาธิต (URL):
+                        รูปภาพสาธิต (URL):
                       </label>
                       <input
                         id="upload-doc-exampleimage"
@@ -1802,8 +1757,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     <div className="flex justify-between">
                       <span className="text-slate-500">รหัสเอกสาร:</span>
                       <span className="font-mono text-white font-semibold">
-                        {(selectedDoc.title || "").split(" ")[0] ||
-                          "ไม่ระบุรหัส"}
+                        {getDocCode(selectedDoc.title)}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -1851,7 +1805,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
                 <div className="pt-2 border-t border-slate-800 text-[9px] text-slate-500 font-mono space-y-1">
                   <div>USER: {currentUser.email}</div>
-                  <div>DEVICE: SECURE PORTAL CONTROLLER V3</div>
+                  <div>DEVICE: SECURE PORTAL CONTROLLER</div>
                   <div>TIMESTAMP: {new Date().toISOString()}</div>
                 </div>
               </div>
@@ -1900,8 +1854,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                       </div>
                       <div className="text-right shrink-0">
                         <span className="block font-mono font-bold text-xs text-slate-800">
-                          {(selectedDoc.title || "").split(" ")[0] ||
-                            "ไม่ระบุรหัส"}
+                          {getDocCode(selectedDoc.title)}
                         </span>
                         <span className="block text-[9px] text-slate-400 font-mono">
                           Rev. {selectedDoc.revision}

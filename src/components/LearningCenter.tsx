@@ -3415,7 +3415,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                             <button
                               onClick={() => {
                                 setModalSelectedCourse(selectedCourse);
-                                setModalSelectedScore(quizScore || 100);
+                                setModalSelectedScore(quizScore ?? 100);
                                 setModalSelectedDate(
                                   new Date().toISOString().split("T")[0],
                                 );
