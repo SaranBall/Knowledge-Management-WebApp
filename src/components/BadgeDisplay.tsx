@@ -12,6 +12,15 @@ import {
 } from "lucide-react";
 import { Badge } from "../utils/badgeUtils";
 
+// Union type จำกัดค่าสีให้ตรงกับ key ที่ colorClasses/headerColors รองรับจริงเท่านั้น
+export type BadgeColor =
+  | "amber"
+  | "teal"
+  | "emerald"
+  | "indigo"
+  | "rose"
+  | "violet";
+
 // Helper component to render Lucide icons dynamically
 export const BadgeIcon: React.FC<{ name: string; className?: string }> = ({
   name,
@@ -55,26 +64,28 @@ export const BadgePill: React.FC<BadgePillProps> = ({
 
   // Colors mapping for badges
   const colorClasses =
-    {
-      amber: earned
-        ? "bg-amber-100 text-amber-805 border-amber-300 hover:bg-amber-150"
-        : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
-      teal: earned
-        ? "bg-teal-100 text-teal-805 border-teal-300 hover:bg-teal-150"
-        : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
-      emerald: earned
-        ? "bg-emerald-105 text-emerald-805 border-emerald-300 hover:bg-emerald-150"
-        : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
-      indigo: earned
-        ? "bg-indigo-100 text-indigo-805 border-indigo-300 hover:bg-indigo-150"
-        : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
-      rose: earned
-        ? "bg-rose-100 text-rose-805 border-rose-300 hover:bg-rose-150"
-        : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
-      violet: earned
-        ? "bg-violet-100 text-violet-805 border-violet-300 hover:bg-violet-150"
-        : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
-    }[color] || "bg-slate-100 text-slate-500 border-slate-200";
+    (
+      {
+        amber: earned
+          ? "bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200"
+          : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
+        teal: earned
+          ? "bg-teal-100 text-teal-800 border-teal-300 hover:bg-teal-200"
+          : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
+        emerald: earned
+          ? "bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200"
+          : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
+        indigo: earned
+          ? "bg-indigo-100 text-indigo-800 border-indigo-300 hover:bg-indigo-200"
+          : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
+        rose: earned
+          ? "bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-200"
+          : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
+        violet: earned
+          ? "bg-violet-100 text-violet-800 border-violet-300 hover:bg-violet-200"
+          : "bg-slate-50 text-slate-400 border-slate-200 opacity-40",
+      } as Record<BadgeColor, string>
+    )[color as BadgeColor] || "bg-slate-100 text-slate-500 border-slate-200";
 
   return (
     <div
@@ -139,15 +150,18 @@ export const UserBadgesGrid: React.FC<UserBadgesGridProps> = ({ badges }) => {
           } = badge;
 
           const headerColors =
-            {
-              amber: "bg-amber-500/10 text-amber-600 border-amber-500/20",
-              teal: "bg-teal-500/10 text-teal-600 border-teal-500/20",
-              emerald:
-                "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
-              indigo: "bg-indigo-500/10 text-indigo-600 border-indigo-500/20",
-              rose: "bg-rose-500/10 text-rose-600 border-rose-500/20",
-              violet: "bg-violet-500/10 text-violet-600 border-violet-500/20",
-            }[color] || "bg-slate-500/10 text-slate-600 border-slate-500/20";
+            (
+              {
+                amber: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+                teal: "bg-teal-500/10 text-teal-600 border-teal-500/20",
+                emerald:
+                  "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+                indigo: "bg-indigo-500/10 text-indigo-600 border-indigo-500/20",
+                rose: "bg-rose-500/10 text-rose-600 border-rose-500/20",
+                violet: "bg-violet-500/10 text-violet-600 border-violet-500/20",
+              } as Record<BadgeColor, string>
+            )[color as BadgeColor] ||
+            "bg-slate-500/10 text-slate-600 border-slate-500/20";
 
           return (
             <div

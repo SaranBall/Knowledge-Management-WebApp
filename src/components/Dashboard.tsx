@@ -65,11 +65,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const visibleUsers = users;
   const [selectedUserTranscript, setSelectedUserTranscript] =
-    useState<User | null>(() => {
-      return (
-        visibleUsers.find((u) => u.id === "u-4") || visibleUsers[0] || null
-      );
-    }); // Def to Somsri if visible, else first visible user
+    useState<User | null>(() => visibleUsers[0] || null);
   const [isISOModalOpen, setIsISOModalOpen] = useState(false);
 
   // States for dynamic badge/certificate generation
@@ -95,7 +91,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     const completedMap = new Map<
       string,
-      { course: Course; score: number; date: string; isDemo?: boolean }
+      { course: Course; score: number; date: string }
     >();
 
     completedFromProgress.forEach((p) => {
@@ -104,7 +100,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         completedMap.set(p.courseId, {
           course: c,
           score: p.score ?? 100,
-          date: p.completedDate ? p.completedDate.split("T")[0] : "2026-06-15",
+          date: p.completedDate
+            ? p.completedDate.split("T")[0]
+            : "ไม่ระบุวันที่",
         });
       }
     });
@@ -115,7 +113,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         completedMap.set(e.courseId, {
           course: c,
           score: e.score,
-          date: e.date || "2026-06-15",
+          date: e.date || "ไม่ระบุวันที่",
         });
       }
     });
@@ -188,7 +186,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalKnowledgeCount =
     documents.filter((d) => d.status === "Published").length +
     kbArticles.filter((k) => k.status === "Approved").length;
-  const newKnowledgeThisMonth = 0; // Static context representation
+  const currentMonthKey = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+  const newKnowledgeThisMonth =
+    documents.filter(
+      (d) =>
+        d.status === "Published" && d.createdAt?.startsWith(currentMonthKey),
+    ).length +
+    kbArticles.filter(
+      (k) =>
+        k.status === "Approved" && k.createdAt?.startsWith(currentMonthKey),
+    ).length;
 
   const totalViews =
     documents.reduce((sum, d) => sum + d.views, 0) +
@@ -199,6 +206,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalCompleted =
     examResults.filter((e) => e.pass).length +
     userProgressList.filter((u) => u.status === "Completed").length;
+  const totalAssignedCount = visibleUsers.reduce(
+    (sum, u) => sum + getRequiredCoursesForPosition(u.position).length,
+    0,
+  );
   const totalAssignedCount = visibleUsers.length * 2; // For demonstration
   const completionRate =
     totalAssignedCount > 0
@@ -221,7 +232,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )
       : 0;
 
-  // คำนวณชั่วโมงสะสมจริงจากจำนวนคอร์สที่พนักงานเรียนจบแล้ว (ประมาณ 3 ชม./คอร์ส)
+  // ค่าประมาณ ไม่ใช่ชั่วโมงจริง — เพราะ Course.durationHours เป็น string หน่วยไม่คงที่
+  // (เช่น "2 ชั่วโมง", "45 นาที", "3.0 ชม.") parse เป็นตัวเลขแม่นยำไม่ได้อย่างปลอดภัย
+  // TODO: เพิ่ม field ตัวเลขจริง (เช่น durationMinutes: number) ใน Course แล้วคำนวณจากของจริงแทน
   const totalTrainingHours = totalCompleted * 3;
 
   // 3. Gap Analysis calculation
@@ -680,7 +693,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
 
               <div className="space-y-4">
-                {["c-1", "c-2", "c-3"].map((courseId, idx) => {
+                {(() => {
+                  const courseAttemptCounts = courses
+                    .map((c) => ({
+                      courseId: c.id,
+                      attempts: examResults.filter((e) => e.courseId === c.id)
+                        .length,
+                    }))
+                    .filter((c) => c.attempts > 0)
+                    .sort((a, b) => b.attempts - a.attempts)
+                    .slice(0, 3)
+                    .map((c) => c.courseId);
+                  return courseAttemptCounts;
+                })().map((courseId, idx) => {
                   const courseObj = courses.find((c) => c.id === courseId);
                   const attempts = examResults.filter(
                     (e) => e.courseId === courseId,
@@ -724,6 +749,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                   );
                 })}
+                {courses.filter((c) =>
+                  examResults.some((e) => e.courseId === c.id),
+                ).length === 0 && (
+                  <p className="text-slate-400 text-xs py-4 text-center">
+                    ยังไม่มีข้อมูลการสอบในระบบ
+                  </p>
+                )}
               </div>
             </div>
 
@@ -968,11 +1000,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <span className="font-extrabold text-slate-800 leading-tight">
                             {item.course.title}
                           </span>
-                          {item.isDemo && (
-                            <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-100 rounded-md font-bold px-1.5 py-0.2 w-max uppercase">
-                              ตัวอย่างพรีวิว / Demo Preview
-                            </span>
-                          )}
                           <span className="text-[9px] text-slate-400 font-mono">
                             สำเร็จเมื่อ: {item.date}
                           </span>
@@ -1218,7 +1245,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 </span>
                                 <div className="text-[9px] text-slate-400">
                                   ประเมินเมื่อ:{" "}
-                                  {examResultObj?.date || "2026-06-10"}
+                                  {examResultObj?.date || "ไม่ระบุวันที่"}
                                 </div>
                               </div>
                             ) : (
@@ -1252,15 +1279,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
 
                   <div className="border border-slate-200 rounded-xl overflow-hidden text-xs">
-                    <div className="grid grid-cols-4 bg-slate-50 p-3 font-semibold text-slate-600 border-b border-slate-200 text-center">
+                    <div className="grid grid-cols-3 bg-slate-50 p-3 font-semibold text-slate-600 border-b border-slate-200 text-center">
                       <div className="text-left select-none">
                         หลักสูตร / หัวข้อความรู้ย่อย
                       </div>
                       <div className="select-none">ผลลัพธ์การเรียน</div>
-                      <div className="select-none">ชั่วโมงอบรม</div>
-                      <div className="text-right select-none">
-                        ฝ่ายกำกับวิเคราะห์
-                      </div>
+                      <div className="text-right select-none">ชั่วโมงอบรม</div>
                     </div>
 
                     <div className="divide-y divide-slate-100">
@@ -1272,7 +1296,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         activeTranscriptCompletions.map((item, idx) => (
                           <div
                             key={`${item.course.id}-${idx}`}
-                            className="grid grid-cols-4 p-3 items-center text-center"
+                            className="grid grid-cols-3 p-3 items-center text-center"
                           >
                             <div className="font-bold text-slate-800 text-left">
                               {item.course.title}
@@ -1280,11 +1304,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <div className="text-green-700 font-bold">
                               ผ่านเกณฑ์ ({item.score}%)
                             </div>
-                            <div className="font-mono">
+                            <div className="font-mono text-right">
                               {item.course.durationHours || "2.0"} ชม.
-                            </div>
-                            <div className="text-right text-slate-500 font-mono text-[9px] font-bold">
-                              VERIFIED BY SYSTEM
                             </div>
                           </div>
                         ))
