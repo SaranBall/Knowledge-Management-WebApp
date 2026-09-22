@@ -22,6 +22,20 @@ interface BadgeCertificateModalProps {
   course: Course;
   score: number;
   completedDate?: string;
+  // ชื่อผู้ลงนามจริงบนใบเซอร์ — เดิม hardcode เป็นเส้นประว่างตลอดกาลพร้อม TODO ค้างในโค้ด
+  // ถ้าไม่ส่งมา จะขึ้นข้อความบอกตรงๆ ว่ายังไม่กำหนดผู้ลงนาม แทนที่จะดูเหมือนเซ็นจริงแล้ว
+  directorName?: string;
+  qaSupervisorName?: string;
+  // เนื้อหา badge/certificate (ชื่อ, คำบรรยาย, โทนสี ฯลฯ) ปัจจุบันเป็น "ข้อมูลตัวอย่าง"
+  // ที่แต่งขึ้นตอนพัฒนา ยังไม่ใช่ข้อความที่ฝ่าย HR/Training ของบริษัทยืนยันจริง
+  // ใส่ override ตรงนี้ไว้เพื่อให้หน้าที่เรียกใช้ modal นี้ส่งเนื้อหาจริงเข้ามาแทนได้
+  // โดยไม่ต้องแก้ไฟล์นี้อีก — ถ้าไม่ส่งมาจะ fallback ไปใช้ข้อมูลตัวอย่างเดิม
+  badgeContentOverride?: {
+    badgeTitle?: string;
+    thaiBadgeTitle?: string;
+    metalTint?: string;
+    desc?: string;
+  };
 }
 
 export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
@@ -31,6 +45,9 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
   course,
   score,
   completedDate,
+  directorName,
+  qaSupervisorName,
+  badgeContentOverride,
 }) => {
   const [activeTab, setActiveTab] = useState<"cert" | "badge">("cert");
   const [frameStyle, setFrameStyle] = useState<"gold" | "teal" | "indigo">(
@@ -46,69 +63,103 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
   // Create randomized secure certification ID
   const certId = `CERT-RMP-${course.id.toUpperCase()}-${user.employeeId}`;
 
-  // Custom metadata for different courses
-  const getCourseBadgeDetails = (courseId: string) => {
-    switch (courseId) {
+  // Custom metadata for different courses — ผูกกับ course.badgeKey (ธีม badge/certificate)
+  // แทนการ hardcode ตาม course.id เดิม เพื่อไม่ให้คอร์สใหม่ (id เป็น c-{timestamp}) ตกไปใช้
+  // default เสมอ — รองรับ legacy id (c-1/c-2/c-3) คู่ไปกับ badgeKey ใหม่ เพื่อไม่ให้ของเดิมพัง
+  // ⚠️ เนื้อหา (badgeTitle/thaiBadgeTitle/metalTint/desc) ด้านล่างเป็น "ข้อมูลตัวอย่าง"
+  // ที่ยังไม่ผ่านการยืนยันจากฝ่าย HR/Training — ก่อนขึ้นระบบจริงต้องแทนที่ด้วยเนื้อหา
+  // ที่บริษัทกำหนด (ผ่าน badgeContentOverride prop ด้านบน หรือแก้ตรงนี้โดยตรง)
+  const getCourseBadgeDetails = (courseIdentifier: string) => {
+    switch (courseIdentifier) {
+      case "onboarding-wms":
       case "c-1":
         return {
-          badgeTitle: "WMS Logistics Specialist",
-          thaiBadgeTitle: "ผู้จัดเจนคลังสินค้าและมาตรฐาน 5S",
-          colorTheme: "indigo",
-          metalTint: "Indigo Royal Carbon & Silver",
+          badgeTitle:
+            badgeContentOverride?.badgeTitle || "WMS Logistics Specialist",
+          thaiBadgeTitle:
+            badgeContentOverride?.thaiBadgeTitle ||
+            "ผู้จัดเจนคลังสินค้าและมาตรฐาน 5S",
+          metalTint:
+            badgeContentOverride?.metalTint || "Indigo Royal Carbon & Silver",
           symbol: "📦",
           icon: Shield,
           colorClass: "from-indigo-600 to-slate-800",
           textColor: "text-indigo-600",
           borderColor: "border-indigo-400",
           glowColor: "shadow-indigo-500/30",
-          desc: "สอบผ่านหลักสูตรวิชาพนักงานคลังสินค้า จัดเรียง Racking และ ISO 9001 Clause 7.2",
+          desc:
+            badgeContentOverride?.desc ||
+            "สอบผ่านหลักสูตรวิชาพนักงานคลังสินค้า จัดเรียง Racking และ ISO 9001 Clause 7.2",
         };
+      case "quality-chem":
       case "c-2":
         return {
-          badgeTitle: "ISO Quality Control Expert",
-          thaiBadgeTitle: "ผู้พิทักษ์คุณภาพและเคมีภัณฑ์ขั้นสุจริต",
-          colorTheme: "emerald",
-          metalTint: "Emerald Chrome & Platinum Dual",
+          badgeTitle:
+            badgeContentOverride?.badgeTitle || "ISO Quality Control Expert",
+          thaiBadgeTitle:
+            badgeContentOverride?.thaiBadgeTitle ||
+            "ผู้พิทักษ์คุณภาพและเคมีภัณฑ์ขั้นสุจริต",
+          metalTint:
+            badgeContentOverride?.metalTint || "Emerald Chrome & Platinum Dual",
           symbol: "🧪",
           icon: Award,
-          colorClass: "from-emerald-605 to-slate-800",
+          colorClass: "from-emerald-600 to-slate-800",
           textColor: "text-emerald-600",
           borderColor: "border-emerald-400",
           glowColor: "shadow-emerald-500/30",
-          desc: "สอบผ่านระบบควบคุมและวิจัยระดับสารละลายเคมี บรรลุกระบวนการผลิตแกนลามิเนต",
+          desc:
+            badgeContentOverride?.desc ||
+            "สอบผ่านระบบควบคุมและวิจัยระดับสารละลายเคมี บรรลุกระบวนการผลิตแกนลามิเนต",
         };
+      case "safety-forklift":
       case "c-3":
         return {
-          badgeTitle: "Verified Forklift Safety Officer",
-          thaiBadgeTitle: "วิศวกรผู้บังคับรถยกและเซฟตี้ภาคปฏิบัติ",
-          colorTheme: "amber",
-          metalTint: "Polished 24K Gold & Safety Yellow",
+          badgeTitle:
+            badgeContentOverride?.badgeTitle ||
+            "Verified Forklift Safety Officer",
+          thaiBadgeTitle:
+            badgeContentOverride?.thaiBadgeTitle ||
+            "วิศวกรผู้บังคับรถยกและเซฟตี้ภาคปฏิบัติ",
+          metalTint:
+            badgeContentOverride?.metalTint ||
+            "Polished 24K Gold & Safety Yellow",
           symbol: "🛡️",
           icon: Zap,
           colorClass: "from-amber-500 to-amber-950",
           textColor: "text-amber-600",
           borderColor: "border-amber-400",
           glowColor: "shadow-amber-500/30",
-          desc: "สำเร็จการกวดขันการขับรถยกไฟฟ้า ดับเพลิง และมาตรฐานความปลอดภัยทางวิศวกรรม SHE",
+          desc:
+            badgeContentOverride?.desc ||
+            "สำเร็จการกวดขันการขับรถยกไฟฟ้า ดับเพลิง และมาตรฐานความปลอดภัยทางวิศวกรรม SHE",
         };
       default:
         return {
-          badgeTitle: "Meiwa Certified Tech Professional",
-          thaiBadgeTitle: "พนักงานวิชาชีพเทคโนโลยีอุตสาหกรรมการพิมพ์",
-          colorTheme: "violet",
-          metalTint: "Holographic Violet Cobalt & Bronze",
+          badgeTitle:
+            badgeContentOverride?.badgeTitle ||
+            "Meiwa Certified Tech Professional",
+          thaiBadgeTitle:
+            badgeContentOverride?.thaiBadgeTitle ||
+            "พนักงานวิชาชีพเทคโนโลยีอุตสาหกรรมการพิมพ์",
+          metalTint:
+            badgeContentOverride?.metalTint ||
+            "Holographic Violet Cobalt & Bronze",
           symbol: "🎓",
           icon: Award,
-          colorClass: "from-violet-650 to-slate-850",
+          colorClass: "from-violet-600 to-slate-900",
           textColor: "text-violet-600",
           borderColor: "border-violet-400",
           glowColor: "shadow-violet-500/30",
-          desc: "สำเร็จหลักสูตรบูรณาการยกระดับวิชาชีพโรงงาน อนุมัติโดยหัวหน้าวิศวกรรมสากล",
+          desc:
+            badgeContentOverride?.desc ||
+            "สำเร็จหลักสูตรบูรณาการยกระดับวิชาชีพโรงงาน อนุมัติโดยหัวหน้าวิศวกรรมสากล",
         };
     }
   };
 
-  const badgeProps = getCourseBadgeDetails(course.id);
+  const badgeProps = getCourseBadgeDetails(
+    (course as { badgeKey?: string }).badgeKey || course.id,
+  );
 
   // Handle printing certificate (highly targeted A4 styling)
   const handlePrint = () => {
@@ -443,24 +494,24 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                   <span className="text-slate-400 font-mono text-[9px] block">
                     (....................................................)
                   </span>
-                  {/* TODO: ใส่ชื่อจริงของ Managing Director เมื่อมี User จริงในระบบ */}
                   <p className="font-bold text-slate-800">
-                    ผู้อำนวยการฝ่ายบริหาร
+                    {directorName || "ผู้อำนวยการฝ่ายบริหาร"}
                   </p>
                   <p className="text-[8.5px] text-slate-400">
                     Managing Director (MD) - รอแยล เมอิวะ แพ็คซ์
+                    {!directorName && " (ยังไม่กำหนดผู้ลงนาม)"}
                   </p>
                 </div>
                 <div className="text-right pr-3 space-y-1">
                   <span className="text-slate-400 font-mono text-[9px] block">
                     (....................................................)
                   </span>
-                  {/* TODO: ใส่ชื่อจริงของ QA/QC Supervisor เมื่อมี User จริงในระบบ */}
                   <p className="font-bold text-slate-800">
-                    ผู้จัดการฝ่ายควบคุมคุณภาพ
+                    {qaSupervisorName || "ผู้จัดการฝ่ายควบคุมคุณภาพ"}
                   </p>
                   <p className="text-[8.5px] text-slate-400">
                     QA/QC Supervisor (Lead Auditor 9001)
+                    {!qaSupervisorName && " (ยังไม่กำหนดผู้ลงนาม)"}
                   </p>
                 </div>
               </div>

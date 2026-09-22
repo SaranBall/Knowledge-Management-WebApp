@@ -300,6 +300,23 @@ export default function App() {
     }
   };
 
+  // Log การดาวน์โหลด/พิมพ์ใบเซอร์ — ใช้ SystemAuditLog เดิมที่มีอยู่แล้ว (ไม่สร้าง log
+  // ประเภทใหม่) ไม่ได้เก็บไฟล์ PDF ใดๆ ไว้ในระบบ เก็บแค่ข้อความว่าใครโหลดอะไรไปเมื่อไหร่
+  const handleCertificateDownloadLog = (info: {
+    userId: string;
+    employeeId: string;
+    userName: string;
+    courseId: string;
+    courseTitle: string;
+    certId: string;
+    timestamp: string;
+  }) => {
+    addAuditLog(
+      "DOWNLOAD_CERTIFICATE",
+      `ดาวน์โหลด/พิมพ์ใบเซอร์: ${info.userName} (${info.employeeId}) หลักสูตร "${info.courseTitle}" [${info.certId}]`,
+    );
+  };
+
   const handleAddUser = async (user: UserType) => {
     const newUser = { ...user, status: user.status || "Active" };
     setUsers((prev) => [...prev, newUser]);
@@ -1640,6 +1657,7 @@ export default function App() {
                   courses={courses}
                   onTriggerGapFill={handleTriggerGapFill}
                   onNavigateToModule={(mod) => setActiveMenu(mod)}
+                  onCertificateDownloadLog={handleCertificateDownloadLog}
                 />
               )}
 
@@ -1676,6 +1694,7 @@ export default function App() {
                   setKmContributionLogs={setKmContributionLogs}
                   onAwardPoints={awardPoints}
                   documents={documents}
+                  onCertificateDownloadLog={handleCertificateDownloadLog}
                 />
               )}
 

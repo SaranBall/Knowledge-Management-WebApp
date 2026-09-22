@@ -48,6 +48,18 @@ interface DashboardProps {
   courses: Course[];
   onTriggerGapFill: (keyword: string) => void;
   onNavigateToModule: (module: string) => void;
+  // callback สำหรับบันทึก log ว่าใครดาวน์โหลด/พิมพ์ใบเซอร์อะไรไปเมื่อไหร่
+  // ส่งต่อมาจาก App.tsx (ผูกกับ addAuditLog ที่มีอยู่แล้ว) — optional เพื่อไม่ให้ของเดิมพัง
+  // ถ้ายังไม่มีใครส่งเข้ามา
+  onCertificateDownloadLog?: (info: {
+    userId: string;
+    employeeId: string;
+    userName: string;
+    courseId: string;
+    courseTitle: string;
+    certId: string;
+    timestamp: string;
+  }) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -62,6 +74,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   courses,
   onTriggerGapFill,
   onNavigateToModule,
+  onCertificateDownloadLog,
 }) => {
   const visibleUsers = users;
   const [selectedUserTranscript, setSelectedUserTranscript] =
@@ -210,7 +223,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     (sum, u) => sum + getRequiredCoursesForPosition(u.position).length,
     0,
   );
-  const totalAssignedCount = visibleUsers.length * 2; // For demonstration
   const completionRate =
     totalAssignedCount > 0
       ? Math.round((totalCompleted / totalAssignedCount) * 100)
@@ -1453,6 +1465,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           course={modalSelectedCourse}
           score={modalSelectedScore}
           completedDate={modalSelectedDate}
+          onDownloadLog={onCertificateDownloadLog}
         />
       )}
     </>

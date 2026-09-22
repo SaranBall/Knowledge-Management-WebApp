@@ -179,6 +179,17 @@ interface LearningCenterProps {
     description: string,
   ) => void;
   documents: DocumentItem[];
+  // callback สำหรับบันทึก log ว่าใครดาวน์โหลด/พิมพ์ใบเซอร์อะไรไปเมื่อไหร่
+  // ส่งต่อมาจาก App.tsx (ผูกกับ addAuditLog ที่มีอยู่แล้ว) — optional เพื่อไม่ให้ของเดิมพัง
+  onCertificateDownloadLog?: (info: {
+    userId: string;
+    employeeId: string;
+    userName: string;
+    courseId: string;
+    courseTitle: string;
+    certId: string;
+    timestamp: string;
+  }) => void;
 }
 
 export const LearningCenter: React.FC<LearningCenterProps> = ({
@@ -200,6 +211,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
   setKmContributionLogs,
   onAwardPoints,
   documents,
+  onCertificateDownloadLog,
 }) => {
   // Main SubTabs for learning
   const [activeSubTab, setActiveSubTab] = useState<
@@ -4665,6 +4677,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           course={modalSelectedCourse}
           score={modalSelectedScore}
           completedDate={modalSelectedDate}
+          onDownloadLog={onCertificateDownloadLog}
         />
       )}
     </div>
