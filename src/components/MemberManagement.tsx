@@ -788,7 +788,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             ? Math.round(
                 attempts.reduce((acc, c) => acc + c.score, 0) / attempts.length,
               )
-            : 90;
+            : null;
         const reqs = getRequiredCoursesForPosition(u.position).length;
         const hours = completions * 3 + 2;
         const statusText =
@@ -808,7 +808,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           u.phone,
           completions,
           reqs,
-          `${avgS}%`,
+          avgS !== null ? `${avgS}%` : "-",
           `${hours} ชั่วโมง`,
           statusText,
         ];
@@ -857,7 +857,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             ? Math.round(
                 attempts.reduce((acc, c) => acc + c.score, 0) / attempts.length,
               )
-            : 90;
+            : null;
         const hours = completions * 3 + 2;
         const statusText =
           completions >= reqs
@@ -872,7 +872,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           completions,
           reqs,
           `${rate}%`,
-          `${avgS}%`,
+          avgS !== null ? `${avgS}%` : "-",
           `${hours} ชั่วโมง`,
           statusText,
         ];
@@ -1077,7 +1077,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
         const isPassed =
           progressObj?.status === "Completed" || (examObj && examObj.pass);
-        const scoreVal = examObj?.score ?? progressObj?.score ?? "85";
+        const scoreVal = examObj?.score ?? progressObj?.score ?? null;
         const title = courseObj ? courseObj.title : "หลักสูตรมาตรฐานโรงงาน";
         const passingScore = courseObj ? courseObj.minPassScore : 80;
 
@@ -1089,7 +1089,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           courseId,
           title,
           `${passingScore}%`,
-          `${scoreVal}%`,
+          scoreVal !== null ? `${scoreVal}%` : "-",
           isPassed ? "ผ่านเกณฑ์ (PASSED)" : "รอดำเนินการอบรม (PENDING)",
           progressObj?.status || "Not Started",
         ];
@@ -1890,7 +1890,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                 attempts.reduce((acc, c) => acc + c.score, 0) /
                                   attempts.length,
                               )
-                            : 90;
+                            : null;
                         const reqs = getRequiredCoursesForPosition(
                           u.position,
                         ).length;
@@ -1926,7 +1926,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                               / {reqs} คอร์ส
                             </td>
                             <td className="p-2.5 text-center font-mono font-bold text-[#15329c]">
-                              {avgS}%
+                              {avgS !== null ? `${avgS}%` : "-"}
                             </td>
                             <td className="p-2.5 text-right font-medium text-emerald-600 font-sans">
                               {completions >= reqs
@@ -2022,7 +2022,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                           0,
                                         ) / attempts.length,
                                       )
-                                    : 89;
+                                    : null;
 
                                 return (
                                   <tr
@@ -2043,7 +2043,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                       {completions} คอร์สเรียนสำเร็จ
                                     </td>
                                     <td className="p-2.5 text-right font-mono font-bold text-[#15329c]">
-                                      {avgS}%
+                                      {avgS !== null ? `${avgS}%` : "-"}
                                     </td>
                                   </tr>
                                 );
@@ -2153,7 +2153,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                   progressObj?.status === "Completed" ||
                                   (examObj && examObj.pass);
                                 const scoreVal =
-                                  examObj?.score ?? progressObj?.score ?? "85";
+                                  examObj?.score ?? progressObj?.score ?? null;
 
                                 return (
                                   <tr
@@ -2171,7 +2171,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                       {courseObj?.minPassScore || 80}%
                                     </td>
                                     <td className="p-2.5 text-center font-mono font-bold text-[#15329c]">
-                                      {scoreVal}%
+                                      {scoreVal !== null ? `${scoreVal}%` : "-"}
                                     </td>
                                     <td className="p-2.5 text-right font-bold">
                                       {isPassed ? (

@@ -104,7 +104,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     const completedMap = new Map<
       string,
-      { course: Course; score: number; date: string }
+      { course: Course; score: number | undefined; date: string }
     >();
 
     completedFromProgress.forEach((p) => {
@@ -112,7 +112,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       if (c) {
         completedMap.set(p.courseId, {
           course: c,
-          score: p.score ?? 100,
+          score: p.score,
           date: p.completedDate
             ? p.completedDate.split("T")[0]
             : "ไม่ระบุวันที่",
@@ -1017,25 +1017,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           </span>
                         </div>
                         <div className="col-span-3 sm:col-span-2 text-center text-emerald-600 font-black">
-                          ผ่าน ({item.score}%)
+                          {item.score !== undefined ? (
+                            <span>ผ่าน ({item.score}%)</span>
+                          ) : (
+                            <span className="text-amber-600">รอผลประเมิน</span>
+                          )}
                         </div>
                         <div className="col-span-2 sm:col-span-1 text-center font-mono font-medium text-slate-500">
                           {item.course.durationHours || "2.0"} ชม.
                         </div>
                         <div className="col-span-2 sm:col-span-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setModalSelectedCourse(item.course);
-                              setModalSelectedScore(item.score);
-                              setModalSelectedDate(item.date);
-                              setIsCertBadgeModalOpen(true);
-                            }}
-                            className="bg-indigo-50 hover:bg-indigo-100 text-[#15329c] font-bold text-[10.5px] px-2.5 py-1.5 rounded-lg border border-indigo-200 cursor-pointer shadow-xs transition-all inline-flex items-center gap-1"
-                          >
-                            <Award className="w-3.5 h-3.5 text-amber-500" />
-                            <span>ดูความสำเร็จ</span>
-                          </button>
+                          {item.score !== undefined ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModalSelectedCourse(item.course);
+                                setModalSelectedScore(item.score as number);
+                                setModalSelectedDate(item.date);
+                                setIsCertBadgeModalOpen(true);
+                              }}
+                              className="bg-indigo-50 hover:bg-indigo-100 text-[#15329c] font-bold text-[10.5px] px-2.5 py-1.5 rounded-lg border border-indigo-200 cursor-pointer shadow-xs transition-all inline-flex items-center gap-1"
+                            >
+                              <Award className="w-3.5 h-3.5 text-amber-500" />
+                              <span>ดูความสำเร็จ</span>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 italic">
+                              ยังไม่มีคะแนนออกใบเซอร์
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1314,7 +1324,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               {item.course.title}
                             </div>
                             <div className="text-green-700 font-bold">
-                              ผ่านเกณฑ์ ({item.score}%)
+                              {item.score !== undefined ? (
+                                <span>ผ่านเกณฑ์ ({item.score}%)</span>
+                              ) : (
+                                <span className="text-amber-700">รอผลประเมิน</span>
+                              )}
                             </div>
                             <div className="font-mono text-right">
                               {item.course.durationHours || "2.0"} ชม.
