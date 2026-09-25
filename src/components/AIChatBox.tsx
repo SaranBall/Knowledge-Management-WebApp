@@ -98,7 +98,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
         {
           id: "welcome-msg",
           sender: "bot",
-          text: `สวัสดีครับคุณ **${currentUser.name}** ฝ่าย **${getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId}** 🙏 \n\nผมคือ **RMP AI Smart Knowledge Assistant** ยินดีต้อนรับสู่ระบบสืบค้นอัจฉริยะ (RAG System) มีหน้าที่ตอบคำถามเกณฑ์มาตรฐานเชิงลึก จากเฉพาะคลังข้อมูลของ **บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด** เท่านั้น\n\n💡 **กติกาความปลอดภัยสูงสุด (Strict RAG Guidance):** \nเพื่อป้องกันความคลาดเคลื่อน ข้อมูลทั้งหมดจะถูกอ้างอิงและพับลิชมาจากเฉพาะไฟล์ฉบับอนุมัติในระบบ (เช่น QP, WI, แบบฟอร์ม, และองค์ความรู้เชิงช่าง Kaizen) เท่านั้น ห้ามดึงคำตอบจากอินเทอร์เน็ตภายนอกเด็ดขาดครับ \n\nท่านสามารถลองเลือกหัวข้อแนะนำ หรือป้อนคำถามช่างที่ต้องการสืบค้นด้านล่างนี้ได้เลยครับ`,
+          text: `สวัสดีครับคุณ **${currentUser.name}** ฝ่าย **${getDepartmentById(currentUser.departmentId)?.name || currentUser.departmentId}** 🙏 \n\nผมคือ **RMP AI Smart Knowledge Assistant** ยินดีต้อนรับสู่ระบบสืบค้นอัจฉริยะ (RAG System) มีหน้าที่ตอบคำถามเกณฑ์มาตรฐานเชิงลึก จากเฉพาะคลังข้อมูลของ **บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด** เท่านั้น\n\n💡 **กติกาความปลอดภัยสูงสุด (Strict RAG Guidance):** \nเพื่อป้องกันความคลาดเคลื่อน ข้อมูลทั้งหมดจะถูกอ้างอิงและเผยแพร่มาจากเฉพาะเอกสารฉบับอนุมัติในระบบ (เช่น QP, WI, แบบฟอร์ม, และองค์ความรู้เชิงช่าง Kaizen) เท่านั้น ห้ามดึงคำตอบจากอินเทอร์เน็ตภายนอกเด็ดขาดครับ \n\nท่านสามารถลองเลือกหัวข้อแนะนำ หรือป้อนคำถามช่างที่ต้องการสืบค้นด้านล่างนี้ได้เลยครับ`,
           timestamp: new Date().toLocaleTimeString("th-TH", {
             hour: "2-digit",
             minute: "2-digit",
@@ -175,7 +175,8 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
     // Index & Score Documents
     documents.forEach((doc) => {
       if (doc.status !== "Published") return;
-      const deptName = getDepartmentById(doc.departmentId)?.name || doc.departmentId || "";
+      const deptName =
+        getDepartmentById(doc.departmentId)?.name || doc.departmentId || "";
       const textToSearch = `${doc.title} ${doc.description} ${doc.exampleText || ""} ${deptName} ${doc.type}`;
       const score = calculateScore(textToSearch, q);
       if (score > 0) {
@@ -198,7 +199,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
         matches.push({
           id: art.id,
           title: `องค์ความรู้ Kaizen: ${art.title}`,
-          type: `คลังสมองเทคนิค (${art.type})`,
+          type: `คลังความรู้ช่างเทคนิค (${art.type})`,
           content: `ปัญหาชำรุด: ${art.problem}\n\nวิเคราะห์สาเหตุ (Root Cause): ${art.cause || "ไม่ระบุ"}\n\nขั้นตอนการแก้ไขโดยผู้เชี่ยวชาญ (Solution):\n${art.solution}\n\nมาตรการป้องกันระยะยาว (Prevention):\n${art.prevention || "ไม่ระบุ"}\n\nเอกสารเชื่อมโยง: ${art.relatedWIs.join(", ") || "ไม่มี"} \nทำโดย: ${art.author} (${art.authorDept})`,
           score,
         });
@@ -230,7 +231,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
         matches.push({
           id: res.id,
           title: `คู่มือเพิ่มเติม: ${res.title}`,
-          type: `คู่มือนอกระบบ (${res.sourceType})`,
+          type: `เอกสารอ้างอิงภายนอก (${res.sourceType})`,
           content: res.content,
           score,
         });
@@ -243,7 +244,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
     // If zero matches, return empty handed strictly
     if (matches.length === 0 || matches[0].score < 4) {
       return {
-        responseText: `❌ ขออภัยอย่างสูงครับคุณ **${currentUser.name}** \n\nคำค้นหา **"${query}"** ไม่ปรากฏอยู่ใน เอกสารมาตรฐานฉบับอนุมัติ (QP, WI, Form), รายงานความรู้เชิงเทคนิคหน้าเครื่องจักร (Kaizen) หรือ บทเรียนสอนงานคลังสินค้าในฐานข้อมูลระบบของบริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด ในปัจจุบันครับ\n\n🔒 **นโยบายความถูกต้องเป็นเลิศ (Strict Local Grounding Security):** \nระบบไม่อนุญาตให้ทำการเดาคำตอบ หรือดึงคำตอบทั่วไปจากเว็บภายนอก เนื่องจากหัวข้อดังกล่าวไม่ได้ผ่านการทบทวนโดยผู้บริหาร RMP คณะกรรมการกลาง ซึ่งอาจก่อให้เกิดอันตรายรุนแรงในการทำงานหน้าไลน์ผลิตได้ครับ หากท่านประสงค์รบกวนติดต่อฝ่ายวิศวกรรม/ซ่อมบำรุง หรือ แนะนำให้เขียนคำร้องปรึกษาผู้เชี่ยวชาญโดยตรงที่มอดูล Expert Directory ครับ`,
+        responseText: `❌ ขออภัยอย่างสูงครับคุณ **${currentUser.name}** \n\nคำค้นหา **"${query}"** ไม่ปรากฏอยู่ใน เอกสารมาตรฐานฉบับอนุมัติ (QP, WI, Form), รายงานความรู้เชิงเทคนิคหน้าเครื่องจักร (Kaizen) หรือ บทเรียนสอนงานคลังสินค้าในฐานข้อมูลระบบของบริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด ในปัจจุบันครับ\n\n🔒 **นโยบายความถูกต้องเป็นเลิศ (Strict Local Grounding Security):** \nระบบไม่อนุญาตให้ทำการเดาคำตอบ หรือดึงคำตอบทั่วไปจากเว็บภายนอก เนื่องจากข้อมูลดังกล่าวไม่ผ่านการรับรองอย่างเป็นทางการ ซึ่งอาจก่อให้เกิดข้อผิดพลาดในการปฏิบัติงานได้ หากต้องการข้อมูลเพิ่มเติม กรุณาติดต่อฝ่ายวิศวกรรม/ซ่อมบำรุง หรือสอบถามผู้เชี่ยวชาญผ่านเมนู Expert Directory ครับ`,
         citations: [],
       };
     }
@@ -255,12 +256,12 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
     let synthesis = "";
 
     if (bestMatch.type.includes("เอกสารระบบ")) {
-      synthesis = `### 📋 รายงานการสืบค้นมาตรฐานปฏิบัติงาน (Verified QP/WI)\n\nจากการตรวจสอบฐานข้อมูลอ้างอิง ระบบตรวจพบข้อปฏิบัติมาตรฐานในเอกสารฉบับอนุมัติพับลิช **"${bestMatch.title}"** ซึ่งมีแนวทางการทำงานที่แนะนำดังนี้:\n\n`;
+      synthesis = `### 📋 รายงานการสืบค้นมาตรฐานปฏิบัติงาน (Verified QP/WI)\n\nจากการตรวจสอบฐานข้อมูลอ้างอิง ระบบตรวจพบข้อปฏิบัติมาตรฐานในเอกสารฉบับอนุมัติ **"${bestMatch.title}"** ซึ่งมีแนวทางการทำงานที่แนะนำดังนี้:\n\n`;
       synthesis += `*   **วัตถุประสงค์งาน & หน้าที่:** ${bestMatch.content.split("\n\nรายละเอียด: ")[1]?.split("\n\nข้อกำหนดการปฏิบัตงาน")[0] || "ปฏิบัติให้เป็นไปตามมาตรฐานคุณภาพและป้องกัน Loss"}\n`;
-      synthesis += `*   **ขั้นตอนมาตรฐานที่กำหนดรัดกุม (Standard Procedure):** \n    ${bestMatch.content.split("ข้อกำหนดการปฏิบัติงาน (WI/QP):\n")[1] || "โปรดดาวน์โหลดเอกสารมาตรฐานฉบับเต็มเพื่อศึกษาขั้นตอนอย่างละเอียด"}\n\n`;
-      synthesis += `**คำแนะนำความปลอดภัยเพิ่มเติม:** ผู้ปฏิบัติงานแผนกผลิตและ QA ต้องสวมใส่อุปกรณ์คุ้มครองความปลอดภัยส่วนบุคคล (PPE) เมือเข้าสัมผัสสายพานงานตรงนี้ตลอด 100%`;
-    } else if (bestMatch.type.includes("คลังสมองเทคนิค")) {
-      synthesis = `### 🛠️ คู่มือแก้ไขปัญหาทางเทคนิคและ Kaizen หน้าเครื่องจักร\n\nระบบสืบค้นพบรายงานวิจัยสาเหตุของช่างเทคนิคที่บันทึกแนวทางแก้อย่างยอดเยี่ยมไว้ในคลังความรู้ **"${bestMatch.title}"** สรุปแนวทางฟื้นฟูดังนีครับ:\n\n`;
+      synthesis += `*   **ขั้นตอนการปฏิบัติงานมาตรฐาน (Standard Procedure):** \n    ${bestMatch.content.split("ข้อกำหนดการปฏิบัติงาน (WI/QP):\n")[1] || "โปรดดาวน์โหลดเอกสารมาตรฐานฉบับเต็มเพื่อศึกษาขั้นตอนอย่างละเอียด"}\n\n`;
+      synthesis += `**คำแนะนำความปลอดภัยเพิ่มเติม:** ผู้ปฏิบัติงานแผนกผลิตและ QA ต้องสวมใส่อุปกรณ์คุ้มครองความปลอดภัยส่วนบุคคล (PPE) เมื่อปฏิบัติงานในพื้นที่ดังกล่าวตลอดเวลา`;
+    } else if (bestMatch.type.includes("คลังความรู้ช่างเทคนิค")) {
+      synthesis = `### 🛠️ คู่มือแก้ไขปัญหาทางเทคนิคและ Kaizen หน้าเครื่องจักร\n\nระบบพบข้อมูลการแก้ไขปัญหาจากคลังความรู้เชิงช่าง **"${bestMatch.title}"** สรุปแนวทางแก้ไขได้ดังนี้ครับ:\n\n`;
       const docCleanContent = bestMatch.content;
       const problem =
         docCleanContent
@@ -280,21 +281,21 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
           ?.split("\n\nเอกสารเชื่อมโยง")[0] || "";
 
       synthesis += `*   **1. อาการของปัญหา (Problem):** ${problem}\n`;
-      synthesis += `*   **2. สาเหตุหัวใจของปัญหา (Root Cause):** ${cause}\n\n`;
-      synthesis += `👉 **3. ขั้นตอนลงมือฟื้นฟูโดยเซียน (Action Plan):**\n${solution
+      synthesis += `*   **2. สาเหตุที่แท้จริงของปัญหา (Root Cause):** ${cause}\n\n`;
+      synthesis += `👉 **3. ขั้นตอนการแก้ไขปัญหาโดยผู้เชี่ยวชาญ (Action Plan):**\n${solution
         .split("\n")
         .map((line) => `    ${line}`)
         .join("\n")}\n\n`;
       synthesis += `🛡️ **4. วิธีระวังรักษาระยะยาว (Prevention Measures):**\n    ${prevention}\n\n`;
       synthesis += `*สำหรับข้อมูลอ้างอิงเชิงลึกกรุณาตรวจสอบเอกสารแนบเพื่อความชัดเจนสูงสุดครับ*`;
     } else if (bestMatch.type.includes("คอร์สอบรมออนไลน์")) {
-      synthesis = `### 🎓 คู่มือทักษะย่อยจากบทเรียน Onboarding เสมือนจริง\n\nเนื้อหานี้จัดอยู่ใน **"${bestMatch.title}"** ของวิทยาลัยสอนงาน RMP Academy:\n\n`;
+      synthesis = `### 🎓 ข้อมูลประกอบจากหลักสูตรการฝึกอบรม (Training Academy)\n\nเนื้อหานี้มาจากหลักสูตร **"${bestMatch.title}"** :\n\n`;
       const lessonContent =
         bestMatch.content.split("เนื้อหาบทเรียนย่อย")[1] || bestMatch.content;
       synthesis += `${lessonContent.slice(0, 1000)}\n\n`;
       synthesis += `\n*ขอแนะนำให้ผู้ปฏิบัติงานเข้าไปเรียนหลักสูตรที่เกี่ยวข้องเต็มรูปแบบเพื่อทำแบบวัดผลเพื่อรับใบประกาศนียบัตรอ้างอิงตามเกณฑ์ Competency ต่อไป*`;
     } else {
-      synthesis = `### 📚 ข้อมูลเพิ่มเติมจากฐานข้อมูล Admin Ingested Manual\n\nคำตอบจากเอกสารอ้างอิงภายนอกความร่วมมือ **"${bestMatch.title}"**:\n\n`;
+      synthesis = `### 📚 ข้อมูลเพิ่มเติมจากฐานข้อมูล Admin Ingested Manual\n\nคำตอบจากเอกสารอ้างอิงเพิ่มเติม **"${bestMatch.title}"**:\n\n`;
       synthesis += `${bestMatch.content}\n\n`;
       synthesis += `*ข้อมูลนี้ได้รับการเพิ่มเข้ามาเป็นการเฉพาะเพื่อขยายขอบเขตความรู้*`;
     }
@@ -384,7 +385,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                       `**อันดับที่ ${i + 1}.** [${c.type}] **"${c.title}"** \n*ตัวอย่างเนื้อหา:* \n${c.content.slice(0, 200)}...\n\n`,
                   )
                   .join("")
-              : "ไม่พบประจักษ์พยานความรู้ใด ๆ ในฐานข้อมูลเลยครับ"
+              : "ไม่พบข้อมูลที่ตรงกับคำค้นหาในฐานข้อมูลครับ"
           }`,
           citations: undefined,
           timestamp: new Date().toLocaleTimeString("th-TH", {
@@ -540,7 +541,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
 
               <div className="space-y-2 pt-2 border-t border-slate-150">
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  💡 คำแนะนำหัวข้อวิจัยประหยัดเวลา
+                  💡 ตัวอย่างคำถามที่พบบ่อย
                 </span>
                 <div className="space-y-1.5">
                   {suggestionQueries.map((chip, idx) => (
@@ -685,7 +686,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                placeholder="พิมพ์ถามขั้นตอนมาตรฐาน ตัวอย่าง: แก้ปัญหาพลาสติกพรู, ตรวจรับ QC, ขับโฟล์คลิฟท์..."
+                placeholder="พิมพ์คำถาม เช่น การปรับตั้งค่าเครื่องเป่าฟิล์ม, ขั้นตอนตรวจรับ QC, ความปลอดภัยรถโฟล์คลิฟท์..."
                 className="flex-1 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-[#15329c] text-slate-800"
               />
               <button
@@ -705,7 +706,8 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div>
               <h3 className="font-extrabold text-slate-900 text-sm">
-                ข้อมูลสารสนเทศทั้งหมดที่ระบบ AI สลักเชื่อมโยง
+                ฐานข้อมูลองค์ความรู้ที่ระบบ AI นำมาประมวลผล (Ingested Knowledge
+                Base)
               </h3>
               <p className="text-xs text-slate-500">
                 ข้อมูลสารสนเทศในองค์กรทั้งหมดที่ดึงมาประมวลผลเป็น RAG Ingestion
@@ -717,7 +719,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
             <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
               <span className="block text-slate-500 text-[10px] font-bold uppercase">
-                เอกสาร QP / WI ฉบับพับลิช
+                เอกสาร QP / WI ที่เผยแพร่แล้ว
               </span>
               <strong className="text-2xl font-black text-indigo-900 block mt-1">
                 {documents.filter((d) => d.status === "Published").length} ฉบับ
@@ -725,7 +727,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
             </div>
             <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
               <span className="block text-slate-500 text-[10px] font-bold uppercase">
-                ข้อยืดหยุ่น Kaizen & บทความเชิงช่าง
+                บทความ Kaizen และเทคนิคการแก้ปัญหาหน้างาน
               </span>
               <strong className="text-2xl font-black text-emerald-900 block mt-1">
                 {kbArticles.filter((k) => k.status === "Approved").length}{" "}
@@ -734,7 +736,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
             </div>
             <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl">
               <span className="block text-slate-500 text-[10px] font-bold uppercase">
-                บทเรียนย่อยในอคาเดมีออนไลน์
+                บทเรียนในระบบการฝึกอบรม (E-Learning)
               </span>
               <strong className="text-2xl font-black text-amber-900 block mt-1">
                 {courses.reduce((sum, c) => sum + c.lessons.length, 0)} หัวข้อ
@@ -855,7 +857,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                         <button
                           onClick={() => onDeleteCustomResource(res.id)}
                           className="text-slate-400 hover:text-rose-600 transition p-1.5 hover:bg-rose-50 rounded"
-                          title="ลบออกความรู้ RAG"
+                          title="ลบเอกสารอ้างอิงนี้"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -872,9 +874,9 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                 สิทธิ์ Viewer/Editor ของคุณไม่สามารถแก้ไขฐานสารสนเทศได้
               </h5>
               <p>
-                เฉพาะแอดมินฝ่ายความรู้ คณะกรรมการกลาง
-                เท่านั้นที่สามารถนำเข้าคู่มือ Manual ฉบับพิเศษเข้าระบบได้
-                หากมีคำแนะนำ Kaizen เพิ่มเติมรบกวนเสนอไปยังหัวหน้าฝ่ายของคุณครับ
+                เฉพาะผู้ดูแลระบบ (Admin)
+                เท่านั้นที่สามารถเพิ่มคู่มือภายนอกเข้าสู่ระบบ AI ได้
+                หากท่านมีข้อเสนอแนะเพิ่มเติม กรุณาติดต่อผู้ดูแลระบบครับ
               </p>
             </div>
           )}
@@ -926,7 +928,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                   },
                   {
                     title: "ข้อมูลไม่เป็นมาตรฐาน",
-                    desc: "พนักงานทำงานตามใจตัวเอง ขาดเอกสารยึดเหนี่ยวมาตรฐานและขั้นตอนที่ถูกต้องแม่นยำ",
+                    desc: "พนักงานแต่ละคนมีวิธีปฏิบัติงานไม่เหมือนกัน ขาดคู่มือมาตรฐานกลางที่ใช้อ้างอิงร่วมกัน",
                   },
                   {
                     title: "ความรู้หายเมื่อพนักงานลาออก",
@@ -980,7 +982,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                   },
                   {
                     title: "ความรู้ไม่หาย แม้คนเปลี่ยน",
-                    desc: "บันทึกเทคนิคหน้าไลน์ วิธีถอดซ่อม และสูตรแก้ปัญหาในรูปฐานข้อมูลคลังสมองอัจฉริยะ",
+                    desc: "บันทึกเทคนิคการทำงาน วิธีการซ่อมบำรุง และแนวทางแก้ไขปัญหาลงในฐานข้อมูลกลางขององค์กร",
                   },
                 ].map((item, index) => (
                   <div
@@ -1051,7 +1053,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                   title: "5. ค้นหา Audit Finding",
                   icon: "📝",
                   query:
-                    "รายการสิ่งบกพร่องจากการตรวจประเมินภายใน มีประเด็นสำคัญเรื่องใดบ่อยบ้าง",
+                    "รายการข้อตรวจพบ (Audit Findings) จากการตรวจประเมินภายใน มีประเด็นใดบ่อยบ้าง",
                 },
                 {
                   id: 6,
@@ -1072,7 +1074,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                   title: "8. ค้นหา Root Cause",
                   icon: "🔥",
                   query:
-                    "สาเหตุการเกิดปัญหาฟองพลาสติกพรูหรือสิ่งแปลกปลอมในฟิล์มเป่า เกิดจากอะไร",
+                    "สาเหตุการเกิดปัญหาฟองอากาศหรือสิ่งแปลกปลอมในฟิล์มเป่า เกิดจากอะไร",
                 },
                 {
                   id: 9,
@@ -1086,7 +1088,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                   title: "10. Chatbot องค์กร 24 ชั่วโมง",
                   icon: "💬",
                   query:
-                    "สอบถามกฎระเบียบมาตรฐานความมั่นคงและเวลาเปิด-ปิดการใช้งานคลังสินค้า",
+                    "มาตรฐานความปลอดภัยและการควบคุมคลังสินค้า",
                 },
               ].map((uc) => (
                 <button
@@ -1127,12 +1129,12 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                 },
                 {
                   title: "แม่นยำขึ้น ลดความผิดพลาด",
-                  desc: "การันตีข้อมูลที่ใช้อ้างอิงเป็น Rev ล่าสุด ผ่านการอนุมัติแล้วเท่านั้น ลดการทำงานซ้ำซากและงานเสีย (Defect Ratio)",
+                  desc: "มั่นใจได้ว่าข้อมูลที่ใช้อ้างอิงเป็นฉบับล่าสุด (Revision) ที่ผ่านการอนุมัติแล้วเท่านั้น ช่วยลดข้อผิดพลาดและลดของเสีย (Defect Rate)",
                   icon: "🎯",
                 },
                 {
                   title: "ปลอดภัยขึ้น ใช้ข้อมูลถูกต้อง",
-                  desc: "ช่วยยับยั้งการใช้อุณหภูมิเครื่องจักรหรือความเร็วมั่วซั่วตามใจตนเอง ซึ่งอาจสร้างอันตรายร้ายแรงต่อโรงงาน",
+                  desc: "ป้องกันการตั้งค่าพารามิเตอร์ของเครื่องจักรผิดพลาดจากเกณฑ์ที่กำหนด ช่วยลดความเสี่ยงและเพิ่มความปลอดภัยในโรงงาน",
                   icon: "🔒",
                 },
                 {
@@ -1197,7 +1199,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                 onClick={() => setPreviewCitation(null)}
                 className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-4 py-2 rounded-xl text-xs cursor-pointer transition shadow"
               >
-                เข้าใจแล้ว และปิดทรานสคริปต์
+                ปิดหน้าต่างนี้
               </button>
             </div>
           </div>

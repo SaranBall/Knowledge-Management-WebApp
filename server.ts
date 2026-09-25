@@ -44,6 +44,7 @@ import {
   UserCertificate,
   KMContributionLog,
   AttendanceLog,
+  TrainingSession,
 } from "./src/types";
 
 dotenv.config();
@@ -276,6 +277,7 @@ async function startServer() {
   let db_employee_master: EmployeeMaster[] = [...INITIAL_EMPLOYEE_MASTER];
   let db_system_audit_logs: SystemAuditLog[] = [];
   let db_attendance_logs: AttendanceLog[] = [];
+  let db_training_sessions: TrainingSession[] = [];
 
   // Add JSON parsing middleware up to 50MB to handle document corpus payloads and file uploads safely
   app.use(express.json({ limit: "50mb" }));
@@ -1460,7 +1462,9 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.post(
     "/api/attendance_logs",
     requireAuth,
-    requireOwnField("userId"),
+    // การเช็คอินจริงต้องผ่าน /api/checkin (ตรวจ token + เวลา) เท่านั้น
+    // endpoint นี้คงไว้ให้ Admin แก้ไขบันทึกด้วยมือ
+    requireRole("Admin"),
     (req, res) => {
       try {
         const log = req.body;
@@ -1500,6 +1504,160 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       }
     },
   );
+
+  // Training Sessions (คาบอบรมออฟไลน์) — สร้าง/ลบได้เฉพาะ Admin/Editor
+  // token ของคาบเป็นความลับ ส่งให้เฉพาะ Admin/Editor เท่านั้น
+  app.get("/api/training_sessions", requireAuth, (req, res) => {
+    const role = req.authUser!.role;
+    if (role === "Admin" || role === "Editor") {
+      return res.json(db_training_sessions);
+    }
+    res.json(db_training_sessions.map(({ token, ...rest }) => rest));
+  });
+  app.post(
+    "/api/training_sessions",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const {
+          courseId,
+          sessionName,
+          location,
+          instructor,
+          startsAt,
+          endsAt,
+        } = req.body;
+        if (!courseId || !sessionName || !startsAt || !endsAt) {
+          return res.status(400).json({
+            error: "MISSING_FIELDS",
+            message: "กรุณากรอกคอร์ส ชื่อคาบ และช่วงเวลาให้ครบ",
+          });
+        }
+        const start = Date.parse(startsAt);
+        const end = Date.parse(endsAt);
+        if (isNaN(start) || isNaN(end) || end <= start) {
+          return res.status(400).json({
+            error: "INVALID_TIME_RANGE",
+            message: "ช่วงเวลาไม่ถูกต้อง (เวลาสิ้นสุดต้องหลังเวลาเริ่ม)",
+          });
+        }
+        const course = db_courses.find((c) => c.id === courseId);
+        if (!course) {
+          return res
+            .status(400)
+            .json({ error: "COURSE_NOT_FOUND", message: "ไม่พบคอร์สที่เลือก" });
+        }
+        const session: TrainingSession = {
+          id: `ts-${crypto.randomUUID()}`,
+          courseId,
+          courseTitle: course.title, // ใช้ชื่อจากฐานข้อมูล ไม่เชื่อ client
+          sessionName: String(sessionName).trim(),
+          location: String(location || "").trim(),
+          instructor: String(instructor || "").trim(),
+          startsAt: new Date(start).toISOString(),
+          endsAt: new Date(end).toISOString(),
+          token: crypto.randomBytes(16).toString("hex"),
+          createdBy: req.authUser!.employeeId,
+          createdAt: new Date().toISOString(),
+        };
+        db_training_sessions.unshift(session);
+        res.json(session);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+  app.delete(
+    "/api/training_sessions/:id",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      const existing = db_training_sessions.find((s) => s.id === req.params.id);
+      if (!existing) return res.status(404).json({ error: "NOT_FOUND" });
+      // Editor ลบได้เฉพาะคาบที่ตัวเองสร้าง
+      if (
+        req.authUser!.role !== "Admin" &&
+        existing.createdBy !== req.authUser!.employeeId
+      ) {
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "ลบได้เฉพาะคาบที่ตัวเองสร้าง",
+        });
+      }
+      db_training_sessions = db_training_sessions.filter(
+        (s) => s.id !== req.params.id,
+      );
+      res.json({ success: true });
+    },
+  );
+
+  // เช็คอินด้วย token จาก QR — ข้อมูลผู้เช็คอินมาจาก DB ตาม token login ไม่ใช่จาก body
+  app.post("/api/checkin", requireAuth, (req, res) => {
+    try {
+      const token = typeof req.body.token === "string" ? req.body.token : "";
+      const session = token
+        ? db_training_sessions.find((s) => s.token === token)
+        : undefined;
+      if (!session) {
+        return res.status(404).json({
+          error: "SESSION_NOT_FOUND",
+          message: "QR นี้ไม่ถูกต้องหรือคาบอบรมถูกยกเลิกแล้ว",
+        });
+      }
+
+      const now = Date.now();
+      if (now < Date.parse(session.startsAt)) {
+        return res.status(403).json({
+          error: "NOT_STARTED",
+          message: "ยังไม่ถึงเวลาเช็คอินของคาบนี้",
+        });
+      }
+      if (now > Date.parse(session.endsAt)) {
+        return res.status(403).json({
+          error: "EXPIRED",
+          message: "หมดเวลาเช็คอินของคาบนี้แล้ว",
+        });
+      }
+
+      const user = db_users.find((u) => u.id === req.authUser!.id);
+      if (
+        !user ||
+        user.status === "Suspended" ||
+        user.status === "Terminated"
+      ) {
+        return res.status(403).json({
+          error: "ACCOUNT_INACTIVE",
+          message: "บัญชีนี้ไม่สามารถเช็คอินได้",
+        });
+      }
+
+      const existing = db_attendance_logs.find(
+        (l) => l.userId === user.id && l.sessionId === session.id,
+      );
+      if (existing) {
+        return res.json({ log: existing, alreadyCheckedIn: true });
+      }
+
+      const log: AttendanceLog = {
+        id: `att-${crypto.randomUUID()}`,
+        userId: user.id,
+        userName: user.name,
+        employeeId: user.employeeId,
+        department: user.departmentId,
+        position: user.position,
+        sessionId: session.id,
+        sessionName: session.sessionName,
+        courseId: session.courseId,
+        courseTitle: session.courseTitle,
+        timestamp: new Date().toISOString(),
+      };
+      db_attendance_logs.unshift(log);
+      res.json({ log, alreadyCheckedIn: false });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // Search Logs APIs
   app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {

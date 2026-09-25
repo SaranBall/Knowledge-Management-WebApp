@@ -668,8 +668,8 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
           <div className="bg-white rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 border border-slate-250">
             <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between text-xs shrink-0">
               <span className="font-bold">
-                ขั้นตอนถ่ายโอนเทคโนโลยี: สัมภาษณ์ความรู้ Tacit
-                ของคนเก่งหน้าเครื่อง
+                ขั้นตอนถ่ายโอนเทคโนโลยี: บันทึกองค์ความรู้เชิงเทคนิค (Tacit
+                Knowledge Capture)
               </span>
               <button
                 id="close-kb-article-modal-btn"
@@ -704,14 +704,14 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                         Troubleshooting (เจาะปัญหา → สาเหตุ → วิธีแก้)
                       </option>
                       <option value="Best Practice">
-                        Best Practice
-                        (วิธีปฎิบัติงานที่ได้ประสิทธิสัมฤทธิ์ดีที่สุด)
+                        Best Practice (แนวทางปฏิบัติที่เป็นเลิศ /
+                        ได้ผลลัพธ์ดีที่สุด)
                       </option>
                       <option value="Lesson Learned">
-                        Lesson Learned (บทเรียนราคาแพงจากข้อผิดพลาดหน้าแท่น)
+                        Lesson Learned (บทเรียนและข้อควรระวังจากความผิดพลาด)
                       </option>
                       <option value="Kaizen">
-                        Kaizen (การทำไคเซ็นลดลำดับเคลื่อนไหวสูญเสียเวลา)
+                        Kaizen (การปรับปรุงกระบวนการและลดความสูญเปล่า)
                       </option>
                       <option value="FAQ">FAQ (ถามยอดฮิตในฝ่ายผลิต)</option>
                     </select>
@@ -760,7 +760,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                   </label>
                   <textarea
                     id="new-kb-problem"
-                    placeholder="ระบบเครื่องจักรขึ้น Alarm Code ใด หน้าปาสัญญาหมุนผิดปรกติอย่างไร..."
+                    placeholder="ระบุรหัส Alarm Code อาการผิดปกติของเครื่องจักร หรือสิ่งที่สังเกตได้..."
                     rows={2}
                     value={newArt.problem}
                     onChange={(e) =>
@@ -796,7 +796,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                   </label>
                   <textarea
                     id="new-kb-solution"
-                    placeholder="ขั้นที่ 1 ตักสับ... ขั้นที่ 2 ล้างป้ายน้ำยาสมานรอย..."
+                    placeholder="ระบุขั้นตอนการแก้ไขปัญหาทีละลำดับขั้น (Step-by-step)..."
                     rows={2}
                     value={newArt.solution}
                     onChange={(e) =>
@@ -1109,7 +1109,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                       className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700 text-xs"
                     >
                       <option value="Troubleshooting">
-                        Troubleshooting (คู่มือแก้ไขอุปสรรคชำรุด)
+                        Troubleshooting (การแก้ไขปัญหาและข้อขัดข้อง)
                       </option>
                       <option value="Best Practice">
                         Best Practice (วิธีทำให้เกิดประสิทธิภาพสูงสุด)
@@ -1118,7 +1118,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                         Lesson Learned (บทเรียนราคาแพงจากของเสีย)
                       </option>
                       <option value="Kaizen">
-                        Kaizen (การเสนอแนะปรับเปลี่ยนเล็กๆ น้อยๆ)
+                        Kaizen (การปรับปรุงกระบวนการและลดความสูญเปล่า)
                       </option>
                       <option value="FAQ">FAQ (คำถามเทคนิคที่พบบ่อย)</option>
                     </select>
@@ -1145,7 +1145,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                 {/* Problem Statement */}
                 <div className="space-y-1">
                   <label className="font-semibold text-slate-600 block">
-                    1. รายละเอียดอาการปัญหาชำรุด / เปรียบวิจัย: (Problem)
+                    1. รายละเอียดอาการหรือปัญหาที่พบ: (Problem)
                   </label>
                   <textarea
                     id="edit-kb-problem"
@@ -1179,7 +1179,7 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
                 {/* Action Solution */}
                 <div className="space-y-1">
                   <label className="font-semibold text-slate-600 block">
-                    3. ลำดับขั้นตอนวิธีดำเนินการแก้ไขปัญหาอย่างเซียน: (Solution)
+                    3. ขั้นตอนและวิธีการแก้ไขปัญหา: (Solution)
                   </label>
                   <textarea
                     id="edit-kb-solution"

@@ -75,6 +75,8 @@ export interface QuizQuestion {
   correctAnswer: string; // For single choice/true false
 }
 
+export type BadgeCategory = "safety" | "quality" | "logistics" | "general";
+
 export interface Course {
   id: string;
   title: string;
@@ -88,6 +90,7 @@ export interface Course {
   tags?: string[];
   isApproved?: boolean;
   createdByRole?: string;
+  badgeKey?: BadgeCategory; // undefined = ไม่ระบุ (ไม่ผูกกับ badge ประเภทใด)
 }
 
 export interface QuizAttempt {
@@ -126,6 +129,22 @@ export interface AttendanceLog {
   courseId: string;
   courseTitle: string;
   timestamp: string;
+}
+
+// คาบอบรมออฟไลน์ที่ Admin/Editor สร้าง — QR แต่ละคาบเข้ารหัส token นี้
+// token เป็นความลับของคาบ: server ส่งให้เฉพาะ Admin/Editor เท่านั้น
+export interface TrainingSession {
+  id: string;
+  courseId: string;
+  courseTitle: string;
+  sessionName: string;
+  location: string;
+  instructor: string;
+  startsAt: string; // ISO-8601 เวลาเริ่มที่อนุญาตให้เช็คอิน
+  endsAt: string; // ISO-8601 เวลาสิ้นสุดที่อนุญาตให้เช็คอิน
+  token: string;
+  createdBy: string; // employeeId ของผู้สร้าง
+  createdAt: string;
 }
 
 export type KBType =

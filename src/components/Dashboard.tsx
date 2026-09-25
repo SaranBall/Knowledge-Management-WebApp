@@ -295,8 +295,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
               ข้อมูลสถิติ & ศักยภาพองค์ความรู้องค์กร
             </h2>
             <p className="text-slate-600 text-xs mt-1">
-              รายงานอัจฉริยะสำหรับติดตามตัววัดผลทางความรับรู้งาน (Knowledge KPI,
-              Training Rate, Competency, และช่องทางอุดรอยรั่ว)
+              รายงานสำหรับติดตามตัวชี้วัดการจัดการความรู้ (Knowledge KPI,
+              อัตราการฝึกอบรม, การประเมินสมรรถนะ และ Gap Analysis)
             </p>
           </div>
           <div className="flex gap-2">
@@ -499,7 +499,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 เอกสารมาตรฐาน{" "}
                 {documents.filter((d) => d.status === "Published").length}{" "}
                 ฉบับจากทั้งหมด {documents.length} ฉบับ
-                ผ่านเกณฑ์อนุมัติพับลิชแล้ว
+                ผ่านการอนุมัติและเผยแพร่แล้ว
               </p>
             </div>
           </div>
@@ -576,7 +576,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div className="space-y-1.5 pt-2">
               <div className="flex justify-between text-[10px] text-slate-500">
-                <span>ถอดบทเรียนเซียนเชิงช่าง</span>
+                <span>องค์ความรู้จากผู้เชี่ยวชาญ</span>
                 <span>
                   {kbArticles.filter((k) => k.status === "Approved").length}{" "}
                   บทเรียนไคเซ็น
@@ -620,8 +620,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     Gap Analysis (การวิเคราะห์หาช่องโหว่ความรู้)
                   </h3>
                   <p className="text-xs text-slate-500">
-                    คำศัพท์ที่พนักงานเสิร์ชค้นหาบ่อยครั้งในระบบ
-                    แต่ไม่มีบทความรองรับ สำหรับกู่สร้างความรู้ใหม่
+                    คำค้นหาที่พนักงานค้นหาบ่อยแต่ยังไม่มีเอกสารรองรับ
+                    เพื่อใช้เป็นแนวทางในการจัดทำองค์ความรู้ใหม่
                   </p>
                 </div>
               </div>
@@ -629,8 +629,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="space-y-3 my-3">
                 {gapAnalysisList.length === 0 ? (
                   <p className="text-slate-400 text-xs py-6 text-center">
-                    พนักงานทุกคนค้นพบความรู้ครบถ้วน 100%
-                    ปัจจุบันยังไม่มีข้อผิดพลาดอับผล
+                    พนักงานค้นพบข้อมูลครบถ้วน ยังไม่พบคำค้นหาที่ขาดหายในระบบ
                   </p>
                 ) : (
                   gapAnalysisList.map((gap, i) => (
@@ -648,8 +647,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-500">
-                          แนะนำดึง Tacit
-                          จากผู้เชี่ยวชาญเพื่อป้องกันความรู้รั่วซึมเมื่อคนกะลาออก
+                          แนะนำให้ถอดองค์ความรู้ (Tacit Knowledge)
+                          จากผู้เชี่ยวชาญ
+                          เพื่อป้องกันการสูญหายของความรู้เมื่อพนักงานลาออก
                         </p>
                       </div>
 
@@ -814,7 +814,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {/* List of personnel */}
             <div className="md:col-span-1 border-r border-slate-100 pr-0 md:pr-4 space-y-2">
               <span className="block text-slate-500 text-[10px] font-bold uppercase mb-2">
-                เลือกพนักงานทดสอบดูทรานสคริปต์
+                เลือกพนักงานเพื่อดูประวัติการฝึกอบรม (Transcript)
               </span>
               {visibleUsers.map((u) => {
                 const reqs = getRequiredCoursesForPosition(u.position);
@@ -891,7 +891,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     kbArticles,
                   ).filter((b) => b.earned).length === 0 ? (
                     <span className="text-slate-400 text-[10.5px] italic">
-                      ยังไม่มีเข็มตราที่ได้รับการเปิดล็อคในหลักสูตรขณะนี้
+                      ยังไม่มีตราสัญลักษณ์ที่ได้รับในขณะนี้
                     </span>
                   ) : (
                     <div className="flex flex-wrap items-center gap-1.5 animate-in fade-in">
@@ -912,8 +912,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {/* Requirement Matrix compliance display */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
                   <span className="block text-[10px] font-bold text-slate-400 uppercase">
-                    ตามตำแหน่งงานคู่ควรหลักสูตรบังคับ (Competency Matrix
-                    Verification)
+                    หลักสูตรบังคับตามตำแหน่งงาน (Competency Matrix Verification)
                   </span>
 
                   <div className="space-y-2">
@@ -999,7 +998,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         สะสม
                       </div>
                       <div className="col-span-2 sm:col-span-3 text-right">
-                        ใบประดับ & เกียรติบัตร
+                        ตราสัญลักษณ์ & ใบประกาศฯ
                       </div>
                     </div>
 
@@ -1052,7 +1051,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                     {activeTranscriptCompletions.length === 0 && (
                       <div className="p-4 text-center text-slate-450 italic">
-                        ไม่พบประวัติวิชาชีพบรรลุเป้าหมายของพนักงานรายนี้
+                        ไม่พบประวัติการฝึกอบรมที่ผ่านเกณฑ์ของพนักงานรายนี้
                       </div>
                     )}
                   </div>
@@ -1092,9 +1091,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </strong>{" "}
                   คลิกปุ่ม <strong>"พิมพ์หรือเซฟรายงานเป็น PDF"</strong>{" "}
                   ด้านล่าง แล้วเลือก Printer ปลายทางเป็น{" "}
-                  <strong>"Save as PDF"</strong> เม็ดสีกระดาษ รอยพับ
-                  และตราสลักรับรองจะเรียงตัวสวยงามพอดีกับกระดาษรายงาน A4
-                  พร้อมประกอบแฟ้มประมวลผลการสอบทวนของท่านทันทีค่ะ
+                  <strong>"Save as PDF"</strong>{" "}
+                  ระบบจะจัดรูปแบบเอกสารให้พอดีกับขนาดกระดาษ A4
+                  เพื่อใช้เป็นเอกสารประกอบการตรวจประเมิน ISO 9001 ได้ทันทีครับ
                 </span>
               </div>
 
@@ -1273,7 +1272,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             ) : (
                               <div className="space-y-0.5">
                                 <span className="text-amber-800 font-black bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded text-[10px]">
-                                  PENDING (กำลังบ่มเพาะปูพื้นฐาน)
+                                  PENDING (รอดำเนินการอบรม)
                                 </span>
                                 <div className="text-[9px] text-slate-400">
                                   เป้าหมาย: สำเร็จก่อนการตรวจสอบรอบถัดไป
@@ -1327,7 +1326,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               {item.score !== undefined ? (
                                 <span>ผ่านเกณฑ์ ({item.score}%)</span>
                               ) : (
-                                <span className="text-amber-700">รอผลประเมิน</span>
+                                <span className="text-amber-700">
+                                  รอผลประเมิน
+                                </span>
                               )}
                             </div>
                             <div className="font-mono text-right">
@@ -1344,8 +1345,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="space-y-3 mb-6 text-left">
                   <div className="border-b border-[#15329c]/20 pb-1.5 flex items-center justify-between">
                     <span className="text-[10.5px] font-black text-[#15329c] tracking-wider uppercase">
-                      ส่วนที่ 3: ตราความเชี่ยวชาญเหรียญตราดิจิทัลที่ปลดล็อค
-                      (VERIFIED ACCOMPLISHMENT BADGES)
+                      ส่วนที่ 3: ตราสัญลักษณ์ความเชี่ยวชาญที่ได้รับ (VERIFIED
+                      ACCOMPLISHMENT BADGES)
                     </span>
                     <span className="text-[9px] text-slate-400 font-mono">
                       Direct Competence Validation Tokens
@@ -1360,7 +1361,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       kbArticles,
                     ).filter((b) => b.earned).length === 0 ? (
                       <span className="text-slate-400 text-xs italic py-1">
-                        ไม่มีประวัติการปลดล็อคตราวิชาชีพระหว่างรอบประเมินนี้
+                        ไม่มีประวัติตราสัญลักษณ์ความเชี่ยวชาญในรอบการประเมินนี้
                       </span>
                     ) : (
                       getUserBadges(
@@ -1407,30 +1408,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <p className="font-bold text-slate-600 mt-1">
                         ผู้ตรวจประเมินระบบคุณภาพ (Lead Auditor)
                       </p>
+                      <p className="text-[9px] text-amber-600 font-mono mt-0.5">
+                        (ยังไม่กำหนดผู้ลงนาม)
+                      </p>
                     </div>
                     <div className="border-b border-dashed border-slate-300 w-3/4 mx-auto pb-1 text-slate-400 font-mono text-[10px]">
                       (....................................................)
                     </div>
                     <p className="text-[10px] text-slate-500 font-mono">
-                      ลงนามสัญญา (Signature) & วันประเมิน
+                      ลายมือชื่อผู้ตรวจประเมิน (Signature) & วันที่ประเมิน
                     </p>
                   </div>
 
                   <div className="space-y-6 flex flex-col justify-between border-l border-r border-[#f1f5f9]">
                     <div>
                       <p className="text-slate-400">
-                        ตัวแทนกวดวิชาวิชาชีพและพัฒนาบุคคล
+                        ผู้รับผิดชอบการฝึกอบรมและพัฒนาบุคลากร (HRD){" "}
                       </p>
                       {/* TODO: ใส่ชื่อจริงของผู้บริหารฝ่ายพัฒนาบุคคลเมื่อมี User จริงในระบบ */}
                       <p className="font-bold text-slate-600 mt-1">
                         ผู้บริหารฝ่ายพัฒนาองค์กรและบุคคล
+                      </p>
+                      <p className="text-[9px] text-amber-600 font-mono mt-0.5">
+                        (ยังไม่กำหนดผู้ลงนาม)
                       </p>
                     </div>
                     <div className="border-b border-dashed border-slate-300 w-3/4 mx-auto pb-1 text-slate-400 font-mono text-[10px]">
                       (....................................................)
                     </div>
                     <p className="text-[10px] text-slate-500 font-mono">
-                      ลงนามสัญญา (Signature) & ตราประทับ
+                      ลายมือชื่อผู้มีอำนาจอนุมัติ (Signature)
                     </p>
                   </div>
 

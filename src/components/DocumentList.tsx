@@ -182,7 +182,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
         e.preventDefault();
         setSecurityNotice(
-          "⚠️ พิมพ์ถูกจำกัด: ระบบความปลอดภัยไม่อนุญาตให้พิมพ์ระเบียบปฏิบัติงาน QP นอกระบบ",
+          "⚠️ จำกัดการพิมพ์: ระบบความปลอดภัยไม่อนุญาตให้พิมพ์เอกสาร QP ออกนอกระบบ",
         );
         setTimeout(() => setSecurityNotice(null), 4000);
       }
@@ -190,7 +190,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         e.preventDefault();
         setSecurityNotice(
-          "⚠️ คัดลอกถูกจำกัด: บล็อกสิทธิ์การก๊อปปี้ข้อมูลของระเบียบเอกสาร QP",
+          "⚠️ จำกัดการคัดลอก: ไม่อนุญาตให้คัดลอกเนื้อหาของเอกสาร QP",
         );
         setTimeout(() => setSecurityNotice(null), 4000);
       }
@@ -198,7 +198,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         setSecurityNotice(
-          "⚠️ บันทึกถูกจำกัด: บล็อกการเซฟไฟล์เอกสารสำคัญออกนอกระบบ",
+          "⚠️ จำกัดการบันทึก: ไม่อนุญาตให้ดาวน์โหลดหรือบันทึกไฟล์เอกสารออกนอกระบบ",
         );
         setTimeout(() => setSecurityNotice(null), 4000);
       }
@@ -411,6 +411,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   const filteredDocs = documents.filter((doc) => {
     // Tab filter
     if (activeTab !== "ALL" && doc.type !== activeTab) return false;
+    // Dept filter — เทียบ departmentId ตรงๆ แทน fuzzy string matching ชื่อแผนกแบบเดิม
+    if (deptFilter !== "ALL" && doc.departmentId !== deptFilter) return false;
     // Search query matches: title, description, department or index codes
     const docDeptName =
       getDepartmentById(doc.departmentId)?.name || doc.departmentId || "";
@@ -425,8 +427,6 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
     return true;
   });
-  // Dept filter — เทียบ departmentId ตรงๆ แทน fuzzy string matching ชื่อแผนกแบบเดิม
-  if (deptFilter !== "ALL" && doc.departmentId !== deptFilter) return false;
   const handleUploadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDoc.title) return;
@@ -673,7 +673,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                         {doc.status === "Published" ? (
                           <span className="text-emerald-600 font-medium flex items-center gap-1">
                             <CheckCircle className="w-3.5 h-3.5" />
-                            พับลิชแล้ว
+                            เผยแพร่แล้ว
                           </span>
                         ) : (
                           <span className="text-amber-500 font-medium flex items-center gap-1 bg-amber-50 px-1.5 py-0.2 rounded">
@@ -736,7 +736,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                 <FileText className="w-6 h-6" />
               </div>
               <h5 className="font-bold text-slate-700 text-xs">
-                โปรดเลือกเอกสารวิเศษทางซ้ายเพื่อแสดงข้อมูล
+                โปรดเลือกเอกสารจากรายการทางซ้ายเพื่อดูรายละเอียด
               </h5>
               <p className="text-slate-400 text-[10px] max-w-[200px] mx-auto">
                 ระบบจะเปิดดู ตัวอย่างการกรอก แนบไฟล์ตรวจ ภาพสกรีน และวิดีโอสาธิต
@@ -753,7 +753,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   {selectedDoc.title}
                 </h3>
                 <span className="block text-[10px] text-slate-400 mt-1 font-mono">
-                  วันที่บังคับใช้: {selectedDoc.effectiveDate} • สัญญารีด: Rev.
+                  วันที่บังคับใช้: {selectedDoc.effectiveDate} • สถานะฉบับแก้ไข:
+                  Rev.
                   {selectedDoc.revision}
                 </span>
               </div>
@@ -807,8 +808,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               {selectedDoc.status === "Pending Approval" && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
                   <p className="text-amber-800 text-[10px] font-medium">
-                    ⚠️ เอกสารนี้เพิ่งอัพโหลดใหม่
-                    ยังไม่ผ่านการตรวจสอบความถูกต้องโดย Admin คณะกรรมการกลาง
+                    ⚠️ เอกสารนี้รอการตรวจสอบและอนุมัติจากผู้ดูแลระบบ (Admin)
                   </p>
                   {currentUser.role === "Admin" ? (
                     <button
@@ -818,11 +818,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                       }}
                       className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-1.5 rounded-lg text-[10px] cursor-pointer transition uppercase"
                     >
-                      อนุมัติความถูกต้องและพับลิช (Admin Approve)
+                      อนุมัติและเผยแพร่เอกสาร (Admin Approve)
                     </button>
                   ) : (
                     <div className="text-[10px] italic text-slate-400 text-center font-mono py-1">
-                      รอแอดมินอนุมัติ (สิทธิ์ Viewer/Editor ดูได้อย่างเจียมตัว)
+                      รอการอนุมัติจากผู้ดูแลระบบ (Admin)
                     </div>
                   )}
                 </div>
@@ -868,7 +868,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     <div className="space-y-1">
                       <span className="block text-[10px] font-semibold text-slate-500 flex items-center gap-1">
                         <Film className="w-3.5 h-3.5 text-slate-400" />{" "}
-                        วิดีโอสาธิตการซ่อม / ตั้งค่าเครื่อง (Video Dem):
+                        วิดีโอสาธิตการซ่อม / ตั้งค่าเครื่อง (Video Demo):
                       </span>
                       <div className="rounded overflow-hidden border border-slate-250 bg-slate-900 mt-1">
                         <video
@@ -1100,7 +1100,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     type="submit"
                     className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-1.5 rounded-lg text-[9px] cursor-pointer transition flex items-center justify-center gap-1"
                   >
-                    ส่งคำวิจารณ์/ปรับปรุงความรู้
+                    ส่งข้อเสนอแนะปรับปรุงเอกสาร
                   </button>
                 </form>
               </div>
@@ -1222,7 +1222,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                 </label>
                 <textarea
                   id="upload-doc-desc"
-                  placeholder="รายละเอียดขั้นตอน คณะวัตถุประสงค์ในการจัดเก็บสารบัน และควบคุมการสูญเสีย..."
+                  placeholder="ระบุวัตถุประสงค์ ขั้นตอนสำคัญ และขอบเขตการปฏิบัติงาน..."
                   rows={2}
                   value={newDoc.description}
                   onChange={(e) =>
@@ -1266,7 +1266,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   >
                     <option value="PDF">PDF (เอกสารสกรีน)</option>
                     <option value="Excel">Excel (แบบคำนวณชีต)</option>
-                    <option value="Word">Word (รายงานแก้ใย)</option>
+                    <option value="Word">Word (เอกสาร/รายงาน)</option>
                     <option value="Video">
                       Video Training (สื่อวิดีโอสาธิต)
                     </option>
@@ -1398,8 +1398,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   {isUploadingFile
                     ? "กำลังอัปโหลดไฟล์..."
                     : currentUser.role === "Admin"
-                      ? "บันทึกและพับลิชเผยแพร่"
-                      : "ส่งของเช็คเพื่อขออนุมัติใช้งาน"}
+                      ? "บันทึกและเผยแพร่เอกสาร"
+                      : "ส่งเพื่อขออนุมัติการใช้งาน"}
                 </button>
               </div>
             </form>
@@ -1558,7 +1558,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   >
                     <option value="PDF">PDF (เอกสารสกรีน)</option>
                     <option value="Excel">Excel (แบบคำนวณชีต)</option>
-                    <option value="Word">Word (รายงานแก้ใย)</option>
+                    <option value="Word">Word (เอกสารแบบฟอร์ม/รายงาน)</option>
                     <option value="Video">
                       Video Training (สื่อวิดีโอสาธิต)
                     </option>
@@ -1740,7 +1740,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     <ShieldAlert className="w-4 h-4 text-amber-500" />
                     <div>
                       <span className="block font-bold text-amber-400 text-[10px]">
-                        เอกสาร QP ห้ามปริ้น
+                        เอกสาร QP ไม่อนุญาตให้พิมพ์ (No Print)
                       </span>
                       <span className="text-[9px] text-slate-500">
                         บันทึกประวัติการเข้าใช้งานเครื่อง
@@ -2044,8 +2044,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                         <div className="bg-indigo-50 border border-indigo-200 text-indigo-950 p-3 rounded-lg flex items-center justify-between">
                           <div>
                             <span className="block font-bold text-[11px]">
-                              📄 แสดงเอกสารสิทธิ์ PDF สำเร็จ (Natively Rendered
-                              Document)
+                              📄 แสดงตัวอย่างเอกสาร PDF (Document Preview)
                             </span>
                             <span className="text-[10px] text-indigo-700">
                               เปิดอ่านผ่านระบบเบราว์เซอร์ภายใน ปลอดภัยตามมาตรฐาน

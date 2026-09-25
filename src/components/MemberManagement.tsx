@@ -230,7 +230,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     // PIN check
     const pin = editForm.password?.trim() || "";
     if (pin && (pin.length !== 6 || !/^\d+$/.test(pin))) {
-      alert("❌ รหัส PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นค่ะ");
+      alert("❌ รหัสผ่าน PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นครับ");
       return;
     }
 
@@ -661,9 +661,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
     const cleanPin = approvePin.trim().replace(/\D/g, "");
     if (cleanPin.length !== 6) {
-      setApproveError(
-        "❌ รหัสผ่านความปลอดภัย PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นค่ะ",
-      );
+      setApproveError("❌ รหัสผ่าน PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นครับ");
       return;
     }
 
@@ -792,7 +790,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         const reqs = getRequiredCoursesForPosition(u.position).length;
         const hours = completions * 3 + 2;
         const statusText =
-          completions >= reqs ? "ผ่านเกณฑ์ครบหลักสูตร" : "รอดำเนินการอบรม";
+          reqs === 0
+            ? "ยังไม่กำหนดหลักสูตรบังคับ"
+            : completions >= reqs
+              ? "ผ่านเกณฑ์ครบหลักสูตร"
+              : "รอดำเนินการอบรม";
 
         const isMaskedAdmin =
           u.role === "Admin" && currentUser.role !== "Admin";
@@ -848,7 +850,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           (p) => p.userId === u.id && p.status === "Completed",
         ).length;
         const reqs = getRequiredCoursesForPosition(u.position).length;
-        const rate = reqs > 0 ? Math.round((completions / reqs) * 100) : 100;
+        const rate = reqs > 0 ? Math.round((completions / reqs) * 100) : null;
         const attempts = examResults.filter(
           (e) => e.employeeId === u.employeeId,
         );
@@ -860,9 +862,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             : null;
         const hours = completions * 3 + 2;
         const statusText =
-          completions >= reqs
-            ? "ผ่านเกณฑ์แบบฟอร์ม ISO"
-            : "รอดำเนินการประเมินศึกษา";
+          reqs === 0
+            ? "ยังไม่กำหนดหลักสูตรบังคับ"
+            : completions >= reqs
+              ? "ผ่านเกณฑ์แบบฟอร์ม ISO"
+              : "รอดำเนินการประเมินศึกษา";
 
         return [
           u.employeeId,
@@ -871,7 +875,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           u.position,
           completions,
           reqs,
-          `${rate}%`,
+          rate !== null ? `${rate}%` : "-",
           avgS !== null ? `${avgS}%` : "-",
           `${hours} ชั่วโมง`,
           statusText,
@@ -916,11 +920,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         const isGap = !stat.hasResult;
         const isResolved = resolvedGaps.includes(stat.keyword);
         const hasMatch = stat.hasResult
-          ? "พบข้อมูลบทความกิตติคุณสำเร็จ"
-          : "ไม่พบบทความกิตติคุณคู่มือ";
+          ? "พบบทความองค์ความรู้ในระบบ"
+          : "ไม่พบบทความในระบบ";
         const gapText = isGap
-          ? "⚠️ พบบายพาสช่องว่างความรู้ (Knowledge Gap Detected)"
-          : "✓ ผ่านกระบวนการทบทวนสืบค้นปกติ";
+          ? "⚠️ ตรวจพบช่องว่างความรู้ (Knowledge Gap Detected)"
+          : "✓ ค้นพบเอกสารตามปกติ";
 
         let resolutionText = "N/A";
         let expertAssigned = "N/A";
@@ -1011,8 +1015,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             ? "พบข้อมูลคู่มือในระบบ (FOUND)"
             : "ไม่พบข้อมูลคู่มือในระบบ (NOT FOUND)",
           isUnresolvedGap
-            ? "ใช่ (เป็นช่องว่างรอพับลิช)"
-            : "ไม่ใช่ช่องว่าง / ได้รับการอนุมัติแล้ว",
+            ? "ใช่ (เป็นช่องว่างความรู้ที่รอดำเนินการ)"
+            : "ไม่ใช่ช่องว่าง / มีเอกสารรองรับแล้ว",
         ];
       });
 
@@ -1929,9 +1933,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                               {avgS !== null ? `${avgS}%` : "-"}
                             </td>
                             <td className="p-2.5 text-right font-medium text-emerald-600 font-sans">
-                              {completions >= reqs
-                                ? "💚 ได้รับใบเซอร์พาสครบ"
-                                : "💛 รอดำเนินการอบรม"}
+                              {reqs === 0
+                                ? "⚪ ยังไม่กำหนดหลักสูตรบังคับ"
+                                : completions >= reqs
+                                  ? "💚 ผ่านการอบรมครบถ้วน"
+                                  : "💛 รอดำเนินการอบรม"}
                             </td>
                           </tr>
                         );
@@ -2195,7 +2201,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       {/* General competency summary note */}
                       <div className="bg-indigo-50/25 p-4 rounded-xl border border-indigo-150 text-slate-650 leading-relaxed space-y-1">
                         <strong className="text-indigo-900 block font-bold text-xs">
-                          📝 ความคิดเห็นของอนุมัติกรรมการกลาง:
+                          📝 ความคิดเห็นของคณะกรรมการผู้ประเมิน:
                         </strong>
                         <p className="text-[10.5px]">
                           พนักงานผู้นี้มีความพร้อมคืบหน้าในการตรวจรับและปฏิบัติงานตามเกณฑ์มาตรฐานเป็นที่น่าพึงพอใจยิ่ง
@@ -2477,7 +2483,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                             onClick={() => {
                                               if (!quickAnswerText.trim()) {
                                                 alert(
-                                                  "กรุณากรอกมาตรการปิดช่องว่างความรู้เพื่อเป็นหลักสารสนเทศการตรวจอุดประเด็นด้วยค่ะ",
+                                                  "กรุณากรอกมาตรการปิดช่องว่างความรู้เพื่อใช้เป็นหลักฐานประกอบการตรวจประเมินครับ",
                                                 );
                                                 return;
                                               }
@@ -2488,7 +2494,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                               setAssigningGap(null);
                                               setQuickAnswerText("");
                                               alert(
-                                                `🍀 ความคืบหน้าสำเร็จ!\nอัปเดตระบบตรวจสอบสิทธิ์ปิดช่องว่างการค้นหาสำหรับประชากรหัวข้อ "${item.keyword}" พร้อมลงพับลิชอุดมาตรฐานเรียบร้อยแล้วค่ะ`,
+                                                `🍀 ความคืบหน้าสำเร็จ!\nอัปเดตระบบตรวจสอบสิทธิ์ปิดช่องว่างการค้นหาสำหรับประชากรหัวข้อ "${item.keyword}" บันทึกมาตรการปิดช่องว่างความรู้และเผยแพร่ในระบบเรียบร้อยแล้วครับ`,
                                               );
                                             }}
                                             className="text-[9.5px] bg-[#15329c] hover:bg-[#11297e] text-white rounded px-3 py-1 font-extrabold cursor-pointer transition shadow"
@@ -3235,12 +3241,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                 {isLinkedUser || emp.status === "Registered" ? (
                                   <span className="bg-green-50 text-green-700 font-bold text-[9.5px] px-2.5 py-1 rounded-full border border-green-200 flex items-center gap-1.5">
                                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full shrink-0" />{" "}
-                                    เปิดเสร็จ/พร้อมเรียน
+                                    เปิดบัญชีแล้ว / พร้อมเรียน
                                   </span>
                                 ) : (
                                   <span className="bg-rose-50 text-rose-700 font-bold text-[9.5px] px-2.5 py-1 rounded-full border border-rose-200 flex items-center gap-1.5">
                                     <span className="w-1.5 h-1.5 bg-rose-500 rounded-full shrink-0 animate-ping" />{" "}
-                                    รอนำการสมัคร
+                                    รอดำเนินการเปิดบัญชี
                                   </span>
                                 )}
                               </div>

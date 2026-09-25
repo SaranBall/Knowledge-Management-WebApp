@@ -175,7 +175,7 @@ export const UserBadgesGrid: React.FC<UserBadgesGridProps> = ({ badges }) => {
               {earned && (
                 <div className="absolute top-0 right-0 w-12 h-12 overflow-hidden pointer-events-none">
                   <div className="bg-emerald-500 text-white text-[7px] font-bold text-center py-0.5 w-16 -rotate-45 translate-x-3 translate-y-2 uppercase tracking-wide">
-                    Earn
+                    Earned
                   </div>
                 </div>
               )}

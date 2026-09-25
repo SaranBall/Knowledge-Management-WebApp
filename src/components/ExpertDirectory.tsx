@@ -248,8 +248,8 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
               Expert Directory & Yellow Pages (ทำเนียบค้นหาผู้เชี่ยวชาญ)
             </h2>
             <p className="text-xs text-slate-505 mt-1">
-              ต้องการแก้ไขวิกฤตเร่งด่วน? ค้นหาหัวข้อทักษะความชำนาญ ISO
-              ตรวจสอบตารางเข้าเวร และกดแชทส่งข้อความขอคำปรึกษาได้ทันที
+              ค้นหาผู้เชี่ยวชาญตามความชำนาญเฉพาะทาง
+              ตรวจสอบช่วงเวลาที่พร้อมให้คำปรึกษา และส่งข้อความสอบถามได้ทันที
             </p>
           </div>
 
@@ -319,7 +319,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
         {/* Left contacts list */}
         <div className="lg:col-span-1 space-y-3">
           <span className="block text-slate-450 text-[10px] font-bold uppercase tracking-wider">
-            พบคณะวิศวกรผู้เชี่ยวชาญ ({filteredExperts.length} ท่าน)
+            รายชื่อผู้เชี่ยวชาญ ({filteredExperts.length} ท่าน)
           </span>
 
           <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
@@ -446,7 +446,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                       className="bg-[#e51a24] hover:bg-[#cb131c] text-white px-3 py-1.5 rounded-lg flex items-center gap-1 transition text-[10px] font-bold cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                      ลบระเบียบช่าง
+                      ลบข้อมูลผู้เชี่ยวชาญ
                     </button>
                   </div>
                 </div>
@@ -489,13 +489,13 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                 <div className="space-y-4">
                   <div>
                     <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      เวลาให้การตอบข้อมูลวิกฤต: (Availability Schedules)
+                      ช่วงเวลาที่พร้อมให้คำปรึกษา: (Availability)
                     </span>
                     <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-150 flex items-start gap-2.5">
                       <Calendar className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
                       <div>
                         <strong className="block text-slate-800 text-[11px]">
-                          สแตนด์บายเชิงช่วยเหลือ:
+                          เวลาปฏิบัติงาน / ให้คำปรึกษา:
                         </strong>
                         <p className="text-slate-600 text-[11px] mt-1 line-clamp-2 leading-snug">
                           {selectedExpert.availability}
@@ -538,7 +538,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                   >
                     <div>
                       <label className="text-[10px] font-semibold text-slate-500 block">
-                        กรอกหัวข้อปัญหาเดือดร้อน:
+                        หัวข้อปัญหา / เรื่องที่ต้องการปรึกษา:
                       </label>
                       <input
                         id="consultation-topic-input"
@@ -553,11 +553,11 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
 
                     <div>
                       <label className="text-[10px] font-semibold text-slate-500 block">
-                        พิมพ์รายละเอียดย่อของคำถามปัญหาหน้าแท่น:
+                        รายละเอียดของปัญหาหน้างาน:
                       </label>
                       <textarea
                         id="consultation-message-textarea"
-                        placeholder="กรุณาป้อนอ้างรหัส Lot อุณหภูมิสาย และอาการเตือนที่เกิดขึ้นที่แผงกระดาน..."
+                        placeholder="ระบุรหัส Lot, อาการผิดปกติ หรือสัญญาณเตือนที่เกิดขึ้นบนหน้าจอควบคุม..."
                         rows={3.5}
                         value={contactMsg}
                         onChange={(e) => setContactMsg(e.target.value)}
@@ -579,8 +579,8 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                   {/* Right: Inbox logs */}
                   <div className="space-y-3">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-tight">
-                      ประวัติการหารือและความช่วยเหลือของคุณต่อนามผู้เชี่ยวชาญนี้
-                      ({relevantInquiries.length})
+                      ประวัติการสอบถามผู้เชี่ยวชาญท่านนี้ (
+                      {relevantInquiries.length})
                     </span>
 
                     <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
@@ -620,8 +620,8 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
                             ) : (
                               <div className="text-right flex justify-between items-center bg-slate-50 p-2 rounded">
                                 <span className="text-[9px] text-amber-600 font-semibold italic animate-pulse">
-                                  ⌛
-                                  คำถามได้รับส่งแล้วและอยู่ระหว่างรอวิศวกรวิจารณ์...
+                                  ⌛ ส่งคำถามเรียบร้อยแล้ว
+                                  อยู่ระหว่างรอผู้เชี่ยวชาญตอบกลับ...
                                 </span>
                               </div>
                             )}
@@ -646,7 +646,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
           <div className="bg-white rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden border border-[#e1ded5]">
             <div className="bg-[#15329c] text-white px-5 py-3.5 flex items-center justify-between shrink-0">
               <span className="font-bold text-xs uppercase text-white">
-                บันทึกข้อมูลทำเนียบวิศวกรผู้เชี่ยวชาญใหม่
+                เพิ่มข้อมูลผู้เชี่ยวชาญใหม่
               </span>
               <button
                 id="close-add-expert-btn"
@@ -1038,7 +1038,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
 
               <div className="space-y-1">
                 <label className="font-semibold text-slate-600 block">
-                  เทคโนโลยีวิชาเฉพาะทาง (คั้นด้วยเครื่องหมาย ",") :
+                  ความชำนาญเฉพาะทาง :
                 </label>
                 <input
                   id="edit-expert-skills"
@@ -1075,7 +1075,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
 
                 <div className="space-y-1">
                   <label className="font-semibold text-slate-600 block">
-                    ที่อยู่เบอร์ส่งเมล:
+                    อีเมลติดต่อ (E-mail):
                   </label>
                   <input
                     id="edit-expert-email"
@@ -1094,7 +1094,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
 
               <div className="space-y-1">
                 <label className="font-semibold text-slate-600 block">
-                  เวลาให้บริการคำช่วยเหลือ:
+                  ช่วงเวลาที่พร้อมให้คำปรึกษา:
                 </label>
                 <input
                   id="edit-expert-availability"

@@ -12,16 +12,10 @@
  * requiredForPositions ในตัว Course object เอง) ควรย้าย mapping นี้ไปผูกกับ
  * ตัวคอร์สโดยตรงแทนการ hardcode รหัส c-1/c-2/c-3 ไว้ตรงนี้
  */
-export const getRequiredCoursesForPosition = (position?: string): string[] => {
-  if (!position) return ["c-1"];
-  if (position.includes("QA") || position.includes("QC")) {
-    return ["c-2", "c-3"]; // Chemistry Inspections & Forklift
-  }
-  if (position.includes("Production") || position.includes("Engineer")) {
-    return ["c-3"]; // Forklift
-  }
-  if (position.includes("Warehouse")) {
-    return ["c-1", "c-3"]; // Onboarding Warehouse & Forklift
-  }
-  return ["c-1"];
+
+// TODO: ยังไม่มี mapping ตำแหน่ง → คอร์สบังคับจริง (คอร์ส c-1/c-2/c-3 เดิมไม่มีอยู่แล้ว)
+// คืน [] ไปก่อนเพื่อไม่ให้รายงานแสดงหลักสูตรบังคับปลอม
+// ทางออกระยะยาว: เพิ่ม field requiredForPositions ใน Course แล้วกรองจากคอร์สจริง
+export const getRequiredCoursesForPosition = (_position?: string): string[] => {
+  return [];
 };

@@ -15,6 +15,7 @@ import {
   UserCertificate,
   KMContributionLog,
   AttendanceLog,
+  TrainingSession,
 } from "../types";
 
 let authToken: string | null = localStorage.getItem("rm_auth_token");
@@ -288,6 +289,31 @@ export const api = {
   clearAttendanceLogs: () =>
     request<{ success: boolean; message: string }>("/api/attendance_logs", {
       method: "DELETE",
+    }),
+
+  // Training Sessions APIs (คาบอบรมออฟไลน์สำหรับ QR Attendance)
+  getTrainingSessions: () =>
+    request<TrainingSession[]>("/api/training_sessions"),
+  createTrainingSession: (session: {
+    courseId: string;
+    sessionName: string;
+    location?: string;
+    instructor?: string;
+    startsAt: string;
+    endsAt: string;
+  }) =>
+    request<TrainingSession>("/api/training_sessions", {
+      method: "POST",
+      body: JSON.stringify(session),
+    }),
+  deleteTrainingSession: (id: string) =>
+    request<{ success: boolean }>(`/api/training_sessions/${id}`, {
+      method: "DELETE",
+    }),
+  checkinToSession: (token: string) =>
+    request<{ log: AttendanceLog; alreadyCheckedIn: boolean }>("/api/checkin", {
+      method: "POST",
+      body: JSON.stringify({ token }),
     }),
 
   // System Audit Logs APIs

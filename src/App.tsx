@@ -242,6 +242,12 @@ export default function App() {
   // Mobile menu control
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // ผลการเช็คอินจาก QR (มาจากลิงก์ ?checkin=token) — แสดง toast แล้วเคลียร์ทิ้ง
+  const [checkinResult, setCheckinResult] = useState<{
+    status: "success" | "already" | "error";
+    message: string;
+  } | null>(null);
+
   // Sync session auth state only
   useEffect(() => {
     if (currentUser) {
@@ -251,6 +257,47 @@ export default function App() {
     }
     localStorage.setItem("rm_is_logged", String(isLogged));
   }, [currentUser, isLogged]);
+
+  // จับ token จาก URL ?checkin=... ทันทีที่โหลดหน้า เก็บไว้ sessionStorage
+  // เผื่อผู้ใช้ยังไม่ได้ล็อกอิน (เปิดลิงก์จากกล้องมือถือครั้งแรก)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("checkin");
+    if (token) {
+      sessionStorage.setItem("rm_pending_checkin_token", token);
+      // ล้าง query string ออกจาก URL โดยไม่ reload หน้า
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  // เมื่อล็อกอินสำเร็จแล้ว (isLogged เป็น true) ถ้ามี token ค้างอยู่ ให้เช็คอินทันที
+  useEffect(() => {
+    if (!isLogged) return;
+    const token = sessionStorage.getItem("rm_pending_checkin_token");
+    if (!token) return;
+    sessionStorage.removeItem("rm_pending_checkin_token");
+
+    (async () => {
+      try {
+        const { log, alreadyCheckedIn } = await api.checkinToSession(token);
+        setCheckinResult({
+          status: alreadyCheckedIn ? "already" : "success",
+          message: alreadyCheckedIn
+            ? `คุณเช็คชื่อคาบ "${log.sessionName}" ไปแล้วก่อนหน้านี้`
+            : `เช็คชื่อสำเร็จ: ${log.sessionName}`,
+        });
+      } catch (err: any) {
+        const match = err?.message?.match(/API Error: \d+ .+ - (.+)/);
+        let msg = "เช็คชื่อไม่สำเร็จ QR อาจหมดอายุหรือไม่ถูกต้อง";
+        if (match) {
+          try {
+            msg = JSON.parse(match[1]).message || msg;
+          } catch {}
+        }
+        setCheckinResult({ status: "error", message: msg });
+      }
+    })();
+  }, [isLogged]);
 
   // --- App Actions ---
 
@@ -545,7 +592,7 @@ export default function App() {
       currentUser &&
       result.employeeId === currentUser.employeeId
     ) {
-      const isPerfect = result.score === 105 || result.score === 100;
+      const isPerfect = result.score === 100;
       const pts = isPerfect ? 30 : 20;
       const actType = isPerfect ? "COURSE_PERFECT" : "COURSE_PASS";
       const desc = isPerfect
@@ -1465,6 +1512,25 @@ export default function App() {
       ) : (
         /* Authenticated workspace layout with Sidebar & Header */
         <div className="flex-1 flex flex-col md:flex-row relative">
+          {checkinResult && (
+            <div
+              className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg text-xs font-bold flex items-center gap-2 animate-fade-in ${
+                checkinResult.status === "error"
+                  ? "bg-rose-600 text-white"
+                  : "bg-emerald-600 text-white"
+              }`}
+            >
+              <span>{checkinResult.status === "error" ? "⚠️" : "✅"}</span>
+              <span>{checkinResult.message}</span>
+              <button
+                onClick={() => setCheckinResult(null)}
+                className="ml-2 text-white/80 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* 2. LEFT SIDEBAR NAVIGATION */}
           <aside
             id="sidebar-menu"

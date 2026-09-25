@@ -51,94 +51,16 @@ import {
 } from "../types";
 import { getUserBadges } from "../utils/badgeUtils";
 import { api } from "../services/api";
+import QRCode from "qrcode";
+import { TrainingSession } from "../types";
 import { BadgePill, UserBadgesGrid } from "./BadgeDisplay";
 import { BadgeCertificateModal } from "./BadgeCertificateModal";
 import {
   calculateLeaderboard,
   calculateRemainingDays,
-  ANCHOR_DATE,
 } from "../utils/gamificationUtils";
 import { getDepartmentById } from "../utils/departmentUtils";
 import { DEFAULT_LESSON_IMAGE_URL } from "../utils/assets";
-
-// Interface for offline scanning sessions
-// TODO: ปัจจุบันยังไม่มีหน้า Admin สำหรับสร้าง/แก้ไขคาบอบรมออฟไลน์จริง
-// เมื่อมีฟีเจอร์นั้นแล้ว ให้ดึงข้อมูลจาก API แทนการ hardcode array นี้
-export interface OfflineTrainingSession {
-  id: string;
-  courseId: string;
-  courseTitle: string;
-  sessionName: string;
-  location: string;
-  instructor: string;
-  date: string;
-  qrValue: string;
-}
-
-export const OFFLINE_TRAINING_SESSIONS: OfflineTrainingSession[] = [];
-
-// Comforable tone audio beep speaker
-export const playBeep = () => {
-  try {
-    const audioCtx = new (
-      window.AudioContext || (window as any).webkitAudioContext
-    )();
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(1250, audioCtx.currentTime);
-    gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
-
-    oscillator.start();
-    setTimeout(() => {
-      oscillator.stop();
-      audioCtx.close();
-    }, 110);
-  } catch (err) {
-    console.warn(
-      "Audio feedback blocked by browser or failed to spin up Oscillator.",
-      err,
-    );
-  }
-};
-
-export const generateMockQRGrid = (seed: string) => {
-  const size = 17;
-  const grid: boolean[][] = Array(size)
-    .fill(null)
-    .map(() => Array(size).fill(false));
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  // Real QR shape simulation
-  const finalQrGrid: boolean[][] = Array(size)
-    .fill(null)
-    .map(() => Array(size).fill(false));
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      const isTopLeft = r < 5 && c < 5;
-      const isTopRight = r < 5 && c >= size - 5;
-      const isBottomLeft = r >= size - 5 && c < 5;
-      if (isTopLeft || isTopRight || isBottomLeft) {
-        const lr = isTopLeft ? r : isTopRight ? r : r - (size - 5);
-        const lc = isTopLeft ? c : isTopRight ? c - (size - 5) : c;
-        const isBorder = lr === 0 || lr === 4 || lc === 0 || lc === 4;
-        const isCenter = lr === 2 && lc === 2;
-        finalQrGrid[r][c] = isBorder || isCenter;
-      } else {
-        const hashVal = Math.abs(
-          (seed.charCodeAt(0) * (r + 13) * (c + 37)) % 103,
-        );
-        finalQrGrid[r][c] = hashVal % 2 === 0;
-      }
-    }
-  }
-  return finalQrGrid;
-};
 
 interface LearningCenterProps {
   currentUser: User;
@@ -418,19 +340,28 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
   const [editingCourse, setEditingCourse] = useState<any>(null);
 
-  // QR/Offline Attendance logs state
-  const [showQRScannerMode, setShowQRScannerMode] = useState<boolean>(false);
-  const [qrTab, setQrTab] = useState<"scan" | "generate" | "logs">("scan");
+  const [qrTab, setQrTab] = useState<"generate" | "logs">("logs");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
-  const [isScanning, setIsScanning] = useState<boolean>(false);
-  const [scanSuccess, setScanSuccess] = useState<boolean>(false);
-  const [scannedSessionName, setScannedSessionName] = useState<string>("");
-  const [scannedCourseTitle, setScannedCourseTitle] = useState<string>("");
-  const [scannedCourseId, setScannedCourseId] = useState<string>("");
 
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceLog[]>([]);
   const [isLoadingAttendance, setIsLoadingAttendance] =
     useState<boolean>(false);
+
+  const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>(
+    [],
+  );
+  const [isLoadingSessions, setIsLoadingSessions] = useState<boolean>(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string>("");
+  const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
+  const [newSession, setNewSession] = useState({
+    courseId: "",
+    sessionName: "",
+    location: "",
+    instructor: "",
+    startsAt: "",
+    endsAt: "",
+  });
+  const [createSessionError, setCreateSessionError] = useState("");
 
   // โหลด Attendance logs จาก Backend API เมื่อเปิดแท็บหรือ Component mount
   const fetchAttendanceLogs = async () => {
@@ -449,66 +380,92 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
     fetchAttendanceLogs();
   }, []);
 
-  // Execute Simulated Scan
-  const handlePerformSimulatedScan = async (sessionId: string) => {
-    const session = OFFLINE_TRAINING_SESSIONS.find((s) => s.id === sessionId);
-    if (!session) return;
+  const fetchTrainingSessions = async () => {
+    try {
+      setIsLoadingSessions(true);
+      const sessions = await api.getTrainingSessions();
+      setTrainingSessions(sessions || []);
+    } catch (err) {
+      console.error("Failed to load training sessions:", err);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  };
 
-    setIsScanning(true);
-    setScanSuccess(false);
+  useEffect(() => {
+    fetchTrainingSessions();
+  }, []);
 
-    setTimeout(async () => {
-      setIsScanning(false);
-      setScanSuccess(true);
-      setScannedSessionName(session.sessionName);
-      setScannedCourseTitle(session.courseTitle);
-      setScannedCourseId(session.courseId);
+  // สร้างลิงก์เช็คอินจาก token แล้ววาดเป็น QR จริงด้วย library qrcode
+  const buildCheckinUrl = (token: string) =>
+    `${window.location.origin}/?checkin=${token}`;
 
-      playBeep();
-
-      const newLogPayload: Partial<AttendanceLog> = {
-        userId: currentUser.id,
-        userName: currentUser.name,
-        employeeId: currentUser.employeeId,
-        department:
-          getDepartmentById(currentUser.departmentId)?.name ||
-          currentUser.departmentId,
-        position: currentUser.position,
-        sessionId: session.id,
-        sessionName: session.sessionName,
-        courseId: session.courseId,
-        courseTitle: session.courseTitle,
-        timestamp: new Date().toISOString(),
-      };
-
-      try {
-        const savedLog = await api.createAttendanceLog(newLogPayload);
-        setAttendanceLogs((prev) => {
-          const isDup = prev.some(
-            (l) => l.userId === currentUser.id && l.sessionId === session.id,
-          );
-          if (isDup) return prev;
-          return [savedLog, ...prev];
-        });
-      } catch (err) {
-        console.error("Failed to save attendance log to API:", err);
-      }
-
-      // Update progress
-      onUpdateUserProgress(currentUser.id, session.courseId, "Completed", 100);
-
-      // Save Exam Result
-      onAddExamResult({
-        employeeName: currentUser.name,
-        employeeId: currentUser.employeeId,
-        courseId: session.courseId,
-        courseTitle: session.courseTitle,
-        score: 100,
-        pass: true,
-        date:
-          new Date().toISOString().split("T")[0] + " (QR สแกน เช็คชื่อออฟไลน์)",
+  const handleSelectSessionForQr = async (session: TrainingSession) => {
+    setSelectedSessionId(session.id);
+    try {
+      const dataUrl = await QRCode.toDataURL(buildCheckinUrl(session.token), {
+        width: 260,
+        margin: 1,
       });
-    }, 1200);
+      setQrDataUrl(dataUrl);
+    } catch (err) {
+      console.error("Failed to generate QR code:", err);
+      setQrDataUrl("");
+    }
+  };
+
+  const handleCreateSessionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateSessionError("");
+    if (
+      !newSession.courseId ||
+      !newSession.sessionName ||
+      !newSession.startsAt ||
+      !newSession.endsAt
+    ) {
+      setCreateSessionError("กรุณากรอกคอร์ส ชื่อคาบ และช่วงเวลาให้ครบ");
+      return;
+    }
+    try {
+      const created = await api.createTrainingSession({
+        courseId: newSession.courseId,
+        sessionName: newSession.sessionName,
+        location: newSession.location,
+        instructor: newSession.instructor,
+        startsAt: new Date(newSession.startsAt).toISOString(),
+        endsAt: new Date(newSession.endsAt).toISOString(),
+      });
+      setTrainingSessions((prev) => [created, ...prev]);
+      setIsCreateSessionOpen(false);
+      setNewSession({
+        courseId: "",
+        sessionName: "",
+        location: "",
+        instructor: "",
+        startsAt: "",
+        endsAt: "",
+      });
+      await handleSelectSessionForQr(created);
+    } catch (err: any) {
+      setCreateSessionError(
+        err?.message || "สร้างคาบอบรมไม่สำเร็จ กรุณาลองใหม่",
+      );
+    }
+  };
+
+  const handleDeleteSession = async (id: string) => {
+    if (!confirm("ยืนยันลบคาบอบรมนี้? QR ของคาบนี้จะใช้เช็คอินไม่ได้อีก"))
+      return;
+    try {
+      await api.deleteTrainingSession(id);
+      setTrainingSessions((prev) => prev.filter((s) => s.id !== id));
+      if (selectedSessionId === id) {
+        setSelectedSessionId("");
+        setQrDataUrl("");
+      }
+    } catch (err) {
+      console.error("Failed to delete training session:", err);
+    }
   };
 
   // Determine current active course based on Active SubTab
@@ -1004,7 +961,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
             </h2>
             <p className="text-xs text-slate-505 mt-1 leading-relaxed">
               ศูนย์รวมคอร์สปฐมนิเทศพนักงานใหม่
-              และหลักสูตรฝึกฝนมาตรฐานออไซต์เพื่อตอบรับการเกณฑ์ประกันระบบคุณภาพอุตสาหกรรมอย่างเป็นระบบ
+              และหลักสูตรฝึกอบรมมาตรฐานออนไซต์ตามเกณฑ์การประกันคุณภาพ
+              ระบบคุณภาพอุตสาหกรรมอย่างเป็นระบบ
             </p>
           </div>
 
@@ -1065,7 +1023,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           </span>
           {activeEarnedBadges.length === 0 ? (
             <span className="text-slate-400 text-[10px] font-medium italic">
-              ยังไม่มีรางวัลตราสะสม พักเรียนคอร์สแรกหรือเช็คชื่อ QR
+              ยังไม่มีรางวัลตราสะสม เริ่มต้นเรียนหลักสูตรแรก หรือสแกน QR
               คลาสเพื่อสะสมเหรียญตราได้ทันที!
             </span>
           ) : (
@@ -1173,7 +1131,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           }`}
         >
           <QrCode className="w-4 h-4" />
-          📸 ตู้สแกนคิวอาร์ห้องปฏิบัติการ (QR Attendance)
+          📸 บันทึกเวลาฝึกอบรม (QR Attendance)
         </button>
 
         <button
@@ -1210,11 +1168,11 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   {currentUser.name}
                 </h4>
                 <p className="text-slate-500 text-[11px] font-mono mt-0.5">
-                  รหัสพนักงาน: {currentUser.employeeId} | รหัสบทรุ่น:{" "}
+                  รหัสพนักงาน: {currentUser.employeeId} | บทบาทผู้ใช้งาน:{" "}
                   {currentUser.role}
                 </p>
                 <p className="text-[11px] text-slate-655 font-bold mt-0.5">
-                  🏢 แผนกคลังสินค้าประตูดำ:{" "}
+                  🏢 ฝ่ายคลังสินค้า (Warehouse):{" "}
                   {getDepartmentById(currentUser.departmentId)?.name ||
                     currentUser.departmentId}{" "}
                   ({currentUser.position})
@@ -1308,7 +1266,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
             {myExams.length === 0 ? (
               <div className="p-8 text-center bg-slate-50 border rounded-2xl text-slate-400 italic text-xs">
                 ยังไม่พบข้อมูลการบันทึกประวัติการทำข้อสอบของคุณในสังกัดบัญชีนี้
-                พักทดสอบความรู้วิชาแรกเพื่อเปิดใช้รายงานสมุดคะแนน!
+                ทำแบบทดสอบวิชาแรกเพื่อเปิดใช้งานรายงานสมุดคะแนน!
               </div>
             ) : (
               <div className="overflow-x-auto border rounded-xl divide-y text-xs">
@@ -1460,33 +1418,33 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                   <div className="text-center">
                     <p className="text-slate-500 text-[11px] italic">
-                      ใบประกาศนียบัตรอุตสาหกรรมฉบับนี้พร้อมประทับรับรองสิทธิ์ให้กับ:
+                      ขอมอบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า:
                     </p>
                     <p className="text-slate-900 font-black text-base sm:text-xl underline decoration-double decoration-amber-400 mt-1.5 font-sans">
                       {currentUser.name}
                     </p>
                     <p className="text-[10px] text-slate-450 mt-1 font-mono">
-                      รหัสเจ้าหน้าที่ระดับ: {currentUser.employeeId}
+                      รหัสพนักงาน: {currentUser.employeeId}
                     </p>
                   </div>
 
                   <div className="max-w-md mx-auto py-3 px-4 bg-white/80 border border-slate-150 rounded-xl leading-relaxed text-center">
                     <p className="text-[10px] text-slate-505">
-                      ผ่านการวัดทักษะมาตรฐานและตรวจสอบหลักสูตรปปพื้นฐานพนักงานใหม่:
+                      ผ่านการประเมินตามเกณฑ์หลักสูตรปูพื้นฐานพนักงานใหม่:
                     </p>
                     <p className="text-[11.5px] font-extrabold text-slate-800 mt-1">
                       {activeCertificateCourse.title}
                     </p>
                     <p className="text-[10px] text-emerald-600 font-mono font-bold mt-1.5 bg-emerald-50 py-0.5 px-2 rounded-full inline-block border border-emerald-150">
-                      ผ่านหลักประกันระบบด้วยคะแนนสะสม {displayScoreText()}{" "}
-                      (เกณฑ์ขั้นต่ำ 80%)
+                      ผ่านการทดสอบด้วยคะแนน {displayScoreText()} (เกณฑ์ขั้นต่ำ
+                      80%)
                     </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4 pt-6 text-[10px] text-slate-600 border-t border-slate-100">
                     <div className="space-y-1 text-left leading-normal pl-4">
                       <p className="font-serif text-slate-800 font-bold whitespace-nowrap">
-                        เกียรติประวัติบริษัท รอแยล เมอิวะ แพ็คซ์
+                        รับรองโดย บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด
                       </p>
                       <p className="text-[8px] text-slate-400 uppercase font-mono">
                         Audit ISO9001 APPROVED EVIDENCE
@@ -1499,10 +1457,13 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       </span>
                       {/* TODO: ใส่ชื่อจริงของ Managing Director เมื่อมี User จริงในระบบ */}
                       <p className="font-extrabold text-slate-800">
-                        ผู้อำนวยการฝ่ายบริหาร
+                        กรรมการผู้จัดการ (Managing Director)
                       </p>
                       <p className="text-[8.5px] text-slate-405">
                         Managing Director (MD)
+                      </p>
+                      <p className="text-[8.5px] text-amber-600 font-mono">
+                        (ยังไม่กำหนดผู้ลงนาม)
                       </p>
                     </div>
                   </div>
@@ -1535,7 +1496,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                   <div className="text-center">
                     <p className="text-slate-500 text-[11px] italic">
-                      ด้วยสัตย์พิสูจน์ขอประกาศรับรองทักษะและมาตรฐานงานฉบับนี้แก่:
+                      ขอรับรองว่าบุคคลดังต่อไปนี้ได้ผ่านการประเมินมาตรฐานทักษะความรู้:
                     </p>
                     <p className="text-slate-900 font-black text-base sm:text-lg underline decoration-double decoration-teal-600 mt-2 font-sans">
                       {currentUser.name}
@@ -1549,8 +1510,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                   <div className="py-3 px-4 bg-white/90 border border-slate-150 rounded-xl max-w-md mx-auto text-center">
                     <p className="text-[10px] text-slate-600">
-                      ผ่านการกวดขันความรู้ทักษะโรงงานและการสอบใบประเมินมาตรฐานเสาหลักที่
-                      5:
+                      ผ่านการฝึกอบรมและทดสอบวัดระดับสมรรถนะตามมาตรฐานที่กำหนดในหลักสูตร:
                     </p>
                     <p className="text-[11.5px] font-bold text-indigo-900 mt-1">
                       {activeCertificateCourse.title}
@@ -1566,7 +1526,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         ISO Internal Evidence Logs
                       </p>
                       <p className="font-extrabold text-slate-750">
-                        ขบวนการจัดเก็บออฟไลน์ / ออนไลน์สิทธิ์
+                        กระบวนการจัดเก็บหลักฐานการฝึกอบรม
                       </p>
                     </div>
 
@@ -1580,6 +1540,9 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       </p>
                       <p className="text-[8.5px] text-slate-405">
                         QA/QC supervisor (Lead Auditor)
+                      </p>
+                      <p className="text-[8.5px] text-amber-600 font-mono">
+                        (ยังไม่กำหนดผู้ลงนาม)
                       </p>
                     </div>
                   </div>
@@ -1843,8 +1806,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
               <div className="flex items-center gap-2 font-bold text-xs">
                 <ShieldCheck className="w-4 h-4 text-orange-600" />
                 <span>
-                  ⚠️ คำเตือนสิ่งสำคัญ: ใบรับรองมาตรฐานสารบัญญัติ ISO
-                  ของคุณพ้นระยะคุ้มครองแล้ว!
+                  ⚠️ แจ้งเตือน: มีใบรับรองการฝึกอบรมตามมาตรฐาน ISO
+                  ที่หมดอายุหรือใกล้หมดอายุ
                 </span>
               </div>
               <div className="space-y-1 text-slate-700">
@@ -1869,7 +1832,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                           : "ใกล้หมดอายุ (ภายใน 30 วัน)"}
                       </span>
                       (หมดอายุช่วง {cert.expiryDate})
-                      กรุณากระชับประเมินทบทวนคอร์สเพื่ออัพใบเซอร์ต่อสัญญาอายุการรับรองใหม่
+                      กรุณาเข้าอบรมทบทวนหลักสูตรเพื่อต่ออายุใบรับรองการฝึกอบรม
                     </p>
                   ))}
               </div>
@@ -1987,7 +1950,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   {/* User interactive assessment option */}
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                     <span className="text-[9px] font-black text-slate-450 uppercase tracking-tight">
-                      ทดสอบแก้ไขจำลองระดับฝีมือ:
+                      จำลองการประเมินระดับทักษะ:
                     </span>
                     <div className="flex gap-1">
                       {[1, 2, 3, 4].map((lvl) => (
@@ -2126,7 +2089,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
               <div className="space-y-1.5">
                 <label className="text-[10.5px] font-bold text-slate-400 uppercase block">
-                  เป้าหมายก้าวรุ่งเรืองที่เป้าประสงค์ (Career Goal Target):
+                  เป้าหมายความก้าวหน้าในสายอาชีพ (Career Goal):
                 </label>
                 <select
                   value={aiTargetGoal}
@@ -2134,7 +2097,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   className="w-full bg-white border border-slate-250 p-2.5 rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-violet-600"
                 >
                   <option value="Senior Film Extrusion Specialist (ระดับ 4 หน้างานเตาหลอมความร้อน)">
-                    🔥 พนักงานคุมตู้นิรภัยเป่าฟิล์ม Lamination อาวุโส (Senior
+                    🔥 พนักงานควบคุมเครื่องเป่าฟิล์มและลามิเนตอาวุโส (Senior
                     Specialist)
                   </option>
                   <option value="Lead Quality Compliance Auditor (ดูแลระบบวิเคราะห์สิ่งแปลกปลอม ISO)">
@@ -2146,8 +2109,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                     Warehouse Supervisor)
                   </option>
                   <option value="Safety & Sustainability Plant Director (ดูแลระบบวิศวกรรมความรอบคอบโรงงาน)">
-                    🛡️ ผู้ประสานงานบริหารความปลอดภัยโรงงานชั้นสูง (Advanced
-                    Production Plant Director)
+                    🛡️ ผู้จัดการฝ่ายความปลอดภัยและสิ่งแวดล้อมโรงงาน (SHE
+                    Director)
                   </option>
                 </select>
               </div>
@@ -2165,7 +2128,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5 animate-bounce" />{" "}
-                    วิเคราะห์กรอบการเรียนประจบเป้าหมาย &rarr;
+                    วิเคราะห์เส้นทางการเรียนรู้สู่เป้าหมาย &rarr;
                   </>
                 )}
               </button>
@@ -2199,7 +2162,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   <div className="p-4 bg-violet-50/45 border border-violet-150 rounded-2xl">
                     <h3 className="text-[10px] font-bold text-violet-800 flex items-center gap-1.5 uppercase font-mono mb-1">
                       <Sparkles className="w-3.5 h-3.5 text-violet-600" />{" "}
-                      วิเคราะห์จุดยืนปฐมบท (AI Executive Insights):
+                      บทวิเคราะห์สถานะปัจจุบัน (AI Assessment Insights):
                     </h3>
                     <p className="text-slate-800 font-extrabold text-[12px] leading-relaxed">
                       {aiRoadmapResult.analysis}
@@ -2209,7 +2172,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   {/* Phases rendering */}
                   <div className="space-y-4">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      ขั้นตอนโรดแมปรวยตัวยุทธศาสตร์ (Strategic Steps
+                      ขั้นตอนการพัฒนาทักษะตามโรดแมป (Strategic Steps
                       Progressions):
                     </span>
 
@@ -2269,7 +2232,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                                 );
                                               }
                                               alert(
-                                                `🧭 AI เชื่อมโยงตรง: นำเดินทางเข้าเรียนวิชาหลักสูตร "${matched.title}" ออโตเมติกศึกษา!`,
+                                                `🧭 AI เชื่อมโยงตรง: นำคุณเข้าสู่หลักสูตร "${matched.title}" เรียบร้อยแล้ว`,
                                               );
                                             } else {
                                               alert(
@@ -2314,7 +2277,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                     <Sparkles className="w-10 h-10 animate-pulse text-violet-300" />
                   </div>
                   <h3 className="font-bold text-slate-700 mt-3 text-xs">
-                    เริ่มต้นจำลองปั้นแผนงานโรดแมปส่วนบุคคล AI
+                    สร้างแผนพัฒนาทักษะเฉพาะบุคคลด้วย AI (AI Career Roadmap)
                   </h3>
                   <p className="text-[11px] text-slate-450 mt-1 max-w-sm">
                     เลือกเป้าหมายสายอาชีพ แล้วให้ Gemini AI
@@ -2327,19 +2290,22 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           </div>
         </div>
       ) : activeSubTab === "qr" ? (
-        /* QR SCANNER & ATTENDANCE LOGS */
+        /* QR ATTENDANCE: Admin/Editor จัดการคาบและ QR, ทุกคนดูประวัติเช็คชื่อได้ */
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-6 animate-fade-in text-slate-800">
           <div className="flex border-b border-slate-100 gap-2 pb-0.5">
-            <button
-              onClick={() => setQrTab("scan")}
-              className={`px-3 py-1.5 text-xs font-bold border-b-2 cursor-pointer ${
-                qrTab === "scan"
-                  ? "border-[#15329c] text-[#15329c]"
-                  : "border-transparent text-slate-500"
-              }`}
-            >
-              📷 สแกน QR ออนไซต์ (Simulator)
-            </button>
+            {(currentUser.role === "Admin" ||
+              currentUser.role === "Editor") && (
+              <button
+                onClick={() => setQrTab("generate")}
+                className={`px-3 py-1.5 text-xs font-bold border-b-2 cursor-pointer ${
+                  qrTab === "generate"
+                    ? "border-[#15329c] text-[#15329c]"
+                    : "border-transparent text-slate-500"
+                }`}
+              >
+                🗓️ จัดการคาบอบรม & QR ({trainingSessions.length})
+              </button>
+            )}
             <button
               onClick={() => setQrTab("logs")}
               className={`px-3 py-1.5 text-xs font-bold border-b-2 cursor-pointer ${
@@ -2348,157 +2314,146 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   : "border-transparent text-slate-500"
               }`}
             >
-              📑 ล็อกบันทึกเช็ดอิน ({attendanceLogs.length})
+              📑 ประวัติการเช็คชื่อ ({attendanceLogs.length})
             </button>
           </div>
 
-          {qrTab === "scan" ? (
-            OFFLINE_TRAINING_SESSIONS.length === 0 ? (
-              <div className="text-center py-16 space-y-3">
-                <QrCode className="w-12 h-12 text-slate-300 mx-auto" />
-                <h4 className="font-bold text-slate-700 text-sm">
-                  ยังไม่มีคาบอบรมออฟไลน์ที่ตั้งค่าไว้ในระบบ
-                </h4>
-                <p className="text-slate-400 text-xs max-w-sm mx-auto">
-                  กรุณาติดต่อผู้ดูแลระบบเพื่อเพิ่มคาบอบรมภาคปฏิบัติ
-                  พร้อมกำหนดสถานที่ ผู้สอน และเวลาให้ตรงกับตารางจริงของโรงงาน
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                <div className="space-y-4">
-                  <div className="p-4 bg-indigo-50/40 rounded-xl border border-[#15329c]/10 text-xs leading-relaxed">
-                    <h4 className="font-extrabold text-[#15329c] mb-1 flex items-center gap-1">
-                      <Landmark className="w-4 h-4" />{" "}
-                      นวัตกรรมสแกนสอบแบบเช็คอินออนไซต์ (Class Check-In System)
-                    </h4>
-                    <p className="text-slate-600">
-                      เพื่ออำนวยความสะดวกในการอบรมเชิงทดลองปฏิบัติงานจริง ณ ห้อง
-                      Lab หรือคลังสินค้าประตูดำพนักงานสามารถพรีสแกน QR Code
-                      หน้าชั้นเรียนจริงเพื่อบันทึกประวัติเข้าระบบ ERP
-                      อัปประเมินและเกรด 100%
-                      สอบผ่านทันทีโดยไม่ต้องเข้าสอบข้อเขียน!
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-500 block">
-                      โปรดเลือกคาบอบรมที่ต้องการสแกนจำลอง:
-                    </label>
-                    <select
-                      value={selectedSessionId}
-                      onChange={(e) => {
-                        setSelectedSessionId(e.target.value);
-                        setScanSuccess(false);
-                      }}
-                      className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs"
-                    >
-                      {OFFLINE_TRAINING_SESSIONS.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.id}: {s.sessionName.substring(0, 45)}...
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl space-y-1 border text-xs">
-                    <p>
-                      <strong>ผู้สอน:</strong>{" "}
-                      {
-                        OFFLINE_TRAINING_SESSIONS.find(
-                          (s) => s.id === selectedSessionId,
-                        )?.instructor
-                      }
-                    </p>
-                    <p>
-                      <strong>สถานที่:</strong>{" "}
-                      {
-                        OFFLINE_TRAINING_SESSIONS.find(
-                          (s) => s.id === selectedSessionId,
-                        )?.location
-                      }
-                    </p>
-                    <p>
-                      <strong>เวลา:</strong>{" "}
-                      {
-                        OFFLINE_TRAINING_SESSIONS.find(
-                          (s) => s.id === selectedSessionId,
-                        )?.date
-                      }
-                    </p>
-                  </div>
-
-                  <div className="pt-2">
-                    <button
-                      onClick={() =>
-                        handlePerformSimulatedScan(selectedSessionId)
-                      }
-                      disabled={isScanning}
-                      className="w-full bg-gradient-to-r from-[#15329c] to-indigo-705 text-white py-2.5 px-4 rounded-xl font-bold text-xs hover:from-[#11297e] hover:to-indigo-805 disabled:bg-slate-300 cursor-pointer shadow flex items-center justify-center gap-2"
-                    >
-                      <QrCode className="w-4 h-4" />
-                      {isScanning
-                        ? "กำลังจับโฟกัสสบเรดาร์รหัสสแกน..."
-                        : "กดเริ่มสแกน QR ออนไซต์จำลอง (Start Cam Scan)"}
-                    </button>
-                  </div>
-
-                  {scanSuccess && (
-                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs space-y-1 animate-fade-in">
-                      <p className="font-extrabold flex items-center gap-1">
-                        <CheckCircle className="w-4 h-4 text-emerald-600" />{" "}
-                        สแกนลงชื่อเข้าร่วมออนไซต์ได้รับการรับรองสำเร็จ!
-                      </p>
-                      <p className="text-[11px] text-slate-700">
-                        รายชื่อคาบ: {scannedSessionName}
-                      </p>
-                      <p className="text-[10px] text-indigo-700 font-mono font-bold">
-                        บันทึกวุฒิความรู้คอร์ส: {scannedCourseTitle} เกรด 100%
-                        เรียบร้อย
-                      </p>
-                    </div>
-                  )}
+          {qrTab === "generate" &&
+          (currentUser.role === "Admin" || currentUser.role === "Editor") ? (
+            <div className="space-y-4">
+              <div className="p-4 bg-indigo-50/40 rounded-xl border border-[#15329c]/10 text-xs leading-relaxed flex items-start justify-between gap-4">
+                <div>
+                  <h4 className="font-extrabold text-[#15329c] mb-1 flex items-center gap-1">
+                    <Landmark className="w-4 h-4" />
+                    สร้างคาบอบรมออฟไลน์และ QR เช็คชื่อจริง
+                  </h4>
+                  <p className="text-slate-600">
+                    พนักงานสแกน QR ด้วยกล้องมือถือ
+                    ระบบจะเปิดลิงก์เช็คอินให้อัตโนมัติ QR
+                    แต่ละใบใช้ได้เฉพาะช่วงเวลาที่กำหนดของคาบนั้น
+                  </p>
                 </div>
+                <button
+                  onClick={() => {
+                    setCreateSessionError("");
+                    setIsCreateSessionOpen(true);
+                  }}
+                  className="bg-[#15329c] hover:bg-[#11297e] text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  สร้างคาบใหม่
+                </button>
+              </div>
 
-                {/* QR Visual representation */}
-                <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-6 bg-slate-50/50 relative">
-                  {isScanning && (
-                    <div className="absolute inset-0 bg-slate-900/5 backdrop-blur-xs flex items-center justify-center rounded-3xl z-10">
-                      <div className="p-4 bg-white rounded-2xl shadow-lg border flex items-center gap-3 text-xs font-bold text-[#15329c]">
-                        <RefreshCw className="w-5 h-5 animate-spin" />{" "}
-                        ค้นหาพอร์ตรหัสอ้างอิง...
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="p-4 bg-white rounded-2xl border-4 border-[#15329c] shadow-md flex justify-center items-center">
-                    <div className="grid grid-cols-17 gap-0.5 bg-white">
-                      {generateMockQRGrid(selectedSessionId).map((row, rIdx) =>
-                        row.map((cell, cIdx) => (
-                          <div
-                            key={`${rIdx}-${cIdx}`}
-                            className={`w-2.5 h-2.5 transition-colors duration-150 ${cell ? "bg-slate-950" : "bg-white"}`}
-                          />
-                        )),
-                      )}
-                    </div>
+              {isLoadingSessions ? (
+                <div className="text-center py-10 text-slate-400 text-xs">
+                  กำลังโหลดรายการคาบอบรม...
+                </div>
+              ) : trainingSessions.length === 0 ? (
+                <div className="text-center py-16 space-y-3">
+                  <QrCode className="w-12 h-12 text-slate-300 mx-auto" />
+                  <h4 className="font-bold text-slate-700 text-sm">
+                    ยังไม่มีคาบอบรมในระบบ
+                  </h4>
+                  <p className="text-slate-400 text-xs max-w-sm mx-auto">
+                    กดปุ่ม "สร้างคาบใหม่" ด้านบนเพื่อเริ่มสร้างคาบอบรมและ QR
+                    เช็คชื่อสำหรับพนักงาน
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                  {/* Session list */}
+                  <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                    {trainingSessions.map((s) => {
+                      const now = Date.now();
+                      const start = Date.parse(s.startsAt);
+                      const end = Date.parse(s.endsAt);
+                      const statusLabel =
+                        now < start
+                          ? "ยังไม่เริ่ม"
+                          : now > end
+                            ? "หมดเวลาเช็คอินแล้ว"
+                            : "เปิดเช็คอินอยู่";
+                      const statusColor =
+                        now < start
+                          ? "bg-slate-100 text-slate-500"
+                          : now > end
+                            ? "bg-rose-50 text-rose-600"
+                            : "bg-emerald-50 text-emerald-700";
+                      return (
+                        <div
+                          key={s.id}
+                          onClick={() => handleSelectSessionForQr(s)}
+                          className={`p-3.5 rounded-xl border cursor-pointer transition text-xs space-y-1.5 ${
+                            selectedSessionId === s.id
+                              ? "border-[#15329c] bg-indigo-50/40"
+                              : "border-slate-150 hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="font-bold text-slate-800 block">
+                                {s.sessionName}
+                              </span>
+                              <span className="text-slate-400 text-[10px] block mt-0.5">
+                                คอร์ส: {s.courseTitle}
+                              </span>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSession(s.id);
+                              }}
+                              className="text-slate-350 hover:text-rose-600 shrink-0 cursor-pointer p-1"
+                              title="ลบคาบนี้"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                            <span
+                              className={`px-1.5 py-0.5 rounded font-bold ${statusColor}`}
+                            >
+                              {statusLabel}
+                            </span>
+                            <span>
+                              {new Date(s.startsAt).toLocaleString("th-TH")} –{" "}
+                              {new Date(s.endsAt).toLocaleTimeString("th-TH")}
+                            </span>
+                          </div>
+                          {s.location && (
+                            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                              <MapPin className="w-3 h-3" /> {s.location}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  <div className="text-center mt-3 space-y-0.5">
-                    <p className="text-xs font-mono font-bold text-slate-505">
-                      {
-                        OFFLINE_TRAINING_SESSIONS.find(
-                          (s) => s.id === selectedSessionId,
-                        )?.qrValue
-                      }
-                    </p>
-                    <p className="text-[9.5px] text-slate-400">
-                      QR Code เช็กชื่อสอบอ้างอิง (ISO Internal Track No.)
-                    </p>
+                  {/* QR display */}
+                  <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-6 bg-slate-50/50 min-h-[280px]">
+                    {qrDataUrl ? (
+                      <>
+                        <img
+                          src={qrDataUrl}
+                          alt="QR เช็คชื่อ"
+                          className="w-52 h-52 rounded-xl border border-slate-200 bg-white p-2"
+                        />
+                        <p className="text-[10.5px] text-slate-500 mt-3 text-center max-w-xs">
+                          ให้พนักงานเปิดกล้องมือถือส่องที่ QR นี้
+                          ระบบจะเปิดลิงก์เช็คอินให้อัตโนมัติ
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-slate-400 text-xs text-center">
+                        เลือกคาบอบรมทางซ้ายเพื่อแสดง QR
+                      </p>
+                    )}
                   </div>
                 </div>
-              </div>
-            )
+              )}
+            </div>
           ) : (
             /* ATTENDANCE LOGS LIST */
             <div className="space-y-4">
@@ -2506,25 +2461,30 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 <span className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest">
                   ลำดับเวลา ล็อกการบันทึกเอกสาร Audit ISO 9001
                 </span>
-                <button
-                  onClick={async () => {
-                    if (
-                      confirm(
-                        "คุณแน่ใจว่าต้องการล้างล็อกข้อมูลทั้งหมดหรือไม่? (เพื่อความสะดวกในการสาธิต)",
-                      )
-                    ) {
-                      try {
-                        await api.clearAttendanceLogs();
-                        setAttendanceLogs([]);
-                      } catch (err) {
-                        console.error("Failed to clear attendance logs:", err);
+                {currentUser.role === "Admin" && (
+                  <button
+                    onClick={async () => {
+                      if (
+                        confirm(
+                          "คุณแน่ใจว่าต้องการล้างล็อกข้อมูลทั้งหมดหรือไม่? (เพื่อความสะดวกในการสาธิต)",
+                        )
+                      ) {
+                        try {
+                          await api.clearAttendanceLogs();
+                          setAttendanceLogs([]);
+                        } catch (err) {
+                          console.error(
+                            "Failed to clear attendance logs:",
+                            err,
+                          );
+                        }
                       }
-                    }
-                  }}
-                  className="text-rose-600 hover:underline text-[10px] font-bold cursor-pointer"
-                >
-                  ล้างข้อมูลประวัติทั้งหมด
-                </button>
+                    }}
+                    className="text-rose-600 hover:underline text-[10px] font-bold cursor-pointer"
+                  >
+                    ล้างข้อมูลประวัติทั้งหมด
+                  </button>
+                )}
               </div>
 
               {attendanceLogs.length === 0 ? (
@@ -2575,6 +2535,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           )}
         </div>
       ) : (
+        /* Create Session Modal */
         /* COURSE LEARNING PROGRAM LABS (ONBOARDING & GENERAL TABS) */
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
           {/* Left pane: Selected Tab Course Catalog */}
@@ -2750,13 +2711,13 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         {currentUser.name}
                       </p>
                       <p className="text-[10px] text-slate-400 mt-1 font-mono">
-                        รหัสสังกัดรุ่นพนักงาน: {currentUser.employeeId}
+                        รหัสพนักงาน: {currentUser.employeeId}
                       </p>
                     </div>
 
                     <div className="py-3 px-4 bg-white/80 border rounded-xl max-w-md mx-auto leading-relaxed">
                       <p className="text-[10px] text-slate-505">
-                        ผ่านการประเมินชุดวิชาสำหรับการลงรับตำแหน่งงานประจำฝ่ายโรงพิมพ์:
+                        ผ่านการประเมินตามเกณฑ์มาตรฐานสำหรับการปฏิบัติงาน:
                       </p>
                       <p className="text-xs font-bold text-slate-805 mt-1">
                         {activeCertificateCourse.title}
@@ -2769,7 +2730,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                     <div className="grid grid-cols-2 gap-4 pt-6 text-[10px] border-t border-slate-100 text-slate-600 leading-normal">
                       <div className="text-left pl-3">
                         <p className="font-bold text-slate-800">
-                          เกียรติประวัติสูงสุดโรงพิมพ์
+                          บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด
                         </p>
                         <p className="text-[9px] text-slate-400 uppercase font-mono">
                           Verified internal Audit
@@ -2781,10 +2742,13 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         </span>
                         {/* TODO: ใส่ชื่อจริงของ Managing Director เมื่อมี User จริงในระบบ */}
                         <p className="font-bold text-slate-850">
-                          ผู้อำนวยการฝ่ายบริหาร
+                          กรรมการผู้จัดการ (Managing Director)
                         </p>
                         <p className="text-[8.5px] text-slate-405">
                           Managing Director (MD)
+                        </p>
+                        <p className="text-[8.5px] text-amber-600 font-mono">
+                          (ยังไม่กำหนดผู้ลงนาม)
                         </p>
                       </div>
                     </div>
@@ -2808,7 +2772,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                     <div className="pt-2">
                       <p className="text-slate-505 text-[11px] italic">
-                        ด้วยสัตย์พิสูจน์ขอประกาศรับรองทักษะและมาตรฐานงานฉบับนี้แก่:
+                        ขอรับรองว่าผู้มีรายนามดังต่อไปนี้ได้ผ่านการทดสอบมาตรฐานวิชาชีพ:
                       </p>
                       <p className="text-[#15329c] font-black text-base sm:text-xl underline decoration-double decoration-teal-600 mt-2 font-sans">
                         {currentUser.name}
@@ -2822,7 +2786,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                     <div className="py-3 px-4 bg-white/90 border rounded-xl max-w-md mx-auto">
                       <p className="text-[10px] text-slate-600">
-                        ผ่านการกวดขันความรู้โรงงานและการสอบใบวิชาชีพระดับฝ่ายงานช่างเทคนิค:
+                        ผ่านการทดสอบวัดระดับสมรรถนะความรู้เชิงช่างเทคนิคในหลักสูตร:
                       </p>
                       <p className="text-xs font-bold text-slate-805 mt-1">
                         {activeCertificateCourse.title}
@@ -2851,6 +2815,9 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         </p>
                         <p className="text-[9px] text-slate-405">
                           QA/QC supervisor (Lead Auditor)
+                        </p>
+                        <p className="text-[8.5px] text-amber-600 font-mono">
+                          (ยังไม่กำหนดผู้ลงนาม)
                         </p>
                       </div>
                     </div>
@@ -2964,7 +2931,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                   <div className="w-full bg-slate-950 text-white rounded-lg p-5 flex flex-col justify-between h-52 relative overflow-hidden">
                                     <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-950 opacity-60"></div>
                                     <div className="z-10 bg-slate-900/60 p-2 rounded text-[10px] select-none w-max">
-                                      ▶️ วิดีโอสื่อประกอบ (.MP4)
+                                      ▶️ วิดีโอสื่อการสอน (.MP4)
                                     </div>
                                     <div className="z-10 flex flex-col items-center justify-center flex-1">
                                       <PlayCircle className="w-14 h-14 text-indigo-400 hover:scale-110 hover:text-indigo-300 transition cursor-pointer" />
@@ -3000,7 +2967,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                       {lessons[activeLessonIndex].title}.pdf
                                     </span>
                                     <span className="text-[10px] text-slate-500 block">
-                                      เอกสารคู่มือ PDF ระดับสารระบบ (2.6 MB)
+                                      เอกสารคู่มือประกอบการอบรม (PDF)
                                     </span>
                                   </div>
                                 </div>
@@ -3398,7 +3365,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                       {quizPassed ? (
                         <div className="p-4 bg-emerald-50 border border-emerald-250 text-emerald-900 rounded-xl font-bold max-w-md mx-auto">
-                          ยินดีด้วย! คุณมีสัญชาติการประเมินวิชาชีพนี้สำเร็จ
+                          ยินดีด้วย! คุณผ่านการประเมินตามเกณฑ์ของหลักสูตรนี้แล้ว
                           สามารถคลิกปุ่มเปิดใบเซอร์ด้านล่างเพื่อพรีวิวหรือพิมพ์ผลตรวจสอบได้ทันที
                         </div>
                       ) : (
@@ -3539,8 +3506,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                             คุณสอบผ่านและมีประวัติการเรียนวิชานี้แล้ว
                           </span>
                           <span className="text-[10px] text-slate-550 font-mono block mt-0.5">
-                            คะแนนพริ้งสูสี: {relevantResult.score}% |
-                            บันทึกเมื่อ {relevantResult.date}
+                            คะแนนที่ทำได้: {relevantResult.score}% | บันทึกเมื่อ{" "}
+                            {relevantResult.date}
                           </span>
                         </div>
                       </div>
@@ -3726,7 +3693,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
               {/* Section 1: ข้อมูลหลักสูตรทั่วไป */}
               <div className="space-y-3.5">
                 <h4 className="font-extrabold text-[#15329c] text-xs border-b pb-1.5 flex items-center gap-1.5">
-                  📊 ส่วนที่ 1: ข้อมูลทั่วไปและระบบเก่งกล้า (Course Metadata)
+                  📊 ส่วนที่ 1: ข้อมูลทั่วไปของหลักสูตร (Course Metadata)
                 </h4>
 
                 <div className="space-y-1">
@@ -4454,7 +4421,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           <div className="bg-white rounded-3xl shadow-xl border w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="bg-gradient-to-r from-amber-600 to-amber-700 p-4 font-bold text-white text-sm shrink-0 flex items-center justify-between animate-pulse-slow">
               <span className="flex items-center gap-1.5">
-                <Edit className="w-4 h-4" /> การกวดขันปรับโครงสร้างบทวิชา:{" "}
+                <Edit className="w-4 h-4" /> แก้ไขข้อมูลหลักสูตร:{" "}
                 {editingCourse.id}
               </span>
               <button
@@ -4679,6 +4646,154 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           completedDate={modalSelectedDate}
           onDownloadLog={onCertificateDownloadLog}
         />
+      )}
+      {isCreateSessionOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in text-slate-800">
+          <div className="bg-white rounded-3xl shadow-xl border w-full max-w-md overflow-hidden">
+            <div className="bg-[#15329c] p-4 font-bold text-white text-sm flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <QrCode className="w-4 h-4" /> สร้างคาบอบรมและ QR เช็คชื่อ
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsCreateSessionOpen(false)}
+                className="text-white/80 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleCreateSessionSubmit}
+              className="p-5 space-y-3.5 text-xs"
+            >
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-600 block">
+                  คอร์สที่เกี่ยวข้อง:*
+                </label>
+                <select
+                  required
+                  value={newSession.courseId}
+                  onChange={(e) =>
+                    setNewSession({ ...newSession, courseId: e.target.value })
+                  }
+                  className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs"
+                >
+                  <option value="">-- เลือกคอร์ส --</option>
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-600 block">
+                  ชื่อคาบอบรม:*
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newSession.sessionName}
+                  onChange={(e) =>
+                    setNewSession({
+                      ...newSession,
+                      sessionName: e.target.value,
+                    })
+                  }
+                  placeholder="เช่น อบรมความปลอดภัย Forklift รุ่นที่ 3"
+                  className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-600 block">
+                    สถานที่:
+                  </label>
+                  <input
+                    type="text"
+                    value={newSession.location}
+                    onChange={(e) =>
+                      setNewSession({ ...newSession, location: e.target.value })
+                    }
+                    className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-600 block">
+                    ผู้สอน:
+                  </label>
+                  <input
+                    type="text"
+                    value={newSession.instructor}
+                    onChange={(e) =>
+                      setNewSession({
+                        ...newSession,
+                        instructor: e.target.value,
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-600 block">
+                    เริ่มเช็คอินได้ตั้งแต่:*
+                  </label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={newSession.startsAt}
+                    onChange={(e) =>
+                      setNewSession({ ...newSession, startsAt: e.target.value })
+                    }
+                    className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-600 block">
+                    ปิดเช็คอินเมื่อ:*
+                  </label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={newSession.endsAt}
+                    onChange={(e) =>
+                      setNewSession({ ...newSession, endsAt: e.target.value })
+                    }
+                    className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs"
+                  />
+                </div>
+              </div>
+
+              {createSessionError && (
+                <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs font-semibold">
+                  {createSessionError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateSessionOpen(false)}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg cursor-pointer transition"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="bg-[#15329c] hover:bg-[#11297e] text-white font-bold px-5 py-2 rounded-lg cursor-pointer transition shadow"
+                >
+                  สร้างคาบและ QR
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

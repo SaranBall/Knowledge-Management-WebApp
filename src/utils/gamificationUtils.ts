@@ -5,10 +5,6 @@ import {
   UserKMPoints,
   CertStatus,
 } from "../types";
-// @deprecated ค่านี้เคยใช้เป็น "วันปัจจุบันจำลอง" สำหรับ demo/testing เท่านั้น
-// calculateRemainingDays() ด้านล่างเปลี่ยนไปใช้วันที่ปัจจุบันจริง (new Date()) แล้ว
-// คงไว้เพื่อไม่ให้กระทบไฟล์อื่นที่ import ชื่อนี้อยู่ (เช่น LearningCenter.tsx)
-export const ANCHOR_DATE = "2026-06-22";
 
 /**
  * Returns initial competencies mapped to a user based on their position & department.
