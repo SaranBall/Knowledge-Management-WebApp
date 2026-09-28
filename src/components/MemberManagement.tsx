@@ -625,7 +625,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       role: newUser.role,
       avatarUrl: newUser.avatarUrl, // ผ่าน validation ด้านบนแล้ว รับประกันว่ามีค่าจริงเสมอ
       email: newUser.email,
-      phone: newUser.phone || "02-1234567",
+      phone: newUser.phone ? newUser.phone.trim() : "",
       startDate: newUser.startDate || new Date().toISOString().split("T")[0],
     };
 
@@ -1200,12 +1200,6 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             </button>
           )}
         </div>
-
-        {currentUser.role !== "Admin" && (
-          <div className="text-[10px] text-amber-600 font-bold bg-amber-50 px-2.5 py-1 rounded border border-amber-200">
-            ⚠️ โหมดสาธิต: แอดมินสามารถสลับสิทธิ์ได้ที่มุมขวาบนของหน้าจอหลัก
-          </div>
-        )}
       </div>
 
       {activeTab === "MEMBERS" && (
@@ -1708,11 +1702,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
             )}
 
             <button
-              onClick={() =>
-                alert(
-                  "🖨️ เตรียมข้อมูลสำหรับการพิมพ์... ระบบตรวจพบโมเดลพิมพ์ PDF ของบราวเซอร์เรียบร้อย!",
-                )
-              }
+              onClick={() => window.print()}
               className="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition shadow"
             >
               <Printer className="w-4 h-4" />
@@ -1873,15 +1863,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     <span className="block text-slate-400 text-[10px] font-bold">
                       อัตราสอบผ่านและการฝึกอบรม
                     </span>
-                    <strong className="text-xl text-emerald-600 block mt-1">
-                      {Math.round(
-                        (userProgressList.filter(
-                          (u) => u.status === "Completed",
-                        ).length /
-                          (visibleUsers.length * 2)) *
-                          100,
-                      )}
-                      %
+                    <strong
+                      className="text-xl text-slate-400 block mt-1"
+                      title="รอการกำหนดหลักสูตรบังคับตามตำแหน่งงาน"
+                    >
+                      -
                     </strong>
                   </div>
                 </div>
@@ -2227,14 +2213,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       </div>
 
                       {/* General competency summary note */}
-                      <div className="bg-indigo-50/25 p-4 rounded-xl border border-indigo-150 text-slate-650 leading-relaxed space-y-1">
-                        <strong className="text-indigo-900 block font-bold text-xs">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-dashed border-slate-300 text-slate-500 leading-relaxed space-y-2">
+                        <strong className="text-slate-700 block font-bold text-xs">
                           📝 ความคิดเห็นของคณะกรรมการผู้ประเมิน:
                         </strong>
-                        <p className="text-[10.5px]">
-                          พนักงานผู้นี้มีความพร้อมคืบหน้าในการตรวจรับและปฏิบัติงานตามเกณฑ์มาตรฐานเป็นที่น่าพึงพอใจยิ่ง
-                          ยืนยันการรับวุฒิความเชี่ยวชาญความรู้และพร้อมทำงานสายตรงทันทีตามเกณฑ์ประกันคุณภาพของบริษัทฯ
+                        <p className="text-[10.5px] italic text-slate-400">
+                          (ยังไม่มีการบันทึกผลการประเมินจากคณะกรรมการ —
+                          สำหรับบันทึกความเห็นและลงนามเป็นลายลักษณ์อักษร)
                         </p>
+                        <div className="h-10 border-b border-dashed border-slate-200"></div>
                       </div>
                     </div>
                   );
