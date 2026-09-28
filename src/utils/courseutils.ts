@@ -1,3 +1,5 @@
+import { Course, UserCourseProgress } from "../types";
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -19,3 +21,43 @@
 export const getRequiredCoursesForPosition = (_position?: string): string[] => {
   return [];
 };
+
+export const formatDuration = (minutes?: number): string => {
+  if (!minutes || minutes <= 0) return "-";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h && m) return `${h} ชั่วโมง ${m} นาที`;
+  if (h) return `${h} ชั่วโมง`;
+  return `${m} นาที`;
+};
+
+// รวมนาทีจากคอร์สที่พนักงานเรียนจบจริง (progress หรือสอบผ่าน ไม่นับซ้ำ)
+// คืน null ถ้าไม่มีคอร์สไหนที่จบแล้วระบุเวลาไว้ เพื่อให้แสดง "-" ไม่ใช่ 0
+export const getUserTrainingMinutes = (
+  userId: string,
+  employeeId: string,
+  courses: Course[],
+  progress: UserCourseProgress[],
+  exams: any[],
+): number | null => {
+  const done = new Set<string>();
+  progress.forEach((p) => {
+    if (p.userId === userId && p.status === "Completed") done.add(p.courseId);
+  });
+  exams.forEach((e) => {
+    if (e.employeeId === employeeId && e.pass) done.add(e.courseId);
+  });
+  let total = 0;
+  let known = false;
+  done.forEach((id) => {
+    const c = courses.find((x) => x.id === id);
+    if (c?.durationMinutes) {
+      total += c.durationMinutes;
+      known = true;
+    }
+  });
+  return known ? total : null;
+};
+
+export const formatHours = (minutes: number | null): string =>
+  minutes === null ? "-" : `${(minutes / 60).toFixed(1)} ชม.`;

@@ -87,6 +87,7 @@ export interface Course {
   quiz: QuizQuestion[];
   minPassScore: number; // e.g. 80 (%)
   durationHours?: string;
+  durationMinutes?: number; // ใช้คำนวณชั่วโมงอบรมรวม (durationHours เป็นแค่ข้อความแสดงผล)
   tags?: string[];
   isApproved?: boolean;
   createdByRole?: string;

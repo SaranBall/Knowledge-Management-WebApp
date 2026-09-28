@@ -60,6 +60,7 @@ import {
   calculateRemainingDays,
 } from "../utils/gamificationUtils";
 import { getDepartmentById } from "../utils/departmentUtils";
+import { formatDuration } from "../utils/courseutils";
 import { DEFAULT_LESSON_IMAGE_URL } from "../utils/assets";
 
 interface LearningCenterProps {
@@ -308,7 +309,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
     title: "",
     description: "",
     type: "Onboarding" as "Onboarding" | "General",
-    durationHours: "2 ชั่วโมง",
+    durationMinutes: "" as number | "",
     minPassScore: 80,
     targetPositions: ["Warehouse Staff"] as string[],
     lessonTitle: "บทเรียนย่อยที่ 1: ขั้นตอนสากลและการจัดสรรงานเบื้องต้น",
@@ -830,7 +831,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       description: newCourseState.description,
       type: newCourseState.type,
       minPassScore: Number(newCourseState.minPassScore) || 80,
-      durationHours: newCourseState.durationHours || "2 ชั่วโมง",
+      durationMinutes: Number(newCourseState.durationMinutes),
+      durationHours: formatDuration(Number(newCourseState.durationMinutes)),
       targetPositions:
         newCourseState.targetPositions.length > 0
           ? newCourseState.targetPositions
@@ -913,7 +915,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       description: editingCourse.description,
       type: editingCourse.type,
       minPassScore: Number(editingCourse.minPassScore) || 80,
-      durationHours: editingCourse.durationHours || "2 ชั่วโมง",
+      durationMinutes: editingCourse.durationMinutes
+        ? Number(editingCourse.durationMinutes)
+        : undefined,
+      durationHours: editingCourse.durationMinutes
+        ? formatDuration(Number(editingCourse.durationMinutes))
+        : editingCourse.durationHours,
       lessons: parsedLessons,
       quiz: parsedQuiz,
       targetPositions: editingCourse.targetPositions || [
@@ -3464,7 +3471,9 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                         ระยะเวลาเรียนรู้:{" "}
-                        {selectedCourse.durationHours || "45 นาที"}
+                        {selectedCourse.durationMinutes
+                          ? formatDuration(selectedCourse.durationMinutes)
+                          : selectedCourse.durationHours || "ยังไม่ระบุ"}
                       </span>
                       <span className="text-slate-300">|</span>
                       <span className="flex items-center gap-1">
@@ -3760,19 +3769,21 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
                   <div className="space-y-1">
                     <label className="font-semibold text-slate-600 block">
-                      ระยะเวลาการอบรม:*
+                      ระยะเวลาการอบรม (นาที):*
                     </label>
                     <input
-                      type="text"
+                      type="number"
+                      min={1}
                       required
-                      value={newCourseState.durationHours}
+                      value={newCourseState.durationMinutes}
                       onChange={(e) =>
                         setNewCourseState({
                           ...newCourseState,
-                          durationHours: e.target.value,
+                          durationMinutes:
+                            e.target.value === "" ? "" : Number(e.target.value),
                         })
                       }
-                      placeholder="เช่น 1 ชั่วโมง, 45 นาที, 3 ชั่วโมง"
+                      placeholder="เช่น 60, 90, 180"
                       className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs"
                     />
                   </div>
@@ -4522,19 +4533,22 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="font-semibold text-slate-600 block">
-                    ระยะเวลาการเรียนรู้:
+                    ระยะเวลาการเรียนรู้ (นาที):
                   </label>
                   <input
-                    type="text"
-                    required
-                    value={editingCourse.durationHours || ""}
+                    type="number"
+                    min={1}
+                    value={editingCourse.durationMinutes ?? ""}
                     onChange={(e) =>
                       setEditingCourse({
                         ...editingCourse,
-                        durationHours: e.target.value,
+                        durationMinutes:
+                          e.target.value === ""
+                            ? undefined
+                            : Number(e.target.value),
                       })
                     }
-                    placeholder="เช่น 2 ชั่วโมง 30 นาที"
+                    placeholder="ยังไม่ระบุ"
                     className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs"
                   />
                 </div>

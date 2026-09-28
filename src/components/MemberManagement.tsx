@@ -49,7 +49,11 @@ import { INITIAL_EMPLOYEE_MASTER } from "../data/initialData";
 import { getUserBadges } from "../utils/badgeUtils";
 import { BadgePill } from "./BadgeDisplay";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
-import { getRequiredCoursesForPosition } from "../utils/courseutils";
+import {
+  getRequiredCoursesForPosition,
+  getUserTrainingMinutes,
+  formatHours,
+} from "../utils/courseutils";
 import {
   getMainDepartments,
   getSubDepartments,
@@ -788,7 +792,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
               )
             : null;
         const reqs = getRequiredCoursesForPosition(u.position).length;
-        const hours = completions * 3 + 2;
+        const hoursText = formatHours(
+          getUserTrainingMinutes(
+            u.id,
+            u.employeeId,
+            courses,
+            userProgressList,
+            examResults,
+          ),
+        );
         const statusText =
           reqs === 0
             ? "ยังไม่กำหนดหลักสูตรบังคับ"
@@ -811,7 +823,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           completions,
           reqs,
           avgS !== null ? `${avgS}%` : "-",
-          `${hours} ชั่วโมง`,
+          hoursText,
           statusText,
         ];
       });
@@ -860,7 +872,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 attempts.reduce((acc, c) => acc + c.score, 0) / attempts.length,
               )
             : null;
-        const hours = completions * 3 + 2;
+        const hoursText = formatHours(
+          getUserTrainingMinutes(
+            u.id,
+            u.employeeId,
+            courses,
+            userProgressList,
+            examResults,
+          ),
+        );
         const statusText =
           reqs === 0
             ? "ยังไม่กำหนดหลักสูตรบังคับ"
@@ -877,7 +897,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           reqs,
           rate !== null ? `${rate}%` : "-",
           avgS !== null ? `${avgS}%` : "-",
-          `${hours} ชั่วโมง`,
+          hoursText,
           statusText,
         ];
       });
@@ -1860,7 +1880,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         ).length /
                           (visibleUsers.length * 2)) *
                           100,
-                      ) || 85}
+                      )}
                       %
                     </strong>
                   </div>
@@ -2043,7 +2063,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                     </td>
                                     <td className="p-2.5">{u.position}</td>
                                     <td className="p-2.5 text-center">
-                                      {completions * 3 + 2} ชั่วโมงสะสม
+                                      {formatHours(
+                                        getUserTrainingMinutes(
+                                          u.id,
+                                          u.employeeId,
+                                          courses,
+                                          userProgressList,
+                                          examResults,
+                                        ),
+                                      )}
                                     </td>
                                     <td className="p-2.5 text-center font-bold text-slate-700">
                                       {completions} คอร์สเรียนสำเร็จ

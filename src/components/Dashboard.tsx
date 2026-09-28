@@ -34,7 +34,11 @@ import { BadgePill } from "./BadgeDisplay";
 import { BadgeCertificateModal } from "./BadgeCertificateModal";
 import { getDepartmentById } from "../utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
-import { getRequiredCoursesForPosition } from "../utils/courseutils";
+import {
+  getRequiredCoursesForPosition,
+  getUserTrainingMinutes,
+  formatHours,
+} from "../utils/courseutils";
 
 interface DashboardProps {
   currentUser: User;
@@ -244,10 +248,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )
       : 0;
 
-  // ค่าประมาณ ไม่ใช่ชั่วโมงจริง — เพราะ Course.durationHours เป็น string หน่วยไม่คงที่
-  // (เช่น "2 ชั่วโมง", "45 นาที", "3.0 ชม.") parse เป็นตัวเลขแม่นยำไม่ได้อย่างปลอดภัย
-  // TODO: เพิ่ม field ตัวเลขจริง (เช่น durationMinutes: number) ใน Course แล้วคำนวณจากของจริงแทน
-  const totalTrainingHours = totalCompleted * 3;
+  // รวมนาทีเฉพาะคอร์สที่จบจริงและระบุ durationMinutes ไว้ (ไม่มีข้อมูล = ไม่นับ)
+  const perUserMinutes = visibleUsers.map((u) =>
+    getUserTrainingMinutes(
+      u.id,
+      u.employeeId,
+      courses,
+      userProgressList,
+      examResults,
+    ),
+  );
+  const totalTrainingMinutes = perUserMinutes.some((m) => m !== null)
+    ? perUserMinutes.reduce<number>((s, m) => s + (m ?? 0), 0)
+    : null;
 
   // 3. Gap Analysis calculation
   // Find search queries where hasResult is false, grouped by count
@@ -383,9 +396,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <div>
                 <span className="text-slate-800 font-bold text-sm">
-                  {totalTrainingHours}
+                  {formatHours(totalTrainingMinutes)}
                 </span>
-                <span className="block text-[9px] text-slate-400">
+                <span
+                  className="block text-[9px] text-slate-400"
+                  title="รวมเฉพาะคอร์สที่ระบุระยะเวลาเป็นนาทีไว้"
+                >
                   ชั่วโมงรวมองค์กร
                 </span>
               </div>
@@ -1023,7 +1039,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           )}
                         </div>
                         <div className="col-span-2 sm:col-span-1 text-center font-mono font-medium text-slate-500">
-                          {item.course.durationHours || "2.0"} ชม.
+                          {item.course.durationHours || "-"}
                         </div>
                         <div className="col-span-2 sm:col-span-3 text-right">
                           {item.score !== undefined ? (
@@ -1332,7 +1348,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               )}
                             </div>
                             <div className="font-mono text-right">
-                              {item.course.durationHours || "2.0"} ชม.
+                              {item.course.durationHours || "-"}
                             </div>
                           </div>
                         ))
