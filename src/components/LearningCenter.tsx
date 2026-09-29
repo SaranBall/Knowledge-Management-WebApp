@@ -62,6 +62,7 @@ import {
 import { getDepartmentById } from "../utils/departmentUtils";
 import { formatDuration } from "../utils/courseutils";
 import { DEFAULT_LESSON_IMAGE_URL } from "../utils/assets";
+import { resolveSignedUrl } from "../utils/fileAccess";
 
 interface LearningCenterProps {
   currentUser: User;
@@ -499,6 +500,30 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
   const lessons = selectedCourse?.lessons || [];
   const questions = selectedCourse?.quiz || [];
+
+  // ไฟล์สื่อบทเรียนที่อัปโหลดเข้าระบบ (เส้นทาง /uploads/...) เปิดตรงไม่ได้เพราะ
+  // <img>/<a href> แนบ Authorization header เองไม่ได้ ต้องขอลิงก์ชั่วคราวก่อน
+  const [signedLessonMediaUrl, setSignedLessonMediaUrl] = useState<
+    string | undefined
+  >(undefined);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const mediaUrl =
+      activeLessonIndex !== null
+        ? lessons[activeLessonIndex]?.mediaUrl
+        : undefined;
+    if (!mediaUrl) {
+      setSignedLessonMediaUrl(undefined);
+      return;
+    }
+    resolveSignedUrl(mediaUrl).then((url) => {
+      if (!cancelled) setSignedLessonMediaUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLessonIndex, lessons]);
 
   const completedLessonsCount =
     currentProgress?.status === "Completed"
@@ -2996,9 +3021,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                   </p>
                                 </div>
                                 <a
-                                  href={
-                                    lessons[activeLessonIndex].mediaUrl || "#"
-                                  }
+                                  href={signedLessonMediaUrl || "#"}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition cursor-pointer"
@@ -3041,9 +3064,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                   </div>
                                 </div>
                                 <a
-                                  href={
-                                    lessons[activeLessonIndex].mediaUrl || "#"
-                                  }
+                                  href={signedLessonMediaUrl || "#"}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition cursor-pointer"
@@ -3060,7 +3081,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                 <div className="border rounded-xl overflow-hidden bg-slate-50 flex items-center justify-center p-2">
                                   <img
                                     src={
-                                      lessons[activeLessonIndex].mediaUrl ||
+                                      signedLessonMediaUrl ||
                                       DEFAULT_LESSON_IMAGE_URL
                                     }
                                     alt={lessons[activeLessonIndex].title}
@@ -3993,7 +4014,6 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                     const data = await api.uploadFile(
                                       base.name,
                                       base64String,
-                                      base.type || "application/octet-stream",
                                     );
                                     setNewCourseState((prev) => ({
                                       ...prev,

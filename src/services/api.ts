@@ -73,12 +73,16 @@ export const api = {
   uploadFile: (
     filename: string,
     fileData: string, // base64 (ไม่รวม prefix "data:...;base64,")
-    mimeType: string,
-    restricted?: boolean,
   ) =>
     request<{ url: string; filename: string }>("/api/upload", {
       method: "POST",
-      body: JSON.stringify({ filename, fileData, mimeType, restricted }),
+      body: JSON.stringify({ filename, fileData }),
+    }),
+  // ขอลิงก์ชั่วคราว (มี token ต่อท้าย) สำหรับฝังใน src/href ที่แนบ Authorization header เองไม่ได้
+  signFileUrl: (storedFilename: string) =>
+    request<{ url: string }>("/api/files/sign", {
+      method: "POST",
+      body: JSON.stringify({ filename: storedFilename }),
     }),
   createUser: (user: UserType) =>
     request<UserType>("/api/users", {

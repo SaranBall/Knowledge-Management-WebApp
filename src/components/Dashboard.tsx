@@ -259,7 +259,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     ),
   );
   const totalTrainingMinutes = perUserMinutes.some((m) => m !== null)
-    ? perUserMinutes.reduce<number>((s, m) => s + (m ?? 0), 0)
+    ? perUserMinutes.reduce((s: number, m: number | null) => s + (m ?? 0), 0)
     : null;
 
   // 3. Gap Analysis calculation

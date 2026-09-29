@@ -481,58 +481,184 @@ async function startServer() {
   }
   const uploadedFiles = new Map<string, UploadedFileMeta>();
 
-  app.post("/api/upload", requireAuth, (req, res) => {
-    try {
-      const { filename, fileData, mimeType, restricted } = req.body;
-      if (!filename || !fileData) {
-        return res
-          .status(400)
-          .json({ error: "filename and fileData are required" });
-      }
-      const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, "_");
-      const buffer = Buffer.from(fileData, "base64");
-      uploadedFiles.set(cleanName, {
-        buffer,
-        mimeType: mimeType || "application/octet-stream",
-        uploadedBy: req.authUser!.employeeId,
-        // ⚠️ QP/เอกสารลับให้ client ส่ง restricted: true มาด้วยตอน implement จริง
-        restricted: restricted === true,
-      });
+  const ALLOWED_UPLOAD_EXTENSIONS: Record<string, string> = {
+    pdf: "application/pdf",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xls: "application/vnd.ms-excel",
+    csv: "text/csv",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    key: "application/octet-stream",
+    mp4: "video/mp4",
+    mov: "video/quicktime",
+    webm: "video/webm",
+    avi: "video/x-msvideo",
+    mkv: "video/x-matroska",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+  };
 
-      // เขียนลง filesystem จริง (ทั้ง buffer และ metadata) เพื่อให้ restricted flag
-      // รอดตอน server restart — ก่อนหน้านี้ uploadedFiles (in-memory Map) หายหมดตอน
-      // restart ทำให้ QP ที่ตั้งใจ restrict กลับอ่านได้แบบไม่จำกัดสิทธิ์
-      const uploadsDirs = [
-        path.join(process.cwd(), "public", "uploads"),
-        path.join(process.cwd(), "dist", "uploads"),
-      ];
-      const metaJson = JSON.stringify({
-        restricted: restricted === true,
-        uploadedBy: req.authUser!.employeeId,
-        mimeType: mimeType || "application/octet-stream",
-      });
-      uploadsDirs.forEach((dir) => {
-        try {
-          if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-          }
-          fs.writeFileSync(path.join(dir, cleanName), buffer);
-          fs.writeFileSync(path.join(dir, `${cleanName}.meta.json`), metaJson);
-        } catch (e) {
-          console.warn("Failed to write file to directory:", dir, e);
+  app.post(
+    "/api/upload",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const { filename, fileData } = req.body;
+        if (!filename || !fileData) {
+          return res
+            .status(400)
+            .json({ error: "filename and fileData are required" });
         }
-      });
+        const ext = filename.split(".").pop()?.toLowerCase() || "";
+        const resolvedMimeType = ALLOWED_UPLOAD_EXTENSIONS[ext];
+        if (!resolvedMimeType) {
+          return res.status(400).json({
+            error: "UNSUPPORTED_FILE_TYPE",
+            message: `ไม่รองรับไฟล์นามสกุล .${ext}`,
+          });
+        }
+        const buffer = Buffer.from(fileData, "base64");
+        // ชื่อไฟล์บนดิสก์เป็น uuid เสมอ — ไม่ใช้ชื่อไฟล์เดิมจาก client (กันชื่อชนกัน/แฝง path)
+        // restricted ตั้งค่าจริงตอนสร้าง/แก้ไข document record ที่อ้างอิงไฟล์นี้ (ดู syncFileRestriction)
+        const storedName = `${crypto.randomUUID()}.${ext}`;
+        uploadedFiles.set(storedName, {
+          buffer,
+          mimeType: resolvedMimeType,
+          uploadedBy: req.authUser!.employeeId,
+          restricted: false,
+        });
 
-      res.json({ url: `/uploads/${cleanName}`, filename: cleanName });
-    } catch (error: any) {
-      console.error("Upload error:", error);
-      res.status(500).json({ error: "Upload failed", message: error.message });
+        const uploadsDirs = [
+          path.join(process.cwd(), "public", "uploads"),
+          path.join(process.cwd(), "dist", "uploads"),
+        ];
+        const metaJson = JSON.stringify({
+          restricted: false,
+          uploadedBy: req.authUser!.employeeId,
+          mimeType: resolvedMimeType,
+        });
+        uploadsDirs.forEach((dir) => {
+          try {
+            if (!fs.existsSync(dir)) {
+              fs.mkdirSync(dir, { recursive: true });
+            }
+            fs.writeFileSync(path.join(dir, storedName), buffer);
+            fs.writeFileSync(
+              path.join(dir, `${storedName}.meta.json`),
+              metaJson,
+            );
+          } catch (e) {
+            console.warn("Failed to write file to directory:", dir, e);
+          }
+        });
+
+        res.json({ url: `/uploads/${storedName}`, filename: storedName });
+      } catch (error: any) {
+        console.error("Upload error:", error);
+        res
+          .status(500)
+          .json({ error: "Upload failed", message: error.message });
+      }
+    },
+  );
+
+  interface FileToken {
+    filename: string;
+    id: string;
+    employeeId: string;
+    role: string;
+  }
+
+  function signFileToken(filename: string, user: AuthPayload): string {
+    const payload: FileToken = {
+      filename,
+      id: user.id,
+      employeeId: user.employeeId,
+      role: user.role,
+    };
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: "15m" });
+  }
+
+  // สร้างลิงก์ชั่วคราวสำหรับฝังใน src/href ที่แนบ Authorization header เองไม่ได้
+  // (img, video, iframe, a) — เรียกใหม่ทุกครั้งที่จะแสดงไฟล์ ไม่บันทึกลิงก์นี้ไว้ถาวร
+  app.post("/api/files/sign", requireAuth, (req, res) => {
+    const { filename } = req.body;
+    if (
+      typeof filename !== "string" ||
+      !filename ||
+      filename.includes("/") ||
+      filename.includes("..")
+    ) {
+      return res.status(400).json({ error: "INVALID_FILENAME" });
     }
+    const token = signFileToken(filename, req.authUser!);
+    res.json({ url: `/uploads/${filename}?t=${token}` });
   });
 
+  // รับได้ทั้ง Authorization header ปกติ (เรียกผ่าน fetch/JS) หรือ query token
+  // จาก /api/files/sign (ใช้กับ src/href ที่แนบ header เองไม่ได้)
+  function fileRequestAuth(
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) {
+    const header = req.headers.authorization;
+    if (header && header.startsWith("Bearer ")) {
+      try {
+        req.authUser = jwt.verify(
+          header.slice("Bearer ".length),
+          JWT_SECRET,
+        ) as AuthPayload;
+        return next();
+      } catch {
+        // ตกไปลองทาง query token ต่อ
+      }
+    }
+    const queryToken = req.query.t;
+    if (typeof queryToken === "string") {
+      try {
+        const decoded = jwt.verify(queryToken, JWT_SECRET) as FileToken;
+        if (decoded.filename !== req.params.filename) {
+          return res.status(403).json({ error: "TOKEN_FILE_MISMATCH" });
+        }
+        req.authUser = {
+          id: decoded.id,
+          employeeId: decoded.employeeId,
+          role: decoded.role,
+        };
+        return next();
+      } catch {
+        return res.status(401).json({
+          error: "INVALID_TOKEN",
+          message: "ลิงก์หมดอายุ กรุณาเปิดหน้าใหม่",
+        });
+      }
+    }
+    return res
+      .status(401)
+      .json({ error: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบก่อนใช้งาน" });
+  }
+
   // Serve the uploaded files (ไฟล์ที่อัปโหลดแล้ว อ่านได้เมื่อ login เท่านั้น)
-  app.get("/uploads/:filename", requireAuth, (req, res) => {
+  app.get("/uploads/:filename", fileRequestAuth, (req, res) => {
     const filename = req.params.filename;
+    // sidecar metadata ไม่ใช่ไฟล์แนบที่ควรเปิดเผยให้ใครเรียกดูได้
+    if (filename.endsWith(".meta.json")) {
+      return res.status(403).json({ error: "FORBIDDEN" });
+    }
+
+    const sendWithHeaders = (buffer: Buffer, mimeType: string) => {
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      res.send(buffer);
+    };
+
     if (uploadedFiles.has(filename)) {
       const file = uploadedFiles.get(filename)!;
       if (
@@ -545,8 +671,7 @@ async function startServer() {
           message: "ไฟล์นี้จำกัดสิทธิ์เฉพาะผู้ดูแลระบบหรือผู้อัปโหลดเท่านั้น",
         });
       }
-      res.setHeader("Content-Type", file.mimeType);
-      return res.send(file.buffer);
+      return sendWithHeaders(file.buffer, file.mimeType);
     }
     // Try to read from filesystem (server restart case) — ต้องเช็ค restricted
     // จาก sidecar .meta.json ด้วย ไม่งั้นไฟล์ QP ที่ restricted จะเปิดอ่านได้ฟรี
@@ -559,9 +684,11 @@ async function startServer() {
       if (!fs.existsSync(filePath)) continue;
 
       const metaPath = path.join(dir, `${filename}.meta.json`);
+      let mimeType = "application/octet-stream";
       if (fs.existsSync(metaPath)) {
         try {
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+          mimeType = meta.mimeType || mimeType;
           if (
             meta.restricted &&
             req.authUser!.role !== "Admin" &&
@@ -577,7 +704,7 @@ async function startServer() {
           console.warn("Failed to parse upload metadata:", metaPath, e);
         }
       }
-      return res.sendFile(filePath);
+      return sendWithHeaders(fs.readFileSync(filePath), mimeType);
     }
     res.status(404).send("File not found");
   });
@@ -1061,14 +1188,54 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Documents APIs
   app.get("/api/documents", requireAuth, (req, res) => {
+    const role = req.authUser!.role;
+    // เอกสาร QP ที่ผู้เรียกไม่ใช่ Admin ต้องไม่เห็นเนื้อหาไฟล์ Excel ที่ฝังมากับ record
+    // (เดิมส่งให้ทุก role เสมอ ทำให้การล็อกไฟล์ตอนดาวน์โหลด/เปิดดูไม่มีความหมาย)
+    const sanitize = (doc: DocumentItem): DocumentItem => {
+      if (doc.type === "QP" && role !== "Admin") {
+        const { parsedExcelSheets, ...rest } = doc;
+        return rest as DocumentItem;
+      }
+      return doc;
+    };
     // Viewer เห็นเฉพาะเอกสารที่ Published เท่านั้น — ก่อนหน้านี้กรองแค่ฝั่ง client
     // (DocumentList.tsx) ทำให้ title/description/exampleText ของ Draft & Pending
     // หลุดไปถึง browser ของ Viewer อยู่ดี ต้องกรองที่ server ด้วย
-    if (req.authUser!.role === "Viewer") {
-      return res.json(db_documents.filter((d) => d.status === "Published"));
-    }
-    res.json(db_documents);
+    const visible =
+      role === "Viewer"
+        ? db_documents.filter((d) => d.status === "Published")
+        : db_documents;
+    res.json(visible.map(sanitize));
   });
+  // ตั้งค่า restricted ของไฟล์แนบให้ตรงกับประเภทเอกสารจริงตอนบันทึก/แก้ไข document
+  // (แทนการเดาจากนามสกุล/ชื่อไฟล์ตอนอัปโหลดแบบเดิม)
+  function syncFileRestriction(doc: DocumentItem) {
+    const url = doc.realFileUrl || doc.fileUrl;
+    if (!url || !url.startsWith("/uploads/")) return;
+    const storedName = url.replace("/uploads/", "").split("?")[0];
+    const shouldRestrict = doc.type === "QP";
+
+    const existing = uploadedFiles.get(storedName);
+    if (existing) {
+      existing.restricted = shouldRestrict;
+    }
+    const uploadsDirs = [
+      path.join(process.cwd(), "public", "uploads"),
+      path.join(process.cwd(), "dist", "uploads"),
+    ];
+    uploadsDirs.forEach((dir) => {
+      const metaPath = path.join(dir, `${storedName}.meta.json`);
+      if (!fs.existsSync(metaPath)) return;
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+        meta.restricted = shouldRestrict;
+        fs.writeFileSync(metaPath, JSON.stringify(meta));
+      } catch (e) {
+        console.warn("Failed to update file restriction metadata:", e);
+      }
+    });
+  }
+
   app.post(
     "/api/documents",
     requireAuth,
@@ -1083,6 +1250,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         newDoc.status = isAdmin ? "Published" : "Pending Approval";
         newDoc.approvedBy = isAdmin ? req.authUser!.employeeId : undefined;
         newDoc.approvedAt = isAdmin ? new Date().toISOString() : undefined;
+        // views/downloads นับที่ server เท่านั้น ไม่เชื่อค่าที่ client ส่งมา
+        newDoc.views = 0;
+        newDoc.downloads = 0;
+        syncFileRestriction(newDoc);
         db_documents.unshift(newDoc);
         res.json(newDoc);
       } catch (err: any) {
@@ -1105,11 +1276,16 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         const updatedDoc: DocumentItem = {
           ...req.body,
           id,
-          // Editor แก้เนื้อหาเอกสารได้ แต่ห้ามเปลี่ยนสถานะอนุมัติเองผ่านการแก้ไข
+          // Editor แก้เนื้อหาเอกสารได้ แต่ห้ามเปลี่ยนสถานะอนุมัติ ประเภทเอกสาร
+          // (QP/WI/FORM มีผลต่อ restricted flag ของไฟล์) หรือยอดวิว/ดาวน์โหลดเอง
           status: isAdmin ? req.body.status : existing.status,
           approvedBy: isAdmin ? req.body.approvedBy : existing.approvedBy,
           approvedAt: isAdmin ? req.body.approvedAt : existing.approvedAt,
+          type: isAdmin ? req.body.type : existing.type,
+          views: existing.views,
+          downloads: existing.downloads,
         };
+        syncFileRestriction(updatedDoc);
         db_documents = db_documents.map((d) => (d.id === id ? updatedDoc : d));
         res.json(updatedDoc);
       } catch (err: any) {

@@ -179,14 +179,14 @@ export default function App() {
           api.getRatings(),
           api.getUserProgress(),
           api.getExamResults(),
-          api.getSearchLogs(),
+          api.getSearchLogs().catch(() => undefined),
           api.getContactRequests(),
           api.getCustomResources(),
           api.getCompetencies(),
           api.getCertificates(),
           api.getContributionLogs(),
-          api.getEmployeeMaster(),
-          api.getAuditLogs(),
+          api.getEmployeeMaster().catch(() => undefined),
+          api.getAuditLogs().catch(() => undefined),
         ]);
 
         if (fetchedUsers) setUsers(fetchedUsers);

@@ -32,6 +32,7 @@ import {
   getAllDepartmentsFlat,
 } from "../utils/departmentUtils";
 import { api } from "../services/api";
+import { resolveSignedUrl } from "../utils/fileAccess";
 import * as XLSX from "xlsx";
 
 interface DocumentListProps {
@@ -177,6 +178,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   React.useEffect(() => {
     if (!isSecureViewerOpen) return;
 
+    document.body.classList.add("secure-viewer-active");
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Block Ctrl+P or Cmd+P (Print)
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
@@ -230,6 +233,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     window.addEventListener("selectstart", handleSelectStart);
 
     return () => {
+      document.body.classList.remove("secure-viewer-active");
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("copy", handleCopy);
@@ -344,12 +348,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     (async () => {
       try {
         const base64 = await fileToBase64(file);
-        const result = await api.uploadFile(
-          file.name,
-          base64,
-          file.type || "application/octet-stream",
-          suggestedDocType === "QP", // เอกสาร QP บังคับ restricted ตั้งแต่ต้น
-        );
+        const result = await api.uploadFile(file.name, base64);
         setUploadedFileServerUrl(result.url);
       } catch (err) {
         console.error("Real file upload failed:", err);
@@ -512,6 +511,23 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   const selectedDocComments = comments.filter(
     (c) => c.docOrKBId === selectedDocId,
   );
+  const [signedRealFileUrl, setSignedRealFileUrl] = useState<
+    string | undefined
+  >(undefined);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!selectedDoc?.realFileUrl) {
+      setSignedRealFileUrl(undefined);
+      return;
+    }
+    resolveSignedUrl(selectedDoc.realFileUrl).then((url) => {
+      if (!cancelled) setSignedRealFileUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDoc?.id, selectedDoc?.realFileUrl]);
 
   const qpCount = documents.filter((d) => d.type === "QP").length;
   const wiCount = documents.filter((d) => d.type === "WI").length;
@@ -959,7 +975,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                         {hasRealFile ? (
                           <a
                             id={`link-download-doc-${selectedDoc.id}`}
-                            href={selectedDoc.realFileUrl}
+                            href={signedRealFileUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={async () => {
@@ -2017,8 +2033,9 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                             >
                               <source
                                 src={
-                                  selectedDoc.realFileUrl ||
-                                  selectedDoc.exampleVideo
+                                  selectedDoc.realFileUrl
+                                    ? signedRealFileUrl
+                                    : selectedDoc.exampleVideo
                                 }
                                 type="video/mp4"
                               />
@@ -2058,7 +2075,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
                         <div className="border border-slate-300 rounded-lg overflow-hidden bg-slate-100 shadow-inner h-[500px]">
                           <iframe
-                            src={selectedDoc.realFileUrl}
+                            src={signedRealFileUrl}
                             className="w-full h-full border-0"
                             title="PDF Secure Preview"
                           />

@@ -14,8 +14,6 @@ import {
   UserCheck,
   Users,
   MessageSquare,
-  CheckCircle,
-  ExternalLink,
   Edit,
   Trash2,
   Plus,
@@ -66,9 +64,6 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
   // Message Form State
   const [contactTopic, setContactTopic] = useState("");
   const [contactMsg, setContactMsg] = useState("");
-
-  // Reply Simulator state
-  const [simulatedReply, setSimulatedReply] = useState("");
 
   // Admin CRUD states
   const [isAddOpen, setIsAddOpen] = useState(false);
