@@ -38,6 +38,7 @@ export interface DocumentItem {
   description: string;
   type: DocType;
   departmentId: string;
+  allowedDepartmentIds?: string[];
   owner: string;
   revision: number;
   effectiveDate: string;

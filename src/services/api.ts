@@ -358,4 +358,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(log),
     }),
+  // AI Semantic RAG Chat API
+  chat: (query: string) =>
+    request<{
+      responseText: string;
+      citations?: Array<{
+        id: string;
+        title: string;
+        type: string;
+        content: string;
+      }>;
+    }>("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ query }),
+    }),
 };
