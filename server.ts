@@ -45,6 +45,7 @@ import {
   KMContributionLog,
   AttendanceLog,
   TrainingSession,
+  QuizSubmission,
 } from "./src/types";
 
 dotenv.config();
@@ -278,6 +279,156 @@ async function startServer() {
   let db_system_audit_logs: SystemAuditLog[] = [];
   let db_attendance_logs: AttendanceLog[] = [];
   let db_training_sessions: TrainingSession[] = [];
+  let db_quiz_submissions: QuizSubmission[] = [];
+
+  // --- Quiz grading helpers: server เป็นผู้ตัดสินคะแนนเท่านั้น ไม่เชื่อค่าที่ client ส่ง ---
+  // ตรวจข้อที่ตรวจอัตโนมัติได้ (SingleChoice / TrueFalse / Matching) — Essay ไม่ผ่านฟังก์ชันนี้
+  function isObjectiveCorrect(
+    q: Course["quiz"][number],
+    answer: string | undefined,
+  ): boolean {
+    if (typeof answer !== "string" || !answer) return false;
+    if ((q.type || "SingleChoice") === "Matching") {
+      try {
+        const userMap = JSON.parse(answer);
+        const correctMap = JSON.parse(q.correctAnswer || "{}");
+        const keys = Object.keys(correctMap);
+        return (
+          keys.length > 0 && keys.every((k) => userMap[k] === correctMap[k])
+        );
+      } catch {
+        return false;
+      }
+    }
+    return answer === q.correctAnswer;
+  }
+
+  // ปิดผลสอบ: สร้าง exam_result และตั้ง Completed (เมื่อผ่าน) — เรียกเมื่อไม่มี Essay
+  // หรือเมื่อผู้ตรวจให้คะแนน Essay ครบแล้ว (ก้อนที่ 2 จะต่อ XP/ใบเซอร์ในฟังก์ชันนี้)
+  function finalizeSubmission(
+    sub: QuizSubmission,
+    course: Course,
+    reviewerEmployeeId?: string,
+  ) {
+    const essayCorrect = sub.essayGrades.filter((g) => g.correct).length;
+    const total = sub.autoTotal + sub.essayQuestionIds.length;
+    const score = Math.round(((sub.autoCorrect + essayCorrect) / total) * 100);
+    const pass = score >= course.minPassScore;
+    const nowIso = new Date().toISOString();
+
+    sub.status = "Finalized";
+    sub.score = score;
+    sub.pass = pass;
+    if (reviewerEmployeeId) {
+      sub.reviewedBy = reviewerEmployeeId;
+      sub.reviewedAt = nowIso;
+    }
+
+    // เช็คก่อนเพิ่มผลสอบครั้งนี้ ว่าเคยสอบผ่านหลักสูตรนี้มาก่อนหรือไม่ (ใช้กำหนดว่าจะให้ XP)
+    const passedBefore = db_exam_results.some(
+      (e) =>
+        e.employeeId === sub.employeeId &&
+        e.courseId === sub.courseId &&
+        e.pass,
+    );
+
+    db_exam_results.unshift({
+      id: `ex-${crypto.randomUUID()}`,
+      submissionId: sub.id,
+      employeeName: sub.userName,
+      employeeId: sub.employeeId,
+      courseId: sub.courseId,
+      courseTitle: sub.courseTitle,
+      score,
+      pass,
+      date: nowIso.split("T")[0],
+    });
+
+    if (pass) {
+      const idx = db_user_progress.findIndex(
+        (p) => p.userId === sub.userId && p.courseId === sub.courseId,
+      );
+      if (idx !== -1) {
+        db_user_progress[idx] = {
+          ...db_user_progress[idx],
+          status: "Completed",
+          score,
+          completedDate: nowIso,
+          attemptsCount: db_user_progress[idx].attemptsCount + 1,
+        };
+      } else {
+        db_user_progress.push({
+          id: `prog-${crypto.randomUUID()}`,
+          userId: sub.userId,
+          courseId: sub.courseId,
+          status: "Completed",
+          score,
+          startDate: nowIso,
+          completedDate: nowIso,
+          attemptsCount: 1,
+          totalStudyMinutes: 0,
+        });
+      }
+
+      // XP: ให้เฉพาะการสอบผ่านครั้งแรกของหลักสูตรนั้น กันเก็บ XP ซ้ำจากการสอบซ้ำ
+      if (!passedBefore) {
+        const isPerfect = score === 100;
+        db_km_contribution_logs.unshift({
+          id: `km-log-${crypto.randomUUID()}`,
+          userId: sub.userId,
+          userName: sub.userName,
+          points: isPerfect ? 30 : 20,
+          activityType: isPerfect ? "COURSE_PERFECT" : "COURSE_PASS",
+          description: isPerfect
+            ? `อบรมผ่านหลักสูตร "${sub.courseTitle}" ด้วยคะแนนเต็ม 100%`
+            : `สอบผ่านหลักสูตร "${sub.courseTitle}" ด้วยคะแนน ${score}%`,
+          timestamp: nowIso,
+        });
+      }
+
+      // ต่ออายุใบรับรองที่ผูกกับหลักสูตรนี้ทุกครั้งที่สอบผ่าน (รวมสอบซ้ำเพื่อต่ออายุ)
+      const todayStr = nowIso.split("T")[0];
+      const nextYearStr = new Date(Date.now() + 365 * 24 * 3600 * 1000)
+        .toISOString()
+        .split("T")[0];
+      db_user_certificates = db_user_certificates.map((cert) =>
+        cert.userId === sub.userId && cert.courseId === sub.courseId
+          ? {
+              ...cert,
+              issueDate: todayStr,
+              expiryDate: nextYearStr,
+              status: "Valid" as const,
+              daysRemaining: 365,
+            }
+          : cert,
+      );
+    }
+  }
+
+  // ตัดเฉลยออกจากคอร์สก่อนส่งให้ Viewer
+  // Matching: pairs คือเฉลยเอง จึงส่งเฉพาะฝั่งซ้าย และสลับตัวเลือกฝั่งขวาใน options
+  function stripQuizAnswers(course: Course): Course {
+    return {
+      ...course,
+      quiz: (course.quiz || []).map((q) => {
+        const { correctAnswer, ...rest } = q;
+        if (q.type === "Matching" && q.pairs) {
+          const rights = q.pairs.map((p) => p.right);
+          for (let i = rights.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [rights[i], rights[j]] = [rights[j], rights[i]];
+          }
+          return {
+            ...rest,
+            correctAnswer: "",
+            pairs: q.pairs.map((p) => ({ left: p.left, right: "" })),
+            options: rights,
+          };
+        }
+        return { ...rest, correctAnswer: "" };
+      }),
+    };
+  }
 
   // Add JSON parsing middleware up to 50MB to handle document corpus payloads and file uploads safely
   app.use(express.json({ limit: "50mb" }));
@@ -295,7 +446,7 @@ async function startServer() {
   >();
   const LOGIN_MAX_ATTEMPTS = 5;
   const LOGIN_WINDOW_MS = 10 * 60 * 1000; // 10 นาที
-  const LOGIN_LOCKOUT_MS = 15 * 60 * 1000; // ล็อก 15 นาทีหลังพยายามเกิน
+  const LOGIN_LOCKOUT_MS = 5 * 60 * 1000; // ล็อก 15 นาทีหลังพยายามเกิน
 
   function getLoginKey(req: express.Request, employeeId: string): string {
     // ผูกกับ employeeId + IP เพื่อไม่ให้คนอื่นโดนล็อกร่วมกันถ้าใช้ NAT/proxy เดียวกัน
@@ -1359,10 +1510,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Courses APIs
   app.get("/api/courses", requireAuth, (req, res) => {
-    // Viewer ไม่ควรเห็นคอร์สที่ยังไม่อนุมัติเลย (รวมถึง quiz.correctAnswer ที่แนบมาด้วย)
-    // เดิมกรองแค่ฝั่ง client (LearningCenter.tsx) ซึ่งข้อมูลจริงถูกส่งมาแล้วตั้งแต่ API
+    // Viewer ไม่เห็นคอร์สที่ยังไม่อนุมัติ และไม่ได้รับเฉลยข้อสอบ (ตรวจที่ server ผ่าน submit-quiz)
+    // Admin/Editor ยังได้เฉลยครบ เพราะต้องใช้แก้ไขหลักสูตรและตรวจข้อ Essay
     if (req.authUser!.role === "Viewer") {
-      return res.json(db_courses.filter((c) => c.isApproved !== false));
+      return res.json(
+        db_courses.filter((c) => c.isApproved !== false).map(stripQuizAnswers),
+      );
     }
     res.json(db_courses);
   });
@@ -1418,6 +1571,197 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         const { id } = req.params;
         db_courses = db_courses.filter((c) => c.id !== id);
         res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+
+  // ส่งข้อสอบ: server ตรวจเอง — ปรนัย/ถูก-ผิด/จับคู่ตัดสินทันที
+  // ถ้ามีข้อ Essay จะเป็น PendingReview จนกว่าผู้ตรวจให้คะแนนครบ (ก้อนที่ 2)
+  app.post("/api/courses/:id/submit-quiz", requireAuth, (req, res) => {
+    try {
+      const course = db_courses.find((c) => c.id === req.params.id);
+      if (!course) {
+        return res
+          .status(404)
+          .json({ error: "NOT_FOUND", message: "ไม่พบหลักสูตร" });
+      }
+      if (course.isApproved === false && req.authUser!.role !== "Admin") {
+        return res.status(403).json({
+          error: "COURSE_NOT_APPROVED",
+          message: "หลักสูตรนี้ยังไม่ได้รับการอนุมัติ",
+        });
+      }
+      const user = db_users.find((u) => u.id === req.authUser!.id);
+      if (
+        !user ||
+        user.status === "Suspended" ||
+        user.status === "Terminated"
+      ) {
+        return res.status(403).json({
+          error: "ACCOUNT_INACTIVE",
+          message: "บัญชีนี้ไม่สามารถส่งข้อสอบได้",
+        });
+      }
+      if (!course.quiz || course.quiz.length === 0) {
+        return res.status(400).json({
+          error: "NO_QUIZ",
+          message: "หลักสูตรนี้ยังไม่มีข้อสอบ",
+        });
+      }
+      const alreadyPending = db_quiz_submissions.some(
+        (s) =>
+          s.userId === user.id &&
+          s.courseId === course.id &&
+          s.status === "PendingReview",
+      );
+      if (alreadyPending) {
+        return res.status(409).json({
+          error: "ALREADY_PENDING",
+          message: "คุณส่งข้อสอบหลักสูตรนี้ไปแล้วและกำลังรอผู้ตรวจข้อ Essay",
+        });
+      }
+
+      const rawAnswers =
+        req.body.answers && typeof req.body.answers === "object"
+          ? req.body.answers
+          : {};
+      const answers: { [qId: string]: string } = {};
+      const essayQuestionIds: string[] = [];
+      let autoCorrect = 0;
+      let autoTotal = 0;
+      course.quiz.forEach((q) => {
+        const a =
+          typeof rawAnswers[q.id] === "string"
+            ? rawAnswers[q.id].slice(0, 5000)
+            : "";
+        answers[q.id] = a;
+        if ((q.type || "SingleChoice") === "Essay") {
+          essayQuestionIds.push(q.id);
+        } else {
+          autoTotal++;
+          if (isObjectiveCorrect(q, a)) autoCorrect++;
+        }
+      });
+
+      // ข้อมูลผู้ส่งมาจาก DB ตาม token เสมอ ไม่ใช่จาก body
+      const sub: QuizSubmission = {
+        id: `qs-${crypto.randomUUID()}`,
+        userId: user.id,
+        userName: user.name,
+        employeeId: user.employeeId,
+        courseId: course.id,
+        courseTitle: course.title,
+        answers,
+        autoCorrect,
+        autoTotal,
+        essayQuestionIds,
+        essayGrades: [],
+        status: "PendingReview",
+        submittedAt: new Date().toISOString(),
+      };
+      db_quiz_submissions.unshift(sub);
+
+      if (essayQuestionIds.length === 0) {
+        finalizeSubmission(sub, course);
+      }
+
+      res.json({
+        submissionId: sub.id,
+        status: sub.status,
+        score: sub.score,
+        pass: sub.pass,
+        pendingEssayCount: essayQuestionIds.length,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // รายการข้อสอบที่ส่งเข้ามา — Admin/Editor เห็นทั้งหมด (ทุกแผนก), คนอื่นเห็นเฉพาะของตัวเอง
+  app.get("/api/quiz_submissions", requireAuth, (req, res) => {
+    const role = req.authUser!.role;
+    if (role === "Admin" || role === "Editor") {
+      return res.json(db_quiz_submissions);
+    }
+    res.json(db_quiz_submissions.filter((s) => s.userId === req.authUser!.id));
+  });
+
+  // ผู้ตรวจให้คะแนนข้อ Essay ครบทุกข้อในครั้งเดียว → ปิดผลสอบ
+  app.post(
+    "/api/quiz_submissions/:id/grade",
+    requireAuth,
+    requireRole("Admin", "Editor"),
+    (req, res) => {
+      try {
+        const sub = db_quiz_submissions.find((s) => s.id === req.params.id);
+        if (!sub) {
+          return res
+            .status(404)
+            .json({ error: "NOT_FOUND", message: "ไม่พบรายการข้อสอบ" });
+        }
+        if (sub.status !== "PendingReview") {
+          return res.status(409).json({
+            error: "ALREADY_FINALIZED",
+            message: "รายการนี้ถูกตรวจและปิดผลไปแล้ว ไม่สามารถตรวจซ้ำได้",
+          });
+        }
+        // ห้ามตรวจงานตัวเอง (กันให้คะแนนตัวเอง)
+        if (sub.userId === req.authUser!.id) {
+          return res.status(403).json({
+            error: "SELF_REVIEW_FORBIDDEN",
+            message: "ไม่สามารถตรวจข้อสอบของตัวเองได้",
+          });
+        }
+        const course = db_courses.find((c) => c.id === sub.courseId);
+        if (!course) {
+          return res.status(404).json({
+            error: "COURSE_NOT_FOUND",
+            message: "ไม่พบหลักสูตรของข้อสอบนี้ (อาจถูกลบไปแล้ว)",
+          });
+        }
+
+        // ต้องให้คะแนนครบทุกข้อ Essay พอดี ไม่ขาด ไม่เกิน ไม่ซ้ำ
+        const incoming = Array.isArray(req.body.grades) ? req.body.grades : [];
+        const grades = incoming.map((g: any) => ({
+          questionId: String(g?.questionId || ""),
+          correct: g?.correct,
+          comment:
+            typeof g?.comment === "string"
+              ? g.comment.trim().slice(0, 1000) || undefined
+              : undefined,
+        }));
+        const gradedIds = grades.map((g: any) => g.questionId);
+        const coversAll =
+          gradedIds.length === sub.essayQuestionIds.length &&
+          new Set(gradedIds).size === gradedIds.length &&
+          sub.essayQuestionIds.every((id) => gradedIds.includes(id));
+        if (
+          !coversAll ||
+          grades.some((g: any) => typeof g.correct !== "boolean")
+        ) {
+          return res.status(400).json({
+            error: "INCOMPLETE_GRADES",
+            message: "ต้องให้คะแนนข้อ Essay ให้ครบทุกข้อ (ถูก/ผิด) ก่อนปิดผล",
+          });
+        }
+
+        sub.essayGrades = grades;
+        finalizeSubmission(sub, course, req.authUser!.employeeId);
+
+        const reviewer = db_users.find((u) => u.id === req.authUser!.id);
+        db_system_audit_logs.unshift({
+          id: `log-${crypto.randomUUID()}`,
+          action: "GRADE_ESSAY",
+          details: `ตรวจข้อสอบ Essay: ${sub.userName} (${sub.employeeId}) หลักสูตร "${sub.courseTitle}" คะแนน ${sub.score}% (${sub.pass ? "ผ่าน" : "ไม่ผ่าน"})`,
+          performedBy: reviewer
+            ? `${reviewer.name} (${reviewer.employeeId})`
+            : req.authUser!.employeeId,
+          timestamp: new Date().toISOString(),
+        });
+
+        res.json(sub);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -1583,19 +1927,47 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     requireOwnField("userId"),
     (req, res) => {
       try {
+        const isAdmin = req.authUser!.role === "Admin";
         const prog = req.body;
-        if (!prog.id) {
-          prog.id = `prog-${Date.now()}`;
+
+        if (isAdmin) {
+          // Admin แก้ไขบันทึกได้ตรงๆ (กรณีแก้ข้อมูลด้วยมือ)
+          if (!prog.id) {
+            prog.id = `prog-${Date.now()}`;
+          }
+          const idx = db_user_progress.findIndex(
+            (p) => p.userId === prog.userId && p.courseId === prog.courseId,
+          );
+          if (idx !== -1) {
+            db_user_progress[idx] = prog;
+          } else {
+            db_user_progress.push(prog);
+          }
+          return res.json(prog);
         }
-        const idx = db_user_progress.findIndex(
-          (p) => p.userId === prog.userId && p.courseId === prog.courseId,
+
+        // ผู้เรียนทั่วไปทำได้แค่ "เริ่มเรียน" — Completed/score/attempts ตั้งโดย server ตอนปิดผลสอบเท่านั้น
+        if (!db_courses.some((c) => c.id === prog.courseId)) {
+          return res
+            .status(400)
+            .json({ error: "INVALID_COURSE", message: "ไม่พบหลักสูตร" });
+        }
+        const existing = db_user_progress.find(
+          (p) => p.userId === req.authUser!.id && p.courseId === prog.courseId,
         );
-        if (idx !== -1) {
-          db_user_progress[idx] = prog;
-        } else {
-          db_user_progress.push(prog);
-        }
-        res.json(prog);
+        if (existing) return res.json(existing);
+
+        const created: UserCourseProgress = {
+          id: `prog-${crypto.randomUUID()}`,
+          userId: req.authUser!.id,
+          courseId: prog.courseId,
+          status: "Learning",
+          startDate: new Date().toISOString(),
+          attemptsCount: 0,
+          totalStudyMinutes: 0,
+        };
+        db_user_progress.push(created);
+        res.json(created);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -1609,7 +1981,8 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.post(
     "/api/exam_results",
     requireAuth,
-    requireOwnField("employeeId"),
+    // ผลสอบสร้างโดย server ผ่าน submit-quiz เท่านั้น — endpoint นี้เหลือไว้ให้ Admin แก้ข้อมูลด้วยมือ
+    requireRole("Admin"),
     (req, res) => {
       try {
         const result = req.body;

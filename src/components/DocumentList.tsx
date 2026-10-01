@@ -1010,25 +1010,25 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   );
                 })()
               )}
-              {selectedDoc.type === "QP" && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const updated = await api.viewDocument(selectedDoc.id);
-                      onUpdateDocument(updated);
-                    } catch (err) {
-                      console.error("Failed to record view count:", err);
-                    }
-                    setIsSecureViewerOpen(true);
-                  }}
-                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition text-[10px] cursor-pointer border border-slate-200"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  เปิดอ่านระบบตรวจสอบความมั่นคงปลอดภัย (Admin Secure Viewer)
-                </button>
-              )}
-
+              {/* เปิดให้กดอ่านในระบบได้สำหรับเอกสารทุกประเภท (QP, WI, FORM) */}
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const updated = await api.viewDocument(selectedDoc.id);
+                    onUpdateDocument(updated);
+                  } catch (err) {
+                    console.error("Failed to record view count:", err);
+                  }
+                  setIsSecureViewerOpen(true);
+                }}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition text-[10px] cursor-pointer border border-slate-200"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                {selectedDoc.type === "QP"
+                  ? "เปิดอ่านระบบตรวจสอบความมั่นคงปลอดภัย (Admin Secure Viewer)"
+                  : `เปิดอ่านเอกสาร ${selectedDoc.type} ในระบบ (Online Viewer)`}
+              </button>
               {/* RATING & REVISION FEEDBACK SECTION */}
               <div className="border-t border-slate-100 pt-4 space-y-3">
                 <div className="flex items-center justify-between">

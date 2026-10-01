@@ -295,3 +295,45 @@ export interface UserKMPoints {
   points: number;
   level: number; // 1 to 5 based on points
 }
+
+// --- Quiz submission & manual Essay review ---
+// ข้อสอบที่มีข้อ Essay จะยังไม่มี exam_result/Completed จนกว่าผู้ตรวจจะให้คะแนนครบทุกข้อ Essay
+export type QuizSubmissionStatus = "PendingReview" | "Finalized";
+
+export interface EssayGrade {
+  questionId: string;
+  correct: boolean;
+  comment?: string;
+}
+
+export interface QuizSubmission {
+  id: string;
+  userId: string;
+  userName: string;
+  employeeId: string;
+  courseId: string;
+  courseTitle: string;
+  answers: { [questionId: string]: string };
+  // ผลข้อที่ server ตรวจอัตโนมัติ (ปรนัย / ถูก-ผิด / จับคู่)
+  autoCorrect: number;
+  autoTotal: number;
+  // ข้อ Essay ที่รอผู้ตรวจ และผลที่ตรวจแล้ว
+  essayQuestionIds: string[];
+  essayGrades: EssayGrade[];
+  status: QuizSubmissionStatus;
+  // มีค่าเมื่อ status = "Finalized" เท่านั้น
+  score?: number;
+  pass?: boolean;
+  submittedAt: string;
+  reviewedBy?: string; // employeeId ของผู้ตรวจ
+  reviewedAt?: string;
+}
+
+// ผลที่ POST /api/courses/:id/submit-quiz ตอบกลับพนักงาน
+export interface QuizSubmitResult {
+  submissionId: string;
+  status: QuizSubmissionStatus;
+  score?: number;
+  pass?: boolean;
+  pendingEssayCount: number;
+}

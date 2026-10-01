@@ -39,10 +39,9 @@ import {
   CustomResource,
   EmployeeMaster,
   SystemAuditLog,
-  CertStatus,
 } from "./types";
 
-import { api, setAuthToken } from "./services/api";
+import { api, setAuthToken, getApiErrorMessage } from "./services/api";
 import { getDepartmentById } from "./utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "./utils/assets";
 
@@ -287,14 +286,13 @@ export default function App() {
             : `เช็คชื่อสำเร็จ: ${log.sessionName}`,
         });
       } catch (err: any) {
-        const match = err?.message?.match(/API Error: \d+ .+ - (.+)/);
-        let msg = "เช็คชื่อไม่สำเร็จ QR อาจหมดอายุหรือไม่ถูกต้อง";
-        if (match) {
-          try {
-            msg = JSON.parse(match[1]).message || msg;
-          } catch {}
-        }
-        setCheckinResult({ status: "error", message: msg });
+        setCheckinResult({
+          status: "error",
+          message: getApiErrorMessage(
+            err,
+            "เช็คชื่อไม่สำเร็จ QR อาจหมดอายุหรือไม่ถูกต้อง",
+          ),
+        });
       }
     })();
   }, [isLogged]);
@@ -577,58 +575,27 @@ export default function App() {
     }
   };
 
-  // Onboarding & LMS: Register user exam score
-  const handleAddExamResult = async (result: any) => {
-    setExamResults((prev) => [result, ...prev]);
+  // Onboarding & LMS: หลังส่ง/ปิดผลข้อสอบ — server เป็นผู้บันทึกผลสอบ ความคืบหน้า XP และต่ออายุใบเซอร์แล้ว
+  // client แค่โหลดข้อมูลชุดนี้ใหม่เพื่อให้หน้าจอตรงกับ server
+  const handleQuizFinalized = async () => {
     try {
-      await api.createExamResult(result);
+      const [
+        fetchedExamResults,
+        fetchedProgress,
+        fetchedContribLogs,
+        fetchedCerts,
+      ] = await Promise.all([
+        api.getExamResults(),
+        api.getUserProgress(),
+        api.getContributionLogs(),
+        api.getCertificates(),
+      ]);
+      if (fetchedExamResults) setExamResults(fetchedExamResults);
+      if (fetchedProgress) setUserProgress(fetchedProgress);
+      if (fetchedContribLogs) setKmContributionLogs(fetchedContribLogs);
+      if (fetchedCerts) setUserCertificates(fetchedCerts);
     } catch (e) {
-      console.error(e);
-    }
-
-    // Check if result is perfect score or passing to trigger Gamification & Certificate Renewal
-    if (
-      result.pass &&
-      currentUser &&
-      result.employeeId === currentUser.employeeId
-    ) {
-      const isPerfect = result.score === 100;
-      const pts = isPerfect ? 30 : 20;
-      const actType = isPerfect ? "COURSE_PERFECT" : "COURSE_PASS";
-      const desc = isPerfect
-        ? `อบรมผ่านหลักสูตร "${result.courseTitle}" ด้วยคะแนนเต็ม 100% ประสบผลสำเร็จระดับยอดเยี่ยม!`
-        : `สอบผ่านประเมินความรู้คุณภาพคอร์ส "${result.courseTitle}" เกรด ${result.score}%`;
-
-      awardPoints(currentUser.id, actType, pts, desc);
-
-      // --- CRITICAL INTEGRATION: Also update the EXPIRY of certificates associated with this course ---
-      const todayStr = new Date().toISOString().split("T")[0];
-      const nextYearStr = new Date(Date.now() + 365 * 24 * 3600 * 1000)
-        .toISOString()
-        .split("T")[0];
-
-      const updatedCerts = userCertificates.map((cert) => {
-        if (
-          cert.userId === currentUser.id &&
-          cert.courseId === result.courseId
-        ) {
-          return {
-            ...cert,
-            issueDate: todayStr,
-            expiryDate: nextYearStr,
-            status: "Valid" as CertStatus,
-            daysRemaining: 365,
-          };
-        }
-        return cert;
-      });
-
-      setUserCertificates(updatedCerts);
-      try {
-        await api.saveCertificates(updatedCerts);
-      } catch (e) {
-        console.error(e);
-      }
+      console.error("Failed to refresh learning data after quiz:", e);
     }
   };
 
@@ -669,8 +636,8 @@ export default function App() {
           startDate: new Date().toISOString(),
           completedDate:
             status === "Completed" ? new Date().toISOString() : undefined,
-          attemptsCount: 1,
-          totalStudyMinutes: 45,
+          attemptsCount: 0,
+          totalStudyMinutes: 0,
         };
         updatedProg = newProg;
         return [...prev, newProg];
@@ -1039,17 +1006,9 @@ export default function App() {
       setMobileMenuOpen(false);
     } catch (error: any) {
       // ดึง message จริงจาก server (รองรับทั้ง invalid credentials และ rate limit)
-      const match = error?.message?.match(/API Error: \d+ .+ - (.+)/);
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[1]);
-          setLoginError(parsed.message || "รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง");
-        } catch {
-          setLoginError("รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง");
-        }
-      } else {
-        setLoginError("รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง");
-      }
+      setLoginError(
+        getApiErrorMessage(error, "รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง"),
+      );
     }
   };
 
@@ -1747,7 +1706,7 @@ export default function App() {
                   courses={courses}
                   userProgressList={userProgress}
                   examResults={examResults}
-                  onAddExamResult={handleAddExamResult}
+                  onQuizFinalized={handleQuizFinalized}
                   onUpdateUserProgress={handleUpdateUserProgress}
                   onAddCourse={handleAddCourse}
                   onUpdateCourse={handleUpdateCourse}

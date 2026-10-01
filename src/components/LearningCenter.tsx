@@ -48,9 +48,11 @@ import {
   KMContributionLog,
   DocumentItem,
   AttendanceLog,
+  QuizSubmission,
+  QuizSubmitResult,
 } from "../types";
 import { getUserBadges } from "../utils/badgeUtils";
-import { api } from "../services/api";
+import { api, getApiErrorMessage } from "../services/api";
 import QRCode from "qrcode";
 import { TrainingSession } from "../types";
 import { BadgePill, UserBadgesGrid } from "./BadgeDisplay";
@@ -69,15 +71,8 @@ interface LearningCenterProps {
   courses: Course[];
   userProgressList: UserCourseProgress[];
   examResults: any[];
-  onAddExamResult: (result: {
-    employeeName: string;
-    employeeId: string;
-    courseId: string;
-    courseTitle: string;
-    score: number;
-    pass: boolean;
-    date: string;
-  }) => void;
+  // server บันทึกผลสอบเอง (submit-quiz) — App ส่ง callback นี้มาเพื่อโหลดผลสอบ/XP/ใบเซอร์ใหม่หลังส่งข้อสอบ
+  onQuizFinalized?: () => void;
   onUpdateUserProgress: (
     userId: string,
     courseId: string,
@@ -121,7 +116,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
   courses,
   userProgressList,
   examResults,
-  onAddExamResult,
+  onQuizFinalized,
   onUpdateUserProgress,
   onAddCourse,
   onUpdateCourse,
@@ -139,7 +134,13 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 }) => {
   // Main SubTabs for learning
   const [activeSubTab, setActiveSubTab] = useState<
-    "onboarding" | "general" | "competency" | "career-ai" | "qr" | "transcript"
+    | "onboarding"
+    | "general"
+    | "competency"
+    | "career-ai"
+    | "qr"
+    | "transcript"
+    | "review"
   >("onboarding");
 
   // Badge calculations for the current user
@@ -183,10 +184,18 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
   );
   const [isTakingQuiz, setIsTakingQuiz] = useState<boolean>(false);
   const [quizAnswers, setQuizAnswers] = useState<{ [qId: string]: string }>({});
-  const [essayAnswer, setEssayAnswer] = useState<string>("");
   const [quizScore, setQuizScore] = useState<number | null>(null);
   const [quizPassed, setQuizPassed] = useState<boolean | null>(null);
-
+  const [isSubmittingQuiz, setIsSubmittingQuiz] = useState<boolean>(false);
+  const [quizSubmitError, setQuizSubmitError] = useState<string>("");
+  const [quizSubmissions, setQuizSubmissions] = useState<QuizSubmission[]>([]);
+  // แท็บตรวจข้อสอบอัตนัย (Admin/Editor)
+  const [reviewSubmissionId, setReviewSubmissionId] = useState<string>("");
+  const [gradeDraft, setGradeDraft] = useState<{
+    [qId: string]: { correct: boolean | null; comment: string };
+  }>({});
+  const [isSavingGrade, setIsSavingGrade] = useState<boolean>(false);
+  const [gradeError, setGradeError] = useState<string>("");
   // Certificate viewer states
   const [showCertificate, setShowCertificate] = useState<boolean>(false);
   const [certificateCourseOverride, setCertificateCourseOverride] =
@@ -312,7 +321,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
     type: "Onboarding" as "Onboarding" | "General",
     durationMinutes: "" as number | "",
     minPassScore: 80,
-    targetPositions: ["Warehouse Staff"] as string[],
+    targetPositions: [] as string[],
     lessonTitle: "บทเรียนย่อยที่ 1: ขั้นตอนสากลและการจัดสรรงานเบื้องต้น",
     lessonContent:
       "รายละเอียดวาระเนื้อหาประกอบการศึกษา พนักงานต้องเข้าใจเกณฑ์คุณภาพ คู่มือ ISO9001 และระเบียบขั้นตอนการทำงาน...",
@@ -323,11 +332,9 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       | "TrueFalse"
       | "Matching"
       | "Essay",
-    quizQuestion:
-      "พนักงานทุกคนต้องปฏิบัติตามมาตรฐานคู่มือปฏิบัติงาน (WI) อย่างเคร่งครัดหรือไม่?",
-    quizOptionsStr:
-      "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ\nไม่จำเป็นใดๆ\nขึ้นอยู่กับความเร่งของรอบกะผลิต",
-    quizCorrectAnswer: "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ",
+    quizQuestion: "",
+    quizOptionsStr: "",
+    quizCorrectAnswer: "",
     simulatedFileName: "",
     isSimulatedUploading: false,
   });
@@ -396,6 +403,20 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
   useEffect(() => {
     fetchTrainingSessions();
+  }, []);
+
+  // ข้อสอบที่ส่งแล้ว (Admin/Editor ได้ทั้งหมด, Viewer ได้เฉพาะของตัวเอง)
+  const fetchQuizSubmissions = async () => {
+    try {
+      const list = await api.getQuizSubmissions();
+      setQuizSubmissions(list || []);
+    } catch (err) {
+      console.error("Failed to load quiz submissions:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchQuizSubmissions();
   }, []);
 
   // สร้างลิงก์เช็คอินจาก token แล้ววาดเป็น QR จริงด้วย library qrcode
@@ -489,6 +510,27 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       e.courseId === selectedCourse?.id,
   );
 
+  // ข้อสอบของฉันที่ส่งแล้วแต่ยังรอผู้ตรวจ Essay (มาจาก server ไม่ใช่ state ชั่วคราว)
+  const myPendingSubmission = quizSubmissions.find(
+    (s) =>
+      s.userId === currentUser.id &&
+      s.courseId === selectedCourse?.id &&
+      s.status === "PendingReview",
+  );
+  const isQuizPending = !!myPendingSubmission;
+
+  // คิวตรวจข้อสอบ: Admin/Editor ตรวจได้ทุกแผนก เรียงจากส่งก่อนไปหลัง
+  const canReview =
+    currentUser.role === "Admin" || currentUser.role === "Editor";
+  const pendingReviewList = quizSubmissions
+    .filter((s) => s.status === "PendingReview")
+    .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+  const reviewedHistory = quizSubmissions
+    .filter((s) => s.status === "Finalized" && s.essayQuestionIds.length > 0)
+    .slice(0, 10);
+  const reviewingSubmission = pendingReviewList.find(
+    (s) => s.id === reviewSubmissionId,
+  );
   // คะแนนที่จะแสดงบนใบเซอร์ — ใช้ผลสอบจริงเท่านั้น ห้าม fallback เป็นตัวเลขลวง (เช่น 100)
   // เพราะจะทำให้ใบเซอร์ที่ยังไม่มีผลสอบจริงดูเหมือนสอบได้เต็มโดยไม่ได้ตั้งใจ
   const displayScoreText = (): string => {
@@ -582,68 +624,67 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
   const handleResetQuiz = () => {
     setQuizAnswers({});
-    setEssayAnswer("");
     setQuizScore(null);
     setQuizPassed(null);
   };
 
-  const handleQuizSubmit = (e: React.FormEvent) => {
+  const handleQuizSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCourse) return;
+    if (!selectedCourse || isSubmittingQuiz) return;
 
-    // Gradings
-    let correctCount = 0;
-    questions.forEach((q) => {
-      const qType = q.type || "SingleChoice";
-      if (qType === "Matching") {
-        try {
-          const userMap = JSON.parse(quizAnswers[q.id] || "{}");
-          const correctMap = JSON.parse(q.correctAnswer || "{}");
-          const keys = Object.keys(correctMap);
-          const isAllCorrect =
-            keys.length > 0 && keys.every((k) => userMap[k] === correctMap[k]);
-          if (isAllCorrect) {
-            correctCount++;
-          }
-        } catch (err) {
-          if (quizAnswers[q.id] === q.correctAnswer) {
-            correctCount++;
-          }
-        }
-      } else if (qType === "Essay") {
-        if (quizAnswers[q.id] && quizAnswers[q.id].trim().length >= 5) {
-          correctCount++;
-        }
-      } else {
-        if (quizAnswers[q.id] === q.correctAnswer) {
-          correctCount++;
-        }
-      }
-    });
-
-    const finalPercent = Math.round((correctCount / questions.length) * 100);
-    const passed = finalPercent >= selectedCourse.minPassScore;
-
-    setQuizScore(finalPercent);
-    setQuizPassed(passed);
-
-    onAddExamResult({
-      employeeName: currentUser.name,
-      employeeId: currentUser.employeeId,
-      courseId: selectedCourse.id,
-      courseTitle: selectedCourse.title,
-      score: finalPercent,
-      pass: passed,
-      date: new Date().toISOString().split("T")[0],
-    });
-
-    if (passed) {
-      onUpdateUserProgress(
-        currentUser.id,
+    setIsSubmittingQuiz(true);
+    setQuizSubmitError("");
+    try {
+      // server เป็นผู้ตรวจและบันทึกผลสอบ/ความคืบหน้า/XP/ใบเซอร์เอง — client ส่งแค่คำตอบ
+      const result: QuizSubmitResult = await api.submitQuiz(
         selectedCourse.id,
-        "Completed",
-        finalPercent,
+        quizAnswers,
       );
+      if (result.status === "Finalized") {
+        setQuizScore(result.score ?? 0);
+        setQuizPassed(!!result.pass);
+      }
+      // ถ้ามีข้อ Essay: quizScore ยังเป็น null และ isQuizPending จะเป็น true หลังโหลดรายการใหม่
+      await fetchQuizSubmissions();
+      onQuizFinalized?.();
+    } catch (err) {
+      setQuizSubmitError(
+        getApiErrorMessage(err, "ส่งข้อสอบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"),
+      );
+    } finally {
+      setIsSubmittingQuiz(false);
+    }
+  };
+  const handleSelectReview = (id: string) => {
+    setReviewSubmissionId(id);
+    setGradeDraft({});
+    setGradeError("");
+  };
+
+  // ปิดผล: ต้องให้ถูก/ผิดครบทุกข้อ Essay ในครั้งเดียว (server ตรวจซ้ำอีกชั้นและแก้ไขหลังปิดไม่ได้)
+  const handleSubmitGrades = async () => {
+    if (!reviewingSubmission || isSavingGrade) return;
+    const grades = reviewingSubmission.essayQuestionIds.map((qId) => ({
+      questionId: qId,
+      correct: gradeDraft[qId]?.correct as boolean,
+      comment: gradeDraft[qId]?.comment?.trim() || undefined,
+    }));
+    if (grades.some((g) => typeof g.correct !== "boolean")) {
+      setGradeError("กรุณาให้คะแนน (ถูก/ผิด) ให้ครบทุกข้อ Essay ก่อนปิดผล");
+      return;
+    }
+    setIsSavingGrade(true);
+    setGradeError("");
+    try {
+      await api.gradeQuizSubmission(reviewingSubmission.id, grades);
+      setReviewSubmissionId("");
+      setGradeDraft({});
+      await fetchQuizSubmissions();
+      onQuizFinalized?.();
+    } catch (err) {
+      setGradeError(getApiErrorMessage(err, "บันทึกผลการตรวจไม่สำเร็จ"));
+    } finally {
+      setIsSavingGrade(false);
     }
   };
 
@@ -672,8 +713,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
         return;
       }
       correctAnswer = newCourseState.quizCorrectAnswer.trim();
-      if (!correctAnswer) {
-        alert("⚠️ กรุณาระบุคำตอบที่ถูกต้องที่สุด");
+      if (!correctAnswer || !options.includes(correctAnswer)) {
+        alert("⚠️ กรุณาระบุคำตอบที่ถูกต้องให้ตรงกับหนึ่งในตัวเลือกข้างต้น");
         return;
       }
     } else if (qType === "TrueFalse") {
@@ -710,9 +751,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       correctAnswer = JSON.stringify(correctMap);
     } else if (qType === "Essay") {
       options = [];
-      correctAnswer =
-        newCourseState.quizCorrectAnswer.trim() ||
-        "(เกณฑ์ตอบคำถามอัตนัยปลายเปิด)";
+      correctAnswer = newCourseState.quizCorrectAnswer.trim();
     }
 
     const newQuestion = {
@@ -744,6 +783,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
   const handleAddCourseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCourseState.title || !newCourseState.description) return;
+    if (newCourseState.targetPositions.length === 0) {
+      alert("⚠️ กรุณาเลือกกลุ่มพนักงานเป้าหมายอย่างน้อย 1 กลุ่ม");
+      return;
+    }
 
     const firstLesson: Lesson = {
       id: `l-${Date.now()}-1`,
@@ -755,15 +798,9 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       mediaType: newCourseState.lessonMediaType,
       mediaUrl:
         newCourseState.lessonMediaUrl ||
-        (newCourseState.lessonMediaType === "PDF"
-          ? ""
-          : newCourseState.lessonMediaType === "Video"
-            ? ""
-            : newCourseState.lessonMediaType === "Slides"
-              ? "https://docs.google.com/presentation/d/123/embed"
-              : newCourseState.lessonMediaType === "Image"
-                ? DEFAULT_LESSON_IMAGE_URL
-                : ""),
+        (newCourseState.lessonMediaType === "Image"
+          ? DEFAULT_LESSON_IMAGE_URL
+          : ""),
     };
 
     const isApproved = currentUser?.role !== "Editor";
@@ -778,16 +815,20 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
       if (qType === "SingleChoice") {
         options = newCourseState.quizOptionsStr
-          ? newCourseState.quizOptionsStr
-              .split("\n")
-              .map((o) => o.trim())
-              .filter(Boolean)
-          : [
-              "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ",
-              "ไม่จำเป็น",
-              "ขึ้นอยู่กับดุลยพินิจ",
-            ];
-        correctAnswer = newCourseState.quizCorrectAnswer.trim() || options[0];
+          .split("\n")
+          .map((o) => o.trim())
+          .filter(Boolean);
+        correctAnswer = newCourseState.quizCorrectAnswer.trim();
+        if (
+          options.length === 0 ||
+          !correctAnswer ||
+          !options.includes(correctAnswer)
+        ) {
+          alert(
+            "⚠️ ข้อสอบที่กำลังกรอกยังไม่สมบูรณ์ กรุณาระบุตัวเลือกและคำตอบที่ตรงกับตัวเลือก หรือเคลียร์โจทย์ออกก่อนบันทึก",
+          );
+          return;
+        }
       } else if (qType === "TrueFalse") {
         options = ["ถูก (True)", "ผิด (False)"];
         correctAnswer = newCourseState.quizCorrectAnswer.trim() || "ถูก (True)";
@@ -815,14 +856,14 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           options = parsedPairs.map((p) => p.right);
           correctAnswer = JSON.stringify(correctMap);
         } else {
-          options = ["ตัวเลือก 1", "ตัวเลือก 2"];
-          correctAnswer = "ตัวเลือก 1";
+          alert(
+            '⚠️ ข้อสอบจับคู่ที่กำลังกรอกไม่ถูกรูปแบบ กรุณากรอก "ซ้าย = ขวา" บรรทัดละ 1 คู่ หรือเคลียร์โจทย์ออกก่อนบันทึก',
+          );
+          return;
         }
       } else if (qType === "Essay") {
         options = [];
-        correctAnswer =
-          newCourseState.quizCorrectAnswer.trim() ||
-          "(เกณฑ์ตอบคำถามอัตนัยปลายเปิด)";
+        correctAnswer = newCourseState.quizCorrectAnswer.trim();
       }
 
       finalQuizQuestions.push({
@@ -835,19 +876,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       });
     }
 
-    // Fallback if no questions are added at all
+    // ต้องมีข้อสอบจริงอย่างน้อย 1 ข้อ ไม่สร้างข้อสอบปลอมแทน
     if (finalQuizQuestions.length === 0) {
-      finalQuizQuestions.push({
-        id: `q-${Date.now()}-fallback`,
-        question: "ข้อความประเมินความเข้าใจท้ายวิชา?",
-        type: "SingleChoice",
-        options: [
-          "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ",
-          "ไม่จำเป็น",
-          "ขึ้นอยู่กับดุลยพินิจ",
-        ],
-        correctAnswer: "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ",
-      });
+      alert("⚠️ กรุณาเพิ่มข้อสอบท้ายวิชาอย่างน้อย 1 ข้อ");
+      return;
     }
 
     const prepared: Course = {
@@ -855,13 +887,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       title: newCourseState.title,
       description: newCourseState.description,
       type: newCourseState.type,
-      minPassScore: Number(newCourseState.minPassScore) || 80,
+      minPassScore: Number(newCourseState.minPassScore),
       durationMinutes: Number(newCourseState.durationMinutes),
       durationHours: formatDuration(Number(newCourseState.durationMinutes)),
-      targetPositions:
-        newCourseState.targetPositions.length > 0
-          ? newCourseState.targetPositions
-          : ["Warehouse Staff"],
+      targetPositions: newCourseState.targetPositions,
       lessons: [firstLesson],
       quiz: finalQuizQuestions,
       isApproved,
@@ -894,19 +923,18 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       title: "",
       description: "",
       type: "Onboarding",
-      durationHours: "2 ชั่วโมง",
+      durationHours: "",
       minPassScore: 80,
-      targetPositions: ["Warehouse Staff"],
+      targetPositions: [""],
       lessonTitle: "บทเรียนย่อยที่ 1: ขั้นตอนสากลและการจัดสรรงานเบื้องต้น",
       lessonContent:
         "รายละเอียดวาระเนื้อหาประกอบการศึกษา พนักงานต้องเข้าใจเกณฑ์คุณภาพ คู่มือ ISO9001 และระเบียบขั้นตอนการทำงาน...",
       lessonMediaType: "Text",
       lessonMediaUrl: "",
-      quizQuestion:
-        "พนักงานทุกคนต้องปฏิบัติตามมาตรฐานคู่มือปฏิบัติงาน (WI) อย่างเคร่งครัดหรือไม่?",
-      quizOptionsStr:
-        "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ\nไม่จำเป็นใดๆ\nขึ้นอยู่กับความเร่งของรอบกะผลิต",
-      quizCorrectAnswer: "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ",
+      quizType: "SingleChoice",
+      quizQuestion: "",
+      quizOptionsStr: "",
+      quizCorrectAnswer: "",
       simulatedFileName: "",
       isSimulatedUploading: false,
     });
@@ -933,13 +961,17 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       );
       return;
     }
-
+    // คงฟิลด์เดิมทั้งหมด (isApproved, createdByRole, badgeKey, tags ฯลฯ)
+    // เขียนทับเฉพาะที่ฟอร์มนี้แก้ได้ — เดิมสร้างอ็อบเจ็กต์ใหม่ทำให้ฟิลด์เหล่านี้หายทุกครั้งที่บันทึก
+    const { lessonsStr, quizStr, targetPositionsStr, ...preserved } =
+      editingCourse;
     const updated: Course = {
+      ...preserved,
       id: editingCourse.id,
       title: editingCourse.title,
       description: editingCourse.description,
       type: editingCourse.type,
-      minPassScore: Number(editingCourse.minPassScore) || 80,
+      minPassScore: Number(editingCourse.minPassScore),
       durationMinutes: editingCourse.durationMinutes
         ? Number(editingCourse.durationMinutes)
         : undefined,
@@ -948,10 +980,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
         : editingCourse.durationHours,
       lessons: parsedLessons,
       quiz: parsedQuiz,
-      targetPositions: editingCourse.targetPositions || [
-        "QC",
-        "Warehouse Staff",
-      ],
+      targetPositions: editingCourse.targetPositions ?? [],
     };
 
     onUpdateCourse(updated);
@@ -1166,6 +1195,32 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           📸 บันทึกเวลาฝึกอบรม (QR Attendance)
         </button>
 
+        {canReview && (
+          <button
+            onClick={() => {
+              setActiveSubTab("review");
+              setActiveLessonIndex(null);
+              setIsTakingQuiz(false);
+              setShowCertificate(false);
+              setCertificateCourseOverride(null);
+              fetchQuizSubmissions();
+            }}
+            className={`px-4 py-2.5 text-xs font-extrabold whitespace-nowrap border-b-2 transition flex items-center gap-2 cursor-pointer ${
+              activeSubTab === "review"
+                ? "border-amber-600 text-amber-700"
+                : "border-transparent text-slate-500 hover:text-slate-705"
+            }`}
+          >
+            <CheckSquare className="w-4 h-4 text-amber-600" />
+            📝 ตรวจข้อสอบอัตนัย
+            {pendingReviewList.length > 0 && (
+              <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 rounded-full">
+                {pendingReviewList.length}
+              </span>
+            )}
+          </button>
+        )}
+
         <button
           onClick={() => {
             setActiveSubTab("transcript");
@@ -1246,7 +1301,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   {myAverageQuizScore}%
                 </span>
                 <span className="text-[10px] text-slate-450 mt-0.5 block">
-                  เกณฑ์ผ่านหลักคือ {80}%
+                  เกณฑ์ผ่านกำหนดแยกตามแต่ละหลักสูตร
                 </span>
               </div>
               <Award className="w-8 h-8 opacity-20 text-emerald-700" />
@@ -1319,7 +1374,6 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       const courseObj = courses.find(
                         (c) => c.id === exam.courseId,
                       );
-                      const minPass = courseObj?.minPassScore || 80;
                       return (
                         <tr
                           key={idx}
@@ -1350,13 +1404,13 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                           <td className="p-3 text-center">
                             <div className="inline-block">
                               <span
-                                className={`text-xs font-black font-mono ${exam.score >= minPass ? "text-emerald-600" : "text-rose-600"}`}
+                                className={`text-xs font-black font-mono ${exam.pass ? "text-emerald-600" : "text-rose-600"}`}
                               >
                                 {exam.score}%
                               </span>
                               <div className="w-14 h-1 w-full bg-slate-200 rounded-full mt-0.5 overflow-hidden">
                                 <div
-                                  className={`h-full rounded-full ${exam.score >= minPass ? "bg-emerald-500" : "bg-rose-500"}`}
+                                  className={`h-full rounded-full ${exam.pass ? "bg-emerald-500" : "bg-rose-500"}`}
                                   style={{
                                     width: `${Math.min(exam.score, 100)}%`,
                                   }}
@@ -1468,8 +1522,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       {activeCertificateCourse.title}
                     </p>
                     <p className="text-[10px] text-emerald-600 font-mono font-bold mt-1.5 bg-emerald-50 py-0.5 px-2 rounded-full inline-block border border-emerald-150">
-                      ผ่านการทดสอบด้วยคะแนน {displayScoreText()} (เกณฑ์ขั้นต่ำ
-                      80%)
+                      ผ่านการทดสอบด้วยคะแนน {displayScoreText()} (เกณฑ์ขั้นต่ำ{" "}
+                      {activeCertificateCourse.minPassScore}%)
                     </p>
                   </div>
 
@@ -2321,6 +2375,283 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
             </div>
           </div>
         </div>
+      ) : activeSubTab === "review" ? (
+        /* REVIEW: Admin/Editor ตรวจข้อสอบอัตนัย (Essay) */
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-5 animate-fade-in text-slate-800">
+          {!canReview ? (
+            <p className="text-xs text-slate-400 text-center py-10">
+              เฉพาะ Admin และ Editor เท่านั้นที่ตรวจข้อสอบอัตนัยได้
+            </p>
+          ) : (
+            <>
+              <div className="p-4 bg-amber-50/50 rounded-xl border border-amber-200 text-xs leading-relaxed">
+                <h4 className="font-extrabold text-amber-900 mb-1">
+                  ตรวจข้อสอบอัตนัย (Essay Review)
+                </h4>
+                <p className="text-slate-600">
+                  ให้คะแนนข้อ Essay เป็น ถูก/ผิด ให้ครบทุกข้อในครั้งเดียว
+                  เมื่อกดปิดผลแล้วแก้ไขไม่ได้ และระบบจะบันทึกผลสอบทางการ, XP
+                  และต่ออายุใบรับรองให้ทันที ไม่สามารถตรวจข้อสอบของตัวเองได้
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+                {/* Queue */}
+                <div className="lg:col-span-1 space-y-2 max-h-[480px] overflow-y-auto pr-1">
+                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    รอตรวจ ({pendingReviewList.length})
+                  </span>
+                  {pendingReviewList.length === 0 ? (
+                    <div className="p-6 bg-slate-50 border border-dashed rounded-xl text-center text-xs text-slate-400 italic">
+                      ไม่มีข้อสอบรอตรวจ
+                    </div>
+                  ) : (
+                    pendingReviewList.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => handleSelectReview(s.id)}
+                        className={`w-full text-left p-3 rounded-xl border text-xs transition cursor-pointer space-y-1 ${
+                          reviewSubmissionId === s.id
+                            ? "border-amber-500 bg-amber-50/50"
+                            : "border-slate-150 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="font-bold text-slate-800 block">
+                          {s.userName}{" "}
+                          <span className="font-mono text-[10px] text-slate-400">
+                            {s.employeeId}
+                          </span>
+                        </span>
+                        <span className="text-[10.5px] text-slate-500 block truncate">
+                          {s.courseTitle}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          Essay {s.essayQuestionIds.length} ข้อ • ส่งเมื่อ{" "}
+                          {new Date(s.submittedAt).toLocaleString("th-TH")}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+
+                {/* Grading panel */}
+                <div className="lg:col-span-2">
+                  {!reviewingSubmission ? (
+                    <div className="p-10 bg-slate-50 border border-dashed rounded-2xl text-center text-xs text-slate-400">
+                      เลือกรายการทางซ้ายเพื่อเริ่มตรวจ
+                    </div>
+                  ) : (
+                    (() => {
+                      const subCourse = courses.find(
+                        (c) => c.id === reviewingSubmission.courseId,
+                      );
+                      const isOwn =
+                        reviewingSubmission.userId === currentUser.id;
+                      const essayIds = reviewingSubmission.essayQuestionIds;
+                      const allGraded = essayIds.every(
+                        (id) => typeof gradeDraft[id]?.correct === "boolean",
+                      );
+                      const essayCorrect = essayIds.filter(
+                        (id) => gradeDraft[id]?.correct === true,
+                      ).length;
+                      const totalQuestions =
+                        reviewingSubmission.autoTotal + essayIds.length;
+                      const previewScore = Math.round(
+                        ((reviewingSubmission.autoCorrect + essayCorrect) /
+                          totalQuestions) *
+                          100,
+                      );
+
+                      return (
+                        <div className="space-y-4 text-xs">
+                          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                            <span className="font-extrabold text-slate-800 block">
+                              {reviewingSubmission.userName} (
+                              {reviewingSubmission.employeeId})
+                            </span>
+                            <span className="text-slate-500 block mt-0.5">
+                              {reviewingSubmission.courseTitle}
+                            </span>
+                            <span className="text-[10.5px] text-slate-400 font-mono block mt-1">
+                              ข้อที่ระบบตรวจแล้ว: ถูก{" "}
+                              {reviewingSubmission.autoCorrect} /{" "}
+                              {reviewingSubmission.autoTotal} ข้อ
+                            </span>
+                          </div>
+
+                          {isOwn && (
+                            <p className="p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 font-semibold">
+                              ไม่สามารถตรวจข้อสอบของตัวเองได้
+                              กรุณาให้ผู้ตรวจท่านอื่นดำเนินการ
+                            </p>
+                          )}
+
+                          {essayIds.map((qId, idx) => {
+                            const q = subCourse?.quiz.find((x) => x.id === qId);
+                            const draft = gradeDraft[qId];
+                            return (
+                              <div
+                                key={qId}
+                                className="p-4 border border-slate-200 rounded-xl space-y-2.5"
+                              >
+                                <p className="font-extrabold text-slate-800">
+                                  Essay ข้อที่ {idx + 1}:{" "}
+                                  {q?.question ||
+                                    "(ไม่พบโจทย์ — หลักสูตรอาจถูกลบหรือแก้ไขแล้ว)"}
+                                </p>
+                                <div className="text-[10.5px] text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                  <span className="font-bold text-slate-600">
+                                    เกณฑ์การพิจารณา:{" "}
+                                  </span>
+                                  {q?.correctAnswer?.trim() ||
+                                    "ไม่ได้ระบุเกณฑ์ไว้ในหลักสูตร"}
+                                </div>
+                                <div className="bg-white border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap leading-relaxed text-slate-700">
+                                  <span className="block text-[10px] font-bold text-slate-400 mb-1">
+                                    คำตอบของพนักงาน:
+                                  </span>
+                                  {reviewingSubmission.answers[qId]?.trim() || (
+                                    <span className="italic text-slate-400">
+                                      (ไม่ได้ตอบ)
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setGradeDraft((prev) => ({
+                                        ...prev,
+                                        [qId]: {
+                                          correct: true,
+                                          comment: prev[qId]?.comment || "",
+                                        },
+                                      }))
+                                    }
+                                    className={`px-3 py-1.5 rounded-lg border font-bold cursor-pointer transition ${
+                                      draft?.correct === true
+                                        ? "bg-emerald-50 border-emerald-500 text-emerald-800"
+                                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                    }`}
+                                  >
+                                    ✅ ถูก
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setGradeDraft((prev) => ({
+                                        ...prev,
+                                        [qId]: {
+                                          correct: false,
+                                          comment: prev[qId]?.comment || "",
+                                        },
+                                      }))
+                                    }
+                                    className={`px-3 py-1.5 rounded-lg border font-bold cursor-pointer transition ${
+                                      draft?.correct === false
+                                        ? "bg-rose-50 border-rose-500 text-rose-800"
+                                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                    }`}
+                                  >
+                                    ❌ ผิด
+                                  </button>
+                                  <input
+                                    type="text"
+                                    value={draft?.comment || ""}
+                                    onChange={(e) =>
+                                      setGradeDraft((prev) => ({
+                                        ...prev,
+                                        [qId]: {
+                                          correct: prev[qId]?.correct ?? null,
+                                          comment: e.target.value,
+                                        },
+                                      }))
+                                    }
+                                    placeholder="ความเห็นประกอบ (ไม่บังคับ)"
+                                    className="flex-1 bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs"
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {allGraded && subCourse && (
+                            <p className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-900 font-bold">
+                              คะแนนที่จะได้: {previewScore}% (เกณฑ์ผ่าน{" "}
+                              {subCourse.minPassScore}% →{" "}
+                              {previewScore >= subCourse.minPassScore
+                                ? "ผ่าน"
+                                : "ไม่ผ่าน"}
+                              )
+                            </p>
+                          )}
+
+                          {gradeError && (
+                            <p className="p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 font-semibold">
+                              {gradeError}
+                            </p>
+                          )}
+
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={handleSubmitGrades}
+                              disabled={isOwn || isSavingGrade || !allGraded}
+                              className="bg-[#15329c] hover:bg-[#11297e] text-white font-bold px-5 py-2 rounded-xl cursor-pointer shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {isSavingGrade
+                                ? "กำลังบันทึก..."
+                                : "ปิดผลและบันทึกคะแนน"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+              </div>
+
+              {/* History */}
+              <div className="space-y-2 pt-3 border-t border-slate-100">
+                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  ตรวจเสร็จล่าสุด (สูงสุด 10 รายการ)
+                </span>
+                {reviewedHistory.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">
+                    ยังไม่มีประวัติการตรวจ
+                  </p>
+                ) : (
+                  <div className="border border-slate-200 rounded-xl divide-y text-xs">
+                    {reviewedHistory.map((s) => (
+                      <div
+                        key={s.id}
+                        className="p-2.5 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <span className="font-bold text-slate-800 block truncate">
+                            {s.userName} ({s.employeeId})
+                          </span>
+                          <span className="text-[10px] text-slate-400 block truncate">
+                            {s.courseTitle} • ตรวจโดย {s.reviewedBy || "-"} •{" "}
+                            {s.reviewedAt
+                              ? new Date(s.reviewedAt).toLocaleString("th-TH")
+                              : ""}
+                          </span>
+                        </div>
+                        <span
+                          className={`shrink-0 font-black font-mono ${s.pass ? "text-emerald-600" : "text-rose-600"}`}
+                        >
+                          {s.score}% {s.pass ? "ผ่าน" : "ไม่ผ่าน"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       ) : activeSubTab === "qr" ? (
         /* QR ATTENDANCE: Admin/Editor จัดการคาบและ QR, ทุกคนดูประวัติเช็คชื่อได้ */
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-6 animate-fade-in text-slate-800">
@@ -2702,8 +3033,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   💡 ข้อมูลสิทธิ์การเรียน:
                 </span>
                 หลังดูเนื้อหาครบทุกบทเรียน ระบบจะทำการเปิดลิงก์แบบทดสอบ (Quiz)
-                ทันที ผ่านเกณฑ์ {selectedCourse?.minPassScore || 80}%
-                จะได้ตราประดับ และเกียรติบัตรรับรอง ERP
+                ทันที ผ่านเกณฑ์ {selectedCourse?.minPassScore}% จะได้ตราประดับ
+                และเกียรติบัตรรับรอง ERP
               </div>
             </div>
           </div>
@@ -2929,7 +3260,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                             </span>
                             <span className="font-mono text-slate-500 truncate max-w-[200px] text-[8.5px]">
                               {lessons[activeLessonIndex].mediaUrl ||
-                                "จำลองออฟไลน์ในเครือข่าย"}
+                                "ไม่มีไฟล์แนบ"}
                             </span>
                           </div>
 
@@ -2959,33 +3290,19 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                     allowFullScreen
                                   />
+                                ) : signedLessonMediaUrl ? (
+                                  <video
+                                    key={signedLessonMediaUrl}
+                                    controls
+                                    src={signedLessonMediaUrl}
+                                    className="w-full max-h-72 rounded-lg bg-slate-950"
+                                  >
+                                    เบราว์เซอร์นี้ไม่รองรับแท็กวิดีโอ
+                                  </video>
                                 ) : (
-                                  <div className="w-full bg-slate-950 text-white rounded-lg p-5 flex flex-col justify-between h-52 relative overflow-hidden">
-                                    <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-950 opacity-60"></div>
-                                    <div className="z-10 bg-slate-900/60 p-2 rounded text-[10px] select-none w-max">
-                                      ▶️ วิดีโอสื่อการสอน (.MP4)
-                                    </div>
-                                    <div className="z-10 flex flex-col items-center justify-center flex-1">
-                                      <PlayCircle className="w-14 h-14 text-indigo-400 hover:scale-110 hover:text-indigo-300 transition cursor-pointer" />
-                                      <span className="text-[11px] font-bold text-slate-200 mt-2">
-                                        คลิกเพื่อเริ่มจำลองเล่นวิดีโอ (Video
-                                        Simulator)
-                                      </span>
-                                      <span className="text-[9px] font-light text-slate-400">
-                                        ชื่อไฟล์ระบบหลักสูตร:{" "}
-                                        {lessons[activeLessonIndex].title}
-                                      </span>
-                                    </div>
-                                    <div className="z-10 flex items-center justify-between w-full text-[10px] font-mono text-slate-400">
-                                      <span>
-                                        00:00 /{" "}
-                                        {lessons[activeLessonIndex]
-                                          .durationMinutes || 20}
-                                        :00
-                                      </span>
-                                      <span>HD 1080p</span>
-                                    </div>
-                                  </div>
+                                  <p className="text-xs text-slate-400 text-center py-10">
+                                    กำลังโหลดวิดีโอ...
+                                  </p>
                                 )}
                               </div>
                             )}
@@ -3003,75 +3320,65 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                     </span>
                                   </div>
                                 </div>
-                                <div className="border border-slate-200 rounded-lg bg-slate-50/50 p-4 font-mono text-[10px] text-slate-500 overflow-y-auto max-h-32 text-left space-y-1">
-                                  <p className="font-bold text-slate-700">
-                                    📄 สรุปย่อประมวลผล PDF Layout:
+                                {signedLessonMediaUrl ? (
+                                  <>
+                                    <iframe
+                                      src={signedLessonMediaUrl}
+                                      title={lessons[activeLessonIndex].title}
+                                      className="w-full h-96 rounded-lg border border-slate-200"
+                                    />
+                                    <a
+                                      href={signedLessonMediaUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition cursor-pointer"
+                                    >
+                                      <FileText className="w-4 h-4" />{" "}
+                                      ดาวน์โหลดเอกสารประกอบนี้ (Download PDF
+                                      Manual)
+                                    </a>
+                                  </>
+                                ) : (
+                                  <p className="text-xs text-slate-400 py-6">
+                                    {lessons[activeLessonIndex].mediaUrl
+                                      ? "กำลังโหลดเอกสาร..."
+                                      : "บทเรียนนี้ยังไม่ได้แนบไฟล์ PDF"}
                                   </p>
-                                  <p>
-                                    1. แผนภูมิสากลการบริหารโครงการอุตสาหกรรม
-                                    (Industrial SOP Guidelines)
-                                  </p>
-                                  <p>
-                                    2.
-                                    ข้อควรระวังความสะอาดเครื่องจักรในกะปฏิบัติการและสุขอนามัยอาหาร
-                                    (HACCP Level 3)
-                                  </p>
-                                  <p>
-                                    3. รายละเอียดขั้นตอนเกณฑ์คุณภาพ ISO9001:2015
-                                  </p>
-                                </div>
-                                <a
-                                  href={signedLessonMediaUrl || "#"}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition cursor-pointer"
-                                >
-                                  <FileText className="w-4 h-4" />{" "}
-                                  ดาวน์โหลดเอกสารประกอบนี้ (Download PDF Manual)
-                                </a>
+                                )}
                               </div>
                             )}
 
                             {lessons[activeLessonIndex].mediaType ===
                               "Slides" && (
                               <div className="w-full select-none text-center space-y-3">
-                                <div className="w-full bg-slate-900 text-white rounded-lg p-5 h-48 flex flex-col justify-between relative overflow-hidden">
-                                  <div className="z-10 bg-amber-500 text-slate-950 text-[9px] font-bold px-2 py-0.5 rounded absolute top-3 right-3">
-                                    SLIDES PRESENTATION
-                                  </div>
-                                  <div className="text-left font-bold text-xs text-amber-200 border-b border-slate-800 pb-2">
-                                    📊 {lessons[activeLessonIndex].title}
-                                  </div>
-                                  <div className="text-xs font-light text-slate-300 justify-center flex-1 flex items-center">
-                                    "หน้าสไลด์ที่ 1/12: นำเสนอเรื่อง{" "}
-                                    {lessons[activeLessonIndex].title}{" "}
-                                    ประกอบภาพสี่เหลี่ยมประกอบการประเมิน"
-                                  </div>
-                                  <div className="flex justify-between items-center text-[10px] text-slate-400">
-                                    <button
-                                      type="button"
-                                      className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded"
-                                    >
-                                      ◀️ ย้อนกลับ
-                                    </button>
-                                    <span>สไลด์ 1 จาก 12</span>
-                                    <button
-                                      type="button"
-                                      className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded"
-                                    >
-                                      ถัดไป ▶️
-                                    </button>
-                                  </div>
-                                </div>
-                                <a
-                                  href={signedLessonMediaUrl || "#"}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition cursor-pointer"
-                                >
-                                  <GraduationCap className="w-4 h-4" />{" "}
-                                  เปิดดูหน้าต่างสไลด์นำเสนอฉบับเต็ม
-                                </a>
+                                {signedLessonMediaUrl &&
+                                lessons[activeLessonIndex].mediaUrl?.includes(
+                                  "embed",
+                                ) ? (
+                                  <iframe
+                                    src={signedLessonMediaUrl}
+                                    title={lessons[activeLessonIndex].title}
+                                    allowFullScreen
+                                    className="w-full h-72 rounded-lg border border-slate-200"
+                                  />
+                                ) : (
+                                  <p className="text-xs text-slate-500 py-6">
+                                    {lessons[activeLessonIndex].mediaUrl
+                                      ? "ไฟล์สไลด์ (.ppt/.pptx) แสดงในหน้านี้ไม่ได้ กรุณาเปิดไฟล์ด้วยปุ่มด้านล่าง"
+                                      : "บทเรียนนี้ยังไม่ได้แนบไฟล์สไลด์"}
+                                  </p>
+                                )}
+                                {signedLessonMediaUrl && (
+                                  <a
+                                    href={signedLessonMediaUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition cursor-pointer"
+                                  >
+                                    <GraduationCap className="w-4 h-4" />{" "}
+                                    เปิดดูไฟล์สไลด์ฉบับเต็ม
+                                  </a>
+                                )}{" "}
                               </div>
                             )}
 
@@ -3157,7 +3464,38 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                     </button>
                   </div>
 
-                  {quizScore === null ? (
+                  {isQuizPending ? (
+                    /* PENDING ESSAY REVIEW */
+                    <div className="space-y-4 mt-6 text-center text-xs animate-fade-in">
+                      <div className="inline-flex p-4 rounded-full bg-amber-50">
+                        <span className="text-3xl">⏳</span>
+                      </div>
+                      <h4 className="font-black text-slate-800 text-sm">
+                        ส่งข้อสอบเรียบร้อย — รอผู้ตรวจข้อ Essay
+                      </h4>
+                      <p className="text-slate-500 max-w-sm mx-auto leading-relaxed">
+                        ระบบตรวจข้อที่ตรวจอัตโนมัติแล้ว เหลือข้อ Essay{" "}
+                        {myPendingSubmission?.essayQuestionIds.length} ข้อ
+                        ที่รอผู้ตรวจให้คะแนน
+                        ผลสอบทางการจะปรากฏในระเบียนคะแนนของฉันเมื่อตรวจครบทุกข้อ
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        ส่งเมื่อ{" "}
+                        {myPendingSubmission
+                          ? new Date(
+                              myPendingSubmission.submittedAt,
+                            ).toLocaleString("th-TH")
+                          : ""}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsTakingQuiz(false)}
+                        className="bg-slate-100 text-slate-700 px-4 py-2 rounded-xl hover:bg-slate-200 cursor-pointer font-bold"
+                      >
+                        กลับไปหน้าหลักสูตร
+                      </button>
+                    </div>
+                  ) : quizScore === null ? (
                     /* QUESTION FLOW */
                     <form
                       onSubmit={handleQuizSubmit}
@@ -3166,8 +3504,14 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       <div className="p-4 bg-rose-50/40 border border-rose-100/50 rounded-xl leading-relaxed">
                         ⚠️ **ข้อกำหนดระบบวัดทักษะ**:
                         จะต้องทำข้อสอบถูกต้องไม่ต่ำกว่า{" "}
-                        {selectedCourse?.minPassScore || 80}%
+                        {selectedCourse?.minPassScore}%
                         จึงจะถือว่าสอบผ่านและได้รับการรับรองใน Competency Matrix
+                        {questions.some((q) => q.type === "Essay") && (
+                          <span className="block mt-1 font-bold text-amber-700">
+                            ข้อสอบนี้มีข้อ Essay ซึ่งผู้ตรวจจะเป็นผู้ให้คะแนน
+                            ผลสอบทางการจะออกหลังตรวจครบทุกข้อ
+                          </span>
+                        )}
                       </div>
 
                       {questions.map((q, qIndex) => {
@@ -3265,9 +3609,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                     }
                                   } catch (e) {}
 
-                                  const rightOptions = q.pairs
-                                    ? q.pairs.map((p) => p.right)
-                                    : [];
+                                  const rightOptions =
+                                    q.options && q.options.length > 0
+                                      ? q.options
+                                      : q.pairs
+                                        ? q.pairs.map((p) => p.right)
+                                        : [];
 
                                   return (
                                     <div
@@ -3320,7 +3667,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                   onChange={(e) =>
                                     handleQuizAnswerSelect(q.id, e.target.value)
                                   }
-                                  placeholder="พิมพ์คำอธิบายรายละเอียดที่นี่ อย่างน้อย 5 ตัวอักษรเพื่อรับคะแนนความเข้าใจ..."
+                                  placeholder="พิมพ์คำอธิบายรายละเอียดที่นี่ ผู้ตรวจจะเป็นผู้ให้คะแนนข้อนี้"
                                   className="w-full bg-white border border-slate-200 p-2.5 rounded-lg text-xs leading-relaxed"
                                 />
                               </div>
@@ -3329,20 +3676,11 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         );
                       })}
 
-                      {/* Essay questions optionally for visual high fidelity */}
-                      <div className="space-y-2 pt-2">
-                        <label className="font-bold text-slate-700 block">
-                          แบบเขียนสกัดบรรยายสรุปความเข้าใจการปฏิบัติงานจริง
-                          (ทางเลือกเขียนสั้นรายงาน QA):
-                        </label>
-                        <textarea
-                          rows={3}
-                          value={essayAnswer}
-                          onChange={(e) => setEssayAnswer(e.target.value)}
-                          placeholder="อธิบายว่าคุณจะทำงานด้วยความมั่นใจและนำความรู้นี้ไปสากลอย่างไร..."
-                          className="w-full bg-white border border-slate-205 p-2 rounded-lg text-xs"
-                        />
-                      </div>
+                      {quizSubmitError && (
+                        <p className="p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 font-semibold">
+                          {quizSubmitError}
+                        </p>
+                      )}
 
                       <div className="pt-4 flex justify-end gap-3 text-xs font-bold border-t">
                         <button
@@ -3354,9 +3692,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         </button>
                         <button
                           type="submit"
-                          className="bg-[#15329c] hover:bg-[#11297e] text-white px-5 py-2 rounded-xl cursor-pointer shadow"
+                          disabled={isSubmittingQuiz}
+                          className="bg-[#15329c] hover:bg-[#11297e] text-white px-5 py-2 rounded-xl cursor-pointer shadow disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          ส่งคำตอบตรวจคะแนน (Submit)
+                          {isSubmittingQuiz
+                            ? "กำลังส่งข้อสอบ..."
+                            : "ส่งคำตอบตรวจคะแนน (Submit)"}
                         </button>
                       </div>
                     </form>
@@ -3386,8 +3727,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                           </span>
                         </div>
                         <p className="text-slate-500 max-w-sm mx-auto leading-relaxed">
-                          คุณต้องได้มากกว่า {selectedCourse?.minPassScore || 80}
-                          % เพื่อความสมบูรณ์และรับใบประกาศ ISO
+                          คุณต้องได้ไม่ต่ำกว่า {selectedCourse?.minPassScore}%
+                          เพื่อความสมบูรณ์และรับใบประกาศ ISO
                         </p>
                       </div>
 
@@ -3398,7 +3739,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         </div>
                       ) : (
                         <div className="p-4 bg-rose-50 border border-rose-250 text-rose-900 rounded-xl font-bold max-w-md mx-auto">
-                          คุณไม่ผ่านเกณฑ์การประเมินขั้นแรก (ต่ำกว่า 80%)
+                          คุณไม่ผ่านเกณฑ์การประเมินขั้นแรก (ต่ำกว่า{" "}
+                          {selectedCourse?.minPassScore}%)
                           โปรดกลับไปพักอ่านทฤษฎีบทเรียน หรือ ทบทวนเอกสาร WI
                           อ้างอิงอีกครั้งและกดสอบแก้ตัวใหม่ได้ฟรีทุกเมื่อ!
                         </div>
@@ -4211,24 +4553,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         value={newCourseState.quizType || "SingleChoice"}
                         onChange={(e) => {
                           const val = e.target.value as any;
-                          let placeholderOptions = "";
-                          let placeholderAnswer = "";
-                          if (val === "TrueFalse") {
-                            placeholderOptions = "ถูก (True)\nผิด (False)";
-                            placeholderAnswer = "ถูก (True)";
-                          } else if (val === "Matching") {
-                            placeholderOptions =
-                              "ชุด PPE = อุปกรณ์ป้องกันส่วนบุคคล\nหน้ากาก N95 = ป้องกันฝุ่นละออง\nรองเท้าเซฟตี้ = ป้องกันการกระแทก";
-                            placeholderAnswer = "";
-                          } else if (val === "Essay") {
-                            placeholderOptions = "";
-                            placeholderAnswer = "(เกณฑ์ตอบคำถามอัตนัยปลายเปิด)";
-                          } else {
-                            placeholderOptions =
-                              "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ\nไม่จำเป็น\nขึ้นอยู่กับดุลยพินิจ";
-                            placeholderAnswer =
-                              "ใช่ เพื่อความปลอดภัยสูงสุดและเสถียรภาพ";
-                          }
+                          // ล้างค่าเดิมเมื่อสลับประเภท (คำตอบเริ่มต้นมีเฉพาะถูก-ผิดที่เป็นตัวเลือกจริง)
+                          const placeholderOptions = "";
+                          const placeholderAnswer =
+                            val === "TrueFalse" ? "ถูก (True)" : "";
                           setNewCourseState({
                             ...newCourseState,
                             quizType: val,

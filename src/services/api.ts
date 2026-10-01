@@ -16,6 +16,9 @@ import {
   KMContributionLog,
   AttendanceLog,
   TrainingSession,
+  QuizSubmission,
+  QuizSubmitResult,
+  EssayGrade,
 } from "../types";
 
 let authToken: string | null = localStorage.getItem("rm_auth_token");
@@ -58,6 +61,21 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+// ดึงข้อความ error ภาษาไทยที่ server ส่งมา (รูปแบบ "API Error: 409 ... - {json}")
+// ใช้ regex ที่ทนกรณี statusText ว่าง (HTTP/2) ซึ่ง regex เดิมใน App.tsx จะจับไม่ได้
+export function getApiErrorMessage(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : "";
+  const match = raw.match(/API Error: \d+.*? - (.*)$/s);
+  if (match) {
+    try {
+      return JSON.parse(match[1]).message || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
 }
 
 export const api = {
@@ -215,6 +233,19 @@ export const api = {
     request<any>("/api/exam_results", {
       method: "POST",
       body: JSON.stringify(result),
+    }),
+
+  // Quiz submissions (server ตรวจข้อสอบ + ผู้ตรวจให้คะแนน Essay)
+  submitQuiz: (courseId: string, answers: { [questionId: string]: string }) =>
+    request<QuizSubmitResult>(`/api/courses/${courseId}/submit-quiz`, {
+      method: "POST",
+      body: JSON.stringify({ answers }),
+    }),
+  getQuizSubmissions: () => request<QuizSubmission[]>("/api/quiz_submissions"),
+  gradeQuizSubmission: (submissionId: string, grades: EssayGrade[]) =>
+    request<QuizSubmission>(`/api/quiz_submissions/${submissionId}/grade`, {
+      method: "POST",
+      body: JSON.stringify({ grades }),
     }),
 
   // Search Logs APIs
