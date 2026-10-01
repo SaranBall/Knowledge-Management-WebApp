@@ -31,17 +31,18 @@ import {
   getDepartmentById,
   getAllDepartmentsFlat,
 } from "../utils/departmentUtils";
-import { api } from "../services/api";
+import { api, getApiErrorMessage } from "../services/api";
 import { resolveSignedUrl } from "../utils/fileAccess";
 import * as XLSX from "xlsx";
 
 interface DocumentListProps {
   currentUser: User;
   documents: DocumentItem[];
-  onAddDocument: (doc: DocumentItem) => void;
-  onApproveDocument: (id: string, approverName: string) => void;
-  onUpdateDocument: (doc: DocumentItem) => void;
-  onDeleteDocument: (id: string) => void;
+  onAddDocument: (doc: DocumentItem) => void | Promise<any>;
+  onApproveDocument: (id: string, approverName: string) => void | Promise<any>;
+  onUpdateDocument: (doc: DocumentItem) => void | Promise<any>;
+  onDeleteDocument: (id: string) => void | Promise<any>;
+  onLocalDocumentSync?: (doc: DocumentItem) => void;
   comments: RatingAndComment[];
   onAddComment: (docId: string, rating: number, comment: string) => void;
 }
@@ -163,6 +164,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   onApproveDocument,
   onUpdateDocument,
   onDeleteDocument,
+  onLocalDocumentSync,
   comments,
   onAddComment,
 }) => {
@@ -248,6 +250,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     description: "",
     type: "QP" as DocType,
     departmentId: "",
+    allowedDepartmentIds: [] as string[],
     owner: currentUser.name,
     revision: 1,
     effectiveDate: new Date().toISOString().split("T")[0],
@@ -256,6 +259,9 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     exampleImage: "",
     exampleVideo: "",
   });
+  const [uploadModalError, setUploadModalError] = useState<string>("");
+  const [editModalError, setEditModalError] = useState<string>("");
+  const [isSubmittingDoc, setIsSubmittingDoc] = useState<boolean>(false);
 
   // Edit Modal State for Admin
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -426,72 +432,112 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
     return true;
   });
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDoc.title) return;
     if (!newDoc.departmentId) return;
-    if (isUploadingFile) return; // กันการ submit ก่อนไฟล์อัปโหลดเสร็จ
+    if (isUploadingFile || isSubmittingDoc) return; // กันการ submit ซ้ำหรือก่อนไฟล์อัปโหลดเสร็จ
 
-    const mockId = `doc-${Date.now()}`;
-    const generatedDoc: DocumentItem = {
-      id: mockId,
-      title: newDoc.title,
-      description: newDoc.description,
-      type: newDoc.type,
-      departmentId: newDoc.departmentId,
-      owner: currentUser.name,
-      revision: Number(newDoc.revision),
-      effectiveDate: newDoc.effectiveDate,
-      // Editor uploads go into "Pending Approval", Admin goes direct to "Published"
-      status: currentUser.role === "Admin" ? "Published" : "Pending Approval",
-      approvedBy: currentUser.role === "Admin" ? currentUser.name : undefined,
-      approvedAt:
-        currentUser.role === "Admin" ? new Date().toISOString() : undefined,
-      // ถ้ามีไฟล์จริงถูก upload ขึ้น server แล้ว ใช้ URL จริง — ไม่งั้นคง fallback แบบ '#...'
-      // ไว้เป็นสัญญาณให้ UI รู้ว่ายังไม่มีไฟล์จริง (เช็คด้วย hasRealFile ตอนแสดงผล)
-      fileUrl: uploadedFileServerUrl || `#no-file-attached-${mockId}`,
-      fileType: newDoc.fileType,
-      exampleText: newDoc.exampleText || undefined,
-      exampleImage: newDoc.exampleImage || undefined,
-      exampleVideo:
-        newDoc.exampleVideo ||
-        (newDoc.fileType === "Video" ? uploadedFileServerUrl : undefined),
-      realFileUrl: uploadedFileServerUrl || undefined,
-      parsedExcelSheets: uploadedFileParsedExcel || undefined,
-      views: 0,
-      downloads: 0,
-      createdAt: new Date().toISOString(),
-    };
+    setUploadModalError("");
+    setIsSubmittingDoc(true);
 
-    onAddDocument(generatedDoc);
-    setIsUploadOpen(false);
-    // Reset fields
-    setNewDoc({
-      title: "",
-      description: "",
-      type: "QP",
-      departmentId: "",
-      owner: currentUser.name,
-      revision: 1,
-      effectiveDate: new Date().toISOString().split("T")[0],
-      fileType: "PDF",
-      exampleText: "",
-      exampleImage: "",
-      exampleVideo: "",
-    });
-    setMockFileName("");
-    setUploadedFileObjectUrl("");
-    setUploadedFileServerUrl("");
-    setUploadFileError("");
-    setUploadedFileParsedExcel(undefined);
+    try {
+      const mockId = `doc-${Date.now()}`;
+      // Ensure owner department is always in allowedDepartmentIds
+      const allowedDepts = Array.from(
+        new Set([newDoc.departmentId, ...(newDoc.allowedDepartmentIds || [])]),
+      );
+
+      const generatedDoc: DocumentItem = {
+        id: mockId,
+        title: newDoc.title,
+        description: newDoc.description,
+        type: newDoc.type,
+        departmentId: newDoc.departmentId,
+        allowedDepartmentIds: allowedDepts,
+        owner: newDoc.owner?.trim() || currentUser.name,
+        revision: Number(newDoc.revision),
+        effectiveDate: newDoc.effectiveDate,
+        // Editor uploads go into "Pending Approval", Admin goes direct to "Published"
+        status: currentUser.role === "Admin" ? "Published" : "Pending Approval",
+        approvedBy: currentUser.role === "Admin" ? currentUser.name : undefined,
+        approvedAt:
+          currentUser.role === "Admin" ? new Date().toISOString() : undefined,
+        // ถ้ามีไฟล์จริงถูก upload ขึ้น server แล้ว ใช้ URL จริง — ไม่งั้นคง fallback แบบ '#...'
+        // ไว้เป็นสัญญาณให้ UI รู้ว่ายังไม่มีไฟล์จริง (เช็คด้วย hasRealFile ตอนแสดงผล)
+        fileUrl: uploadedFileServerUrl || `#no-file-attached-${mockId}`,
+        fileType: newDoc.fileType,
+        exampleText: newDoc.exampleText || undefined,
+        exampleImage: newDoc.exampleImage || undefined,
+        exampleVideo:
+          newDoc.exampleVideo ||
+          (newDoc.fileType === "Video" ? uploadedFileServerUrl : undefined),
+        realFileUrl: uploadedFileServerUrl || undefined,
+        parsedExcelSheets: uploadedFileParsedExcel || undefined,
+        views: 0,
+        downloads: 0,
+        createdAt: new Date().toISOString(),
+      };
+
+      await onAddDocument(generatedDoc);
+      setIsUploadOpen(false);
+      // Reset fields
+      setNewDoc({
+        title: "",
+        description: "",
+        type: "QP",
+        departmentId: "",
+        allowedDepartmentIds: [],
+        owner: currentUser.name,
+        revision: 1,
+        effectiveDate: new Date().toISOString().split("T")[0],
+        fileType: "PDF",
+        exampleText: "",
+        exampleImage: "",
+        exampleVideo: "",
+      });
+      setMockFileName("");
+      setUploadedFileObjectUrl("");
+      setUploadedFileServerUrl("");
+      setUploadFileError("");
+      setUploadedFileParsedExcel(undefined);
+    } catch (err: any) {
+      console.error("Failed to add document:", err);
+      setUploadModalError(
+        getApiErrorMessage(err, "ไม่สามารถสร้างเอกสารได้ กรุณาลองใหม่อีกครั้ง"),
+      );
+    } finally {
+      setIsSubmittingDoc(false);
+    }
   };
 
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDoc || !editingDoc.title) return;
-    onUpdateDocument(editingDoc);
-    setIsEditOpen(false);
-    setEditingDoc(null);
+    setEditModalError("");
+    setIsSubmittingDoc(true);
+
+    try {
+      const allowedDepts = Array.from(
+        new Set([
+          editingDoc.departmentId,
+          ...(editingDoc.allowedDepartmentIds || []),
+        ]),
+      );
+      await onUpdateDocument({
+        ...editingDoc,
+        allowedDepartmentIds: allowedDepts,
+      });
+      setIsEditOpen(false);
+      setEditingDoc(null);
+    } catch (err: any) {
+      console.error("Failed to update document:", err);
+      setEditModalError(
+        getApiErrorMessage(err, "ไม่สามารถแก้ไขเอกสารได้ กรุณาลองใหม่อีกครั้ง"),
+      );
+    } finally {
+      setIsSubmittingDoc(false);
+    }
   };
 
   const handleDeleteClick = (id: string) => {
@@ -665,25 +711,37 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     key={doc.id}
                     id={`doc-card-${doc.id}`}
                     onClick={() => setSelectedDocId(doc.id)}
-                    className={`bg-white p-5 rounded-2xl border transition-all cursor-pointer text-left block space-y-3 relative overflow-hidden ${
-                      selectedDocId === doc.id
-                        ? "border-indigo-600 shadow-md ring-1 ring-indigo-500"
-                        : "border-slate-200 hover:border-slate-350 hover:shadow-sm"
+                    className={`p-5 rounded-2xl border transition-all cursor-pointer text-left block space-y-3 relative overflow-hidden ${
+                      doc.accessible === false
+                        ? selectedDocId === doc.id
+                          ? "bg-slate-50/80 border-indigo-400 ring-1 ring-indigo-400 shadow-xs"
+                          : "bg-slate-50/60 border-dashed border-slate-300 hover:border-slate-400"
+                        : selectedDocId === doc.id
+                          ? "bg-white border-indigo-600 shadow-md ring-1 ring-indigo-500"
+                          : "bg-white border-slate-200 hover:border-slate-350 hover:shadow-sm"
                     }`}
                   >
                     {/* Upper label Badge */}
                     <div className="flex items-center justify-between gap-1">
-                      <span
-                        className={`px-2 py-0.5 rounded font-mono text-[9px] font-bold ${
-                          doc.type === "QP"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : doc.type === "WI"
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-rose-100 text-rose-800"
-                        }`}
-                      >
-                        {doc.type}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`px-2 py-0.5 rounded font-mono text-[9px] font-bold ${
+                            doc.type === "QP"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : doc.type === "WI"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-rose-100 text-rose-800"
+                          }`}
+                        >
+                          {doc.type}
+                        </span>
+                        {doc.accessible === false && (
+                          <span className="bg-amber-100/80 text-amber-900 border border-amber-300/80 px-1.5 py-0.5 rounded text-[8px] font-bold flex items-center gap-1 font-mono">
+                            <Lock className="w-2.5 h-2.5 text-amber-700" />
+                            จำกัดสิทธิ์
+                          </span>
+                        )}
+                      </div>
 
                       <div className="flex items-center gap-1.5 text-[10px]">
                         {doc.status === "Published" ? (
@@ -820,6 +878,27 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                 </div>
               )}
 
+              {/* Editor Edit Controls */}
+              {currentUser.role === "Editor" &&
+                selectedDoc.accessible !== false && (
+                  <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl flex items-center justify-between gap-2">
+                    <span className="font-bold text-[10px] text-indigo-900">
+                      เครื่องมือผู้จัดทำ (Editor Tools):
+                    </span>
+                    <button
+                      id={`btn-edit-doc-${selectedDoc.id}`}
+                      onClick={() => {
+                        setEditingDoc({ ...selectedDoc });
+                        setIsEditOpen(true);
+                      }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer text-[10px] font-bold shadow-xs"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      แก้ไขข้อมูลเอกสาร
+                    </button>
+                  </div>
+                )}
+
               {/* Workflow Admin Action buttons */}
               {selectedDoc.status === "Pending Approval" && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
@@ -905,8 +984,33 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                 </div>
               )}
 
-              {/* Download Action with Role-based constraints for QP */}
-              {selectedDoc.type === "QP" && currentUser.role !== "Admin" ? (
+              {/* Access Control Check: Locked Card for Unauthorized Department */}
+              {selectedDoc.accessible === false ? (
+                <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-2.5 text-left">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-1.5 bg-amber-100 rounded-lg text-amber-800 shrink-0 mt-0.5">
+                      <Lock className="w-4 h-4" />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="block font-bold text-amber-950 text-[11px]">
+                        เอกสารจำกัดสิทธิ์เฉพาะแผนก (Department Restricted)
+                      </span>
+                      <p className="text-amber-800 text-[10px] leading-relaxed">
+                        คุณไม่มีสิทธิ์เข้าถึงเนื้อหา ตัวอย่าง
+                        หรือไฟล์แนบของเอกสารนี้
+                        เนื่องจากถูกจำกัดสิทธิ์ไว้เฉพาะแผนกที่ได้รับอนุญาตเท่านั้น
+                      </p>
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-amber-200/60 text-[10px] text-slate-600">
+                    แผนกเจ้าของงาน:{" "}
+                    <span className="font-semibold text-slate-800">
+                      {getDepartmentById(selectedDoc.departmentId)?.name ||
+                        selectedDoc.departmentId}
+                    </span>
+                  </div>
+                </div>
+              ) : selectedDoc.type === "QP" && currentUser.role !== "Admin" ? (
                 <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl space-y-3 text-left">
                   <div className="flex items-start gap-2.5">
                     <div className="p-1.5 bg-rose-100 rounded-lg text-rose-700 shrink-0 mt-0.5">
@@ -983,7 +1087,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                                 const updated = await api.downloadDocument(
                                   selectedDoc.id,
                                 );
-                                onUpdateDocument(updated);
+                                if (onLocalDocumentSync) {
+                                  onLocalDocumentSync(updated);
+                                } else {
+                                  onUpdateDocument(updated);
+                                }
                               } catch (err) {
                                 console.error(
                                   "Failed to record download count:",
@@ -1010,116 +1118,124 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   );
                 })()
               )}
-              {/* เปิดให้กดอ่านในระบบได้สำหรับเอกสารทุกประเภท (QP, WI, FORM) */}
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const updated = await api.viewDocument(selectedDoc.id);
-                    onUpdateDocument(updated);
-                  } catch (err) {
-                    console.error("Failed to record view count:", err);
-                  }
-                  setIsSecureViewerOpen(true);
-                }}
-                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition text-[10px] cursor-pointer border border-slate-200"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                {selectedDoc.type === "QP"
-                  ? "เปิดอ่านระบบตรวจสอบความมั่นคงปลอดภัย (Admin Secure Viewer)"
-                  : `เปิดอ่านเอกสาร ${selectedDoc.type} ในระบบ (Online Viewer)`}
-              </button>
-              {/* RATING & REVISION FEEDBACK SECTION */}
-              <div className="border-t border-slate-100 pt-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-800 text-xs">
-                    ข้อคิดเห็น & ข้อเสนอแนะปรับปรุง (
-                    {selectedDocComments.length})
-                  </h4>
-                  <span className="text-[9px] text-indigo-600 block bg-indigo-50 px-1.5 py-0.5 rounded">
-                    นำไปสู่ Version ใหม่
-                  </span>
-                </div>
-
-                {/* Listing */}
-                <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                  {selectedDocComments.length === 0 ? (
-                    <p className="text-slate-400 text-[10px] italic py-2 text-center">
-                      ยังไม่มีข้อเสนอแนะความรู้เพิ่มเติมสำหรับไฟล์นี้
-                    </p>
-                  ) : (
-                    selectedDocComments.map((c) => (
-                      <div
-                        key={c.id}
-                        className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 space-y-1"
-                      >
-                        <div className="flex items-center justify-between text-[10px]">
-                          <span className="font-bold text-slate-700">
-                            {c.userName}
-                          </span>
-                          <div className="flex items-center gap-0.5">
-                            {Array.from({ length: 5 }).map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`w-2.5 h-2.5 ${i < c.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        <p className="text-slate-600 text-[10px] leading-relaxed">
-                          {c.comment}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {/* Form to comment */}
-                <form
-                  id="form-add-doc-comment"
-                  onSubmit={(e) => handleAddCommentSubmit(e, selectedDoc.id)}
-                  className="space-y-2.5"
+              {/* เปิดให้กดอ่านในระบบได้สำหรับเอกสารที่ได้รับอนุญาต */}
+              {selectedDoc.accessible !== false && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const updated = await api.viewDocument(selectedDoc.id);
+                      if (onLocalDocumentSync) {
+                        onLocalDocumentSync(updated);
+                      } else {
+                        onUpdateDocument(updated);
+                      }
+                    } catch (err) {
+                      console.error("Failed to record view count:", err);
+                    }
+                    setIsSecureViewerOpen(true);
+                  }}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition text-[10px] cursor-pointer border border-slate-200"
                 >
+                  <Eye className="w-3.5 h-3.5" />
+                  {selectedDoc.type === "QP"
+                    ? "เปิดอ่านระบบตรวจสอบความมั่นคงปลอดภัย (Admin Secure Viewer)"
+                    : `เปิดอ่านเอกสาร ${selectedDoc.type} ในระบบ (Online Viewer)`}
+                </button>
+              )}
+              {/* RATING & REVISION FEEDBACK SECTION (เฉพาะเอกสารที่ได้รับสิทธิ์) */}
+              {selectedDoc.accessible !== false && (
+                <div className="border-t border-slate-100 pt-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-semibold text-slate-500">
-                      ระดับความพึงพอใจการเข้าใจงาน:
-                    </label>
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          type="button"
-                          key={star}
-                          onClick={() => setRatingInput(star)}
-                          className="text-amber-400 focus:outline-none cursor-pointer"
+                    <h4 className="font-bold text-slate-800 text-xs">
+                      ข้อคิดเห็น & ข้อเสนอแนะปรับปรุง (
+                      {selectedDocComments.length})
+                    </h4>
+                    <span className="text-[9px] text-indigo-600 block bg-indigo-50 px-1.5 py-0.5 rounded">
+                      นำไปสู่ Version ใหม่
+                    </span>
+                  </div>
+
+                  {/* Listing */}
+                  <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                    {selectedDocComments.length === 0 ? (
+                      <p className="text-slate-400 text-[10px] italic py-2 text-center">
+                        ยังไม่มีข้อเสนอแนะความรู้เพิ่มเติมสำหรับไฟล์นี้
+                      </p>
+                    ) : (
+                      selectedDocComments.map((c) => (
+                        <div
+                          key={c.id}
+                          className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 space-y-1"
                         >
-                          <Star
-                            className={`w-4 h-4 ${ratingInput >= star ? "fill-amber-400" : "text-slate-200"}`}
-                          />
-                        </button>
-                      ))}
-                    </div>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="font-bold text-slate-700">
+                              {c.userName}
+                            </span>
+                            <div className="flex items-center gap-0.5">
+                              {Array.from({ length: 5 }).map((_, i) => (
+                                <Star
+                                  key={i}
+                                  className={`w-2.5 h-2.5 ${i < c.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                          <p className="text-slate-600 text-[10px] leading-relaxed">
+                            {c.comment}
+                          </p>
+                        </div>
+                      ))
+                    )}
                   </div>
 
-                  <div className="relative">
-                    <textarea
-                      id="comment-textarea"
-                      placeholder="เสนอจุดปรับปรุง อุปสรรคหน้าเครื่องจักร หรือเสนอเวอรชั่นถัดไป..."
-                      rows={2}
-                      value={commentInput}
-                      onChange={(e) => setCommentInput(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-[10px] focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800"
-                    />
-                  </div>
-
-                  <button
-                    id="submit-comment-btn"
-                    type="submit"
-                    className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-1.5 rounded-lg text-[9px] cursor-pointer transition flex items-center justify-center gap-1"
+                  {/* Form to comment */}
+                  <form
+                    id="form-add-doc-comment"
+                    onSubmit={(e) => handleAddCommentSubmit(e, selectedDoc.id)}
+                    className="space-y-2.5"
                   >
-                    ส่งข้อเสนอแนะปรับปรุงเอกสาร
-                  </button>
-                </form>
-              </div>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold text-slate-500">
+                        ระดับความพึงพอใจการเข้าใจงาน:
+                      </label>
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            type="button"
+                            key={star}
+                            onClick={() => setRatingInput(star)}
+                            className="text-amber-400 focus:outline-none cursor-pointer"
+                          >
+                            <Star
+                              className={`w-4 h-4 ${ratingInput >= star ? "fill-amber-400" : "text-slate-200"}`}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <textarea
+                        id="comment-textarea"
+                        placeholder="เสนอจุดปรับปรุง อุปสรรคหน้าเครื่องจักร หรือเสนอเวอรชั่นถัดไป..."
+                        rows={2}
+                        value={commentInput}
+                        onChange={(e) => setCommentInput(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-[10px] focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800"
+                      />
+                    </div>
+
+                    <button
+                      id="submit-comment-btn"
+                      type="submit"
+                      className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-1.5 rounded-lg text-[9px] cursor-pointer transition flex items-center justify-center gap-1"
+                    >
+                      ส่งข้อเสนอแนะปรับปรุงเอกสาร
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1152,6 +1268,20 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               onSubmit={handleUploadSubmit}
               className="p-5 space-y-4 text-xs"
             >
+              {uploadModalError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-start gap-2">
+                  <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-bold block">
+                      เกิดข้อผิดพลาดในการบันทึกเอกสาร
+                    </span>
+                    <p className="text-[11px] leading-relaxed">
+                      {uploadModalError}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 {/* Type */}
                 <div className="space-y-1">
@@ -1181,9 +1311,19 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     id="upload-doc-dept"
                     value={newDoc.departmentId}
                     required
-                    onChange={(e) =>
-                      setNewDoc({ ...newDoc, departmentId: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const newDeptId = e.target.value;
+                      setNewDoc((prev) => ({
+                        ...prev,
+                        departmentId: newDeptId,
+                        allowedDepartmentIds: Array.from(
+                          new Set([
+                            newDeptId,
+                            ...(prev.allowedDepartmentIds || []),
+                          ]),
+                        ).filter(Boolean),
+                      }));
+                    }}
                     className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700 text-xs"
                   >
                     <option value="">-- กรุณาเลือกแผนก --</option>
@@ -1193,6 +1333,101 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                       </option>
                     ))}
                   </select>
+                </div>
+              </div>
+
+              {/* Department Authorization Configuration */}
+              <div className="border border-slate-200 bg-slate-50/80 p-3.5 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold text-slate-700 text-xs flex items-center gap-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5 text-indigo-600" />
+                    กำหนดแผนกที่ได้รับอนุญาตให้เข้าถึง (Allowed Departments):
+                  </label>
+                  <div className="flex items-center gap-1.5 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allIds = getAllDepartmentsFlat().map((d) => d.id);
+                        setNewDoc((prev) => ({
+                          ...prev,
+                          allowedDepartmentIds: allIds,
+                        }));
+                      }}
+                      className="text-indigo-600 hover:underline font-bold cursor-pointer"
+                    >
+                      ทุกแผนก
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewDoc((prev) => ({
+                          ...prev,
+                          allowedDepartmentIds: prev.departmentId
+                            ? [prev.departmentId]
+                            : [],
+                        }));
+                      }}
+                      className="text-slate-500 hover:underline cursor-pointer"
+                    >
+                      เฉพาะแผนกเจ้าของงาน
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-500">
+                  แผนกเจ้าของงาน (
+                  {getDepartmentById(newDoc.departmentId)?.name || "ที่เลือก"})
+                  จะได้รับสิทธิ์เข้าถึงโดยอัตโนมัติเสมอ คุณสามารถเลือกแผนกอื่นๆ
+                  เพิ่มเติมได้
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-32 overflow-y-auto p-1.5 bg-white rounded-lg border border-slate-200">
+                  {getAllDepartmentsFlat().map((dept) => {
+                    const isOwner = dept.id === newDoc.departmentId;
+                    const isChecked =
+                      isOwner ||
+                      (newDoc.allowedDepartmentIds || []).includes(dept.id);
+
+                    return (
+                      <label
+                        key={dept.id}
+                        className={`flex items-center gap-1.5 p-1.5 rounded cursor-pointer text-[10px] transition ${
+                          isOwner
+                            ? "bg-indigo-50 text-indigo-900 font-semibold cursor-not-allowed"
+                            : isChecked
+                              ? "bg-slate-100 text-slate-900 font-medium"
+                              : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={isOwner}
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const current = new Set(
+                              newDoc.allowedDepartmentIds || [],
+                            );
+                            if (newDoc.departmentId)
+                              current.add(newDoc.departmentId);
+                            if (e.target.checked) {
+                              current.add(dept.id);
+                            } else {
+                              current.delete(dept.id);
+                            }
+                            setNewDoc((prev) => ({
+                              ...prev,
+                              allowedDepartmentIds: Array.from(current),
+                            }));
+                          }}
+                          className="rounded text-indigo-600 focus:ring-indigo-500 text-xs"
+                        />
+                        <span className="truncate" title={dept.name}>
+                          {dept.name}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1245,6 +1480,24 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     setNewDoc({ ...newDoc, description: e.target.value })
                   }
                   required
+                  className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-800 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Owner / Responsible party */}
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-600 block">
+                  ผู้รับผิดชอบ / หน่วยงานเจ้าของเอกสาร (Document Owner /
+                  Custodian):
+                </label>
+                <input
+                  id="upload-doc-owner"
+                  type="text"
+                  placeholder="เช่น QS (Document Control), เจ้าหน้าที่ QS, หรือระบุชื่อผู้จัดทำ"
+                  value={newDoc.owner}
+                  onChange={(e) =>
+                    setNewDoc({ ...newDoc, owner: e.target.value })
+                  }
                   className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-800 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                 />
               </div>
@@ -1431,9 +1684,13 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         >
           <div className="bg-white rounded-2xl w-full max-w-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 border border-[#e1ded5] my-auto">
             {/* Header */}
-            <div className="bg-[#15329c] text-white px-5 py-3.5 flex items-center justify-between">
+            <div
+              className={`${currentUser.role === "Admin" ? "bg-[#15329c]" : "bg-indigo-600"} text-white px-5 py-3.5 flex items-center justify-between`}
+            >
               <span className="font-bold text-xs uppercase">
-                แก้ไขข้อมูลเอกสารมาตรฐาน (Admin Edit Mode)
+                {currentUser.role === "Admin"
+                  ? "แก้ไขข้อมูลเอกสารมาตรฐาน (Admin Edit Mode)"
+                  : "แก้ไขข้อมูลเอกสารมาตรฐาน (Editor Mode)"}
               </span>
               <button
                 id="close-edit-modal-btn"
@@ -1450,6 +1707,20 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               onSubmit={handleEditSubmit}
               className="p-5 space-y-4 text-xs"
             >
+              {editModalError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-start gap-2">
+                  <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-bold block">
+                      เกิดข้อผิดพลาดในการแก้ไขเอกสาร
+                    </span>
+                    <p className="text-[11px] leading-relaxed">
+                      {editModalError}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 {/* Type */}
                 <div className="space-y-1">
@@ -1480,14 +1751,26 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                   </label>
                   <select
                     id="edit-doc-dept"
+                    disabled={currentUser.role !== "Admin"}
                     value={editingDoc?.departmentId || ""}
-                    onChange={(e) =>
-                      setEditingDoc({
-                        ...editingDoc,
-                        departmentId: e.target.value,
-                      })
-                    }
-                    className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700 text-xs"
+                    onChange={(e) => {
+                      const newDeptId = e.target.value;
+                      setEditingDoc((prev: any) => ({
+                        ...prev,
+                        departmentId: newDeptId,
+                        allowedDepartmentIds: Array.from(
+                          new Set([
+                            newDeptId,
+                            ...(prev.allowedDepartmentIds || []),
+                          ]),
+                        ).filter(Boolean),
+                      }));
+                    }}
+                    className={`w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-700 text-xs ${
+                      currentUser.role !== "Admin"
+                        ? "bg-slate-100 cursor-not-allowed text-slate-500"
+                        : ""
+                    }`}
                   >
                     {getAllDepartmentsFlat().map((dept) => (
                       <option key={dept.id} value={dept.id}>
@@ -1495,6 +1778,102 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                       </option>
                     ))}
                   </select>
+                </div>
+              </div>
+
+              {/* Department Authorization Configuration */}
+              <div className="border border-slate-200 bg-slate-50/80 p-3.5 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold text-slate-700 text-xs flex items-center gap-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5 text-indigo-600" />
+                    กำหนดแผนกที่ได้รับอนุญาตให้เข้าถึง (Allowed Departments):
+                  </label>
+                  <div className="flex items-center gap-1.5 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allIds = getAllDepartmentsFlat().map((d) => d.id);
+                        setEditingDoc((prev: any) => ({
+                          ...prev,
+                          allowedDepartmentIds: allIds,
+                        }));
+                      }}
+                      className="text-indigo-600 hover:underline font-bold cursor-pointer"
+                    >
+                      ทุกแผนก
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingDoc((prev: any) => ({
+                          ...prev,
+                          allowedDepartmentIds: prev.departmentId
+                            ? [prev.departmentId]
+                            : [],
+                        }));
+                      }}
+                      className="text-slate-500 hover:underline cursor-pointer"
+                    >
+                      เฉพาะแผนกเจ้าของงาน
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-500">
+                  แผนกเจ้าของงาน (
+                  {getDepartmentById(editingDoc.departmentId)?.name ||
+                    "ที่เลือก"}
+                  ) จะได้รับสิทธิ์เข้าถึงโดยอัตโนมัติเสมอ
+                  คุณสามารถเลือกแผนกอื่นๆ เพิ่มเติมได้
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-32 overflow-y-auto p-1.5 bg-white rounded-lg border border-slate-200">
+                  {getAllDepartmentsFlat().map((dept) => {
+                    const isOwner = dept.id === editingDoc.departmentId;
+                    const isChecked =
+                      isOwner ||
+                      (editingDoc.allowedDepartmentIds || []).includes(dept.id);
+
+                    return (
+                      <label
+                        key={dept.id}
+                        className={`flex items-center gap-1.5 p-1.5 rounded cursor-pointer text-[10px] transition ${
+                          isOwner
+                            ? "bg-indigo-50 text-indigo-900 font-semibold cursor-not-allowed"
+                            : isChecked
+                              ? "bg-slate-100 text-slate-900 font-medium"
+                              : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={isOwner}
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const current = new Set(
+                              editingDoc.allowedDepartmentIds || [],
+                            );
+                            if (editingDoc.departmentId)
+                              current.add(editingDoc.departmentId);
+                            if (e.target.checked) {
+                              current.add(dept.id);
+                            } else {
+                              current.delete(dept.id);
+                            }
+                            setEditingDoc((prev: any) => ({
+                              ...prev,
+                              allowedDepartmentIds: Array.from(current),
+                            }));
+                          }}
+                          className="rounded text-indigo-600 focus:ring-indigo-500 text-xs"
+                        />
+                        <span className="truncate" title={dept.name}>
+                          {dept.name}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1531,6 +1910,27 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     })
                   }
                   required
+                  className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-800 text-xs focus:ring-1 focus:ring-[#15329c] focus:outline-none"
+                />
+              </div>
+
+              {/* Owner / Responsible party */}
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-600 block">
+                  ผู้รับผิดชอบ / หน่วยงานเจ้าของเอกสาร (Document Owner /
+                  Custodian):
+                </label>
+                <input
+                  id="edit-doc-owner"
+                  type="text"
+                  placeholder="เช่น QS (Document Control), เจ้าหน้าที่ QS, หรือระบุชื่อผู้จัดทำ"
+                  value={editingDoc.owner || ""}
+                  onChange={(e) =>
+                    setEditingDoc({
+                      ...editingDoc,
+                      owner: e.target.value,
+                    })
+                  }
                   className="w-full bg-white border border-slate-200 p-2 rounded-lg text-slate-800 text-xs focus:ring-1 focus:ring-[#15329c] focus:outline-none"
                 />
               </div>
@@ -1659,9 +2059,12 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                 <button
                   id="btn-confirm-edit"
                   type="submit"
-                  className="bg-[#15329c] hover:bg-[#11297e] text-white font-bold px-5 py-2 rounded-lg cursor-pointer transition"
+                  disabled={isSubmittingDoc}
+                  className="bg-[#15329c] hover:bg-[#11297e] text-white font-bold px-5 py-2 rounded-lg cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  บันทึกการปรับปรุงข้อมูล
+                  {isSubmittingDoc
+                    ? "กำลังบันทึก..."
+                    : "บันทึกการปรับปรุงข้อมูล"}
                 </button>
               </div>
             </form>

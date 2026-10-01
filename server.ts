@@ -23,6 +23,10 @@ import {
 } from "./src/data/initialData";
 import { DEFAULT_AVATAR_URL } from "./src/utils/assets";
 import {
+  getDepartmentById,
+  getMainDepartmentOf,
+} from "./src/utils/departmentUtils";
+import {
   getInitialCompetencies,
   getInitialCertificates,
   getInitialKMContributionLogs,
@@ -92,13 +96,21 @@ function sanitizeUserForViewer(user: UserType, viewerId: string) {
 // --- AUTH: JWT setup + middleware ---
 // ============================================================
 
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  console.error(
-    "❌ JWT_SECRET environment variable is required. Refusing to start server — set JWT_SECRET in .env before deploying.",
-  );
-  process.exit(1);
+const isProduction = process.env.NODE_ENV === "production";
+if (!process.env.JWT_SECRET) {
+  if (isProduction) {
+    console.error(
+      "❌ FATAL: JWT_SECRET environment variable is missing. Server cannot start in production.",
+    );
+    process.exit(1);
+  } else {
+    console.warn(
+      "⚠️ [DEV WARNING] JWT_SECRET is not set. Generating temporary random secret for this session. Set JWT_SECRET in .env for persistent sessions.",
+    );
+  }
 }
+const JWT_SECRET =
+  process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex");
 
 interface AuthPayload {
   id: string;
@@ -106,20 +118,32 @@ interface AuthPayload {
   role: string;
 }
 
-// ขยาย express Request ให้เก็บ user ที่ decode แล้วจาก token
+interface CurrentUserAuth {
+  id: string;
+  employeeId: string;
+  role: string;
+  departmentId: string;
+  name: string;
+  status?: string;
+}
+
+// ขยาย express Request ให้เก็บ user ที่ resolve จาก DB ปัจจุบัน
 declare global {
   namespace Express {
     interface Request {
-      authUser?: AuthPayload;
+      authUser?: CurrentUserAuth;
     }
   }
 }
+
+let db_users: UserType[] = [];
 
 function signToken(payload: AuthPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "8h" });
 }
 
 // ต้อง login (มี token ที่ถูกต้อง) ถึงจะเข้าถึง endpoint นี้ได้
+// ความปลอดภัยระดับ Single Source of Truth: resolve role, departmentId, และ status จาก DB ปัจจุบันเสมอ
 function requireAuth(
   req: express.Request,
   res: express.Response,
@@ -134,7 +158,32 @@ function requireAuth(
   const token = header.slice("Bearer ".length);
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as AuthPayload;
-    req.authUser = decoded;
+    // Resolve current DB user: DB user is current authority
+    const userInDb = db_users.find(
+      (u) =>
+        (decoded.id && u.id === decoded.id) ||
+        (decoded.employeeId && u.employeeId === decoded.employeeId),
+    );
+    if (!userInDb) {
+      return res.status(401).json({
+        error: "UNAUTHORIZED",
+        message: "ไม่พบข้อมูลผู้ใช้ในระบบ หรือบัญชีถูกลบแล้ว",
+      });
+    }
+    if (userInDb.status === "Suspended" || userInDb.status === "Terminated") {
+      return res.status(403).json({
+        error: "ACCOUNT_DISABLED",
+        message: "บัญชีผู้ใช้ถูกระงับสิทธิ์การใช้งาน กรุณาติดต่อผู้ดูแลระบบ",
+      });
+    }
+    req.authUser = {
+      id: userInDb.id,
+      employeeId: userInDb.employeeId,
+      role: userInDb.role,
+      departmentId: userInDb.departmentId,
+      name: userInDb.name,
+      status: userInDb.status,
+    };
     next();
   } catch {
     return res.status(401).json({
@@ -142,6 +191,90 @@ function requireAuth(
       message: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่",
     });
   }
+}
+
+// Document Department Authorization: Single Source of Truth
+function canAccessDocument(
+  user: CurrentUserAuth | undefined,
+  doc: DocumentItem | undefined,
+): boolean {
+  if (!user || !doc) return false;
+  // Admin bypasses Document Department Access layer
+  if (user.role === "Admin") return true;
+
+  // Validate user department exists in system — fail-closed if invalid
+  const userDept = getDepartmentById(user.departmentId);
+  if (!userDept) return false;
+
+  // Target allowed departments: doc.allowedDepartmentIds + owner doc.departmentId
+  const allowedDeptIds =
+    Array.isArray(doc.allowedDepartmentIds) &&
+    doc.allowedDepartmentIds.length > 0
+      ? doc.allowedDepartmentIds
+      : [doc.departmentId];
+
+  const targetDepts = Array.from(
+    new Set([...allowedDeptIds, doc.departmentId]),
+  ).filter(Boolean);
+
+  for (const targetId of targetDepts) {
+    // 1. Direct department match
+    if (user.departmentId === targetId) return true;
+
+    // 2. Department inheritance: ONE-WAY Main Department -> Sub Department
+    // Sibling or Sub -> Main is strictly DENIED
+    if (userDept.parentId === null) {
+      const targetDept = getDepartmentById(targetId);
+      if (targetDept && targetDept.parentId === userDept.id) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// Normalize allowedDepartmentIds: validate IDs, dedupe, and enforce owner department inclusion
+// Throws Error with INVALID_DEPARTMENT_ACCESS on any unrecognized department ID
+function normalizeAllowedDepartments(
+  ownerDeptId: string,
+  rawAllowedIds: unknown,
+): string[] {
+  const result = new Set<string>();
+  const ownerDept = getDepartmentById(ownerDeptId);
+  if (!ownerDept) {
+    const err: any = new Error(
+      `แผนกเจ้าของเอกสาร "${ownerDeptId}" ไม่ถูกต้องหรือไม่พบในระบบ`,
+    );
+    err.code = "INVALID_DEPARTMENT_ACCESS";
+    throw err;
+  }
+  result.add(ownerDeptId);
+
+  if (rawAllowedIds !== undefined && rawAllowedIds !== null) {
+    if (!Array.isArray(rawAllowedIds)) {
+      const err: any = new Error(
+        "allowedDepartmentIds ต้องเป็น Array ของรหัสแผนก",
+      );
+      err.code = "INVALID_DEPARTMENT_ACCESS";
+      throw err;
+    }
+    for (const id of rawAllowedIds) {
+      if (
+        typeof id !== "string" ||
+        !id.trim() ||
+        !getDepartmentById(id.trim())
+      ) {
+        const err: any = new Error(
+          `รหัสแผนก "${id}" ไม่ถูกต้องหรือไม่พบในระบบ`,
+        );
+        err.code = "INVALID_DEPARTMENT_ACCESS";
+        throw err;
+      }
+      result.add(id.trim());
+    }
+  }
+  return Array.from(result);
 }
 
 // ต้องมี role ที่กำหนดเท่านั้นถึงจะผ่าน (ใช้ต่อจาก requireAuth เสมอ)
@@ -208,9 +341,9 @@ async function seedInitialAdmin(
   let generated = false;
 
   if (!employeeId || !plainPassword) {
-    // ไม่ได้ตั้งค่าผ่าน .env — generate ให้ระบบยังใช้งานได้ ไม่ hardcode ในซอร์ส
+    // ไม่ได้ตั้งค่าผ่าน .env — generate รหัสผ่านสุ่มปลอดภัยจริง ไม่ hardcode ในซอร์ส
     employeeId = employeeId || "ADMIN001";
-    plainPassword = plainPassword || crypto.randomBytes(6).toString("hex");
+    plainPassword = plainPassword || crypto.randomBytes(12).toString("hex");
     generated = true;
   }
 
@@ -253,10 +386,10 @@ async function seedInitialAdmin(
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
-  let db_users: UserType[] = await seedInitialAdmin(INITIAL_USERS);
+  db_users = await seedInitialAdmin(INITIAL_USERS);
   let db_documents: DocumentItem[] = [...INITIAL_DOCUMENTS];
   let db_courses: Course[] = [...INITIAL_COURSES];
   let db_kb_articles: KBArticle[] = [...INITIAL_KB_ARTICLES];
@@ -646,9 +779,72 @@ async function startServer() {
     buffer: Buffer;
     mimeType: string;
     uploadedBy: string; // employeeId ของผู้อัปโหลด
-    restricted: boolean; // true = เฉพาะ Admin หรือผู้อัปโหลดเองเท่านั้นที่อ่านได้
+    restricted: boolean; // true = เฉพาะ Admin หรือผู้อัปโหลดเองเท่านั้นที่อ่านได้ (สำหรับไฟล์ QP)
+    documentId?: string; // id ของ Document ที่ไฟล์นี้ผูกอยู่ (Server-owned binding)
+    uploadedAt: string;
   }
   const uploadedFiles = new Map<string, UploadedFileMeta>();
+
+  const uploadsDirs = [
+    path.join(process.cwd(), "public", "uploads"),
+    path.join(process.cwd(), "dist", "uploads"),
+  ];
+
+  function loadSidecar(storedName: string): UploadedFileMeta | null {
+    if (uploadedFiles.has(storedName)) {
+      return uploadedFiles.get(storedName)!;
+    }
+    for (const dir of uploadsDirs) {
+      const metaPath = path.join(dir, `${storedName}.meta.json`);
+      const filePath = path.join(dir, storedName);
+      if (fs.existsSync(metaPath) && fs.existsSync(filePath)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+          const meta: UploadedFileMeta = {
+            buffer: fs.readFileSync(filePath),
+            mimeType: raw.mimeType || "application/octet-stream",
+            uploadedBy: raw.uploadedBy || "",
+            restricted: !!raw.restricted,
+            documentId: raw.documentId || undefined,
+            uploadedAt: raw.uploadedAt || new Date().toISOString(),
+          };
+          uploadedFiles.set(storedName, meta);
+          return meta;
+        } catch (e) {
+          console.warn("Failed to parse sidecar:", metaPath, e);
+        }
+      }
+    }
+    return null;
+  }
+
+  function updateSidecar(
+    storedName: string,
+    updates: Partial<UploadedFileMeta>,
+  ) {
+    const existing = loadSidecar(storedName);
+    if (!existing) return;
+    Object.assign(existing, updates);
+    uploadedFiles.set(storedName, existing);
+
+    const sidecarJson = JSON.stringify({
+      mimeType: existing.mimeType,
+      uploadedBy: existing.uploadedBy,
+      restricted: existing.restricted,
+      documentId: existing.documentId,
+      uploadedAt: existing.uploadedAt,
+    });
+
+    uploadsDirs.forEach((dir) => {
+      try {
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const metaPath = path.join(dir, `${storedName}.meta.json`);
+        fs.writeFileSync(metaPath, sidecarJson);
+      } catch (e) {
+        console.warn("Failed to write sidecar:", dir, e);
+      }
+    });
+  }
 
   const ALLOWED_UPLOAD_EXTENSIONS: Record<string, string> = {
     pdf: "application/pdf",
@@ -692,25 +888,28 @@ async function startServer() {
           });
         }
         const buffer = Buffer.from(fileData, "base64");
-        // ชื่อไฟล์บนดิสก์เป็น uuid เสมอ — ไม่ใช้ชื่อไฟล์เดิมจาก client (กันชื่อชนกัน/แฝง path)
-        // restricted ตั้งค่าจริงตอนสร้าง/แก้ไข document record ที่อ้างอิงไฟล์นี้ (ดู syncFileRestriction)
+        // ชื่อไฟล์บนดิสก์เป็น uuid เสมอ — ไม่ใช้ชื่อไฟล์เดิมจาก client
         const storedName = `${crypto.randomUUID()}.${ext}`;
-        uploadedFiles.set(storedName, {
+        const uploadedAt = new Date().toISOString();
+
+        const fileMeta: UploadedFileMeta = {
           buffer,
           mimeType: resolvedMimeType,
           uploadedBy: req.authUser!.employeeId,
           restricted: false,
-        });
+          documentId: undefined, // First binding: ยังไม่ได้ผูกกับเอกสารใด
+          uploadedAt,
+        };
+        uploadedFiles.set(storedName, fileMeta);
 
-        const uploadsDirs = [
-          path.join(process.cwd(), "public", "uploads"),
-          path.join(process.cwd(), "dist", "uploads"),
-        ];
         const metaJson = JSON.stringify({
           restricted: false,
           uploadedBy: req.authUser!.employeeId,
           mimeType: resolvedMimeType,
+          documentId: null,
+          uploadedAt,
         });
+
         uploadsDirs.forEach((dir) => {
           try {
             if (!fs.existsSync(dir)) {
@@ -743,7 +942,7 @@ async function startServer() {
     role: string;
   }
 
-  function signFileToken(filename: string, user: AuthPayload): string {
+  function signFileToken(filename: string, user: CurrentUserAuth): string {
     const payload: FileToken = {
       filename,
       id: user.id,
@@ -754,7 +953,7 @@ async function startServer() {
   }
 
   // สร้างลิงก์ชั่วคราวสำหรับฝังใน src/href ที่แนบ Authorization header เองไม่ได้
-  // (img, video, iframe, a) — เรียกใหม่ทุกครั้งที่จะแสดงไฟล์ ไม่บันทึกลิงก์นี้ไว้ถาวร
+  // Security invariant 8: resolve file -> owning document -> canAccessDocument before sign
   app.post("/api/files/sign", requireAuth, (req, res) => {
     const { filename } = req.body;
     if (
@@ -765,42 +964,91 @@ async function startServer() {
     ) {
       return res.status(400).json({ error: "INVALID_FILENAME" });
     }
-    const token = signFileToken(filename, req.authUser!);
+
+    const currentDbUser = req.authUser!;
+    const meta = loadSidecar(filename);
+    if (!meta) {
+      return res
+        .status(404)
+        .json({ error: "FILE_NOT_FOUND", message: "ไม่พบไฟล์ที่ระบุในระบบ" });
+    }
+
+    // Resolve owning document
+    if (meta.documentId) {
+      if (
+        meta.documentId.startsWith("deleted:") ||
+        meta.documentId.startsWith("replaced:")
+      ) {
+        return res.status(403).json({
+          error: "ORPHANED_FILE",
+          message:
+            "เอกสารที่ผูกกับไฟล์นี้ถูกลบหรือเปลี่ยนไฟล์แล้ว ไม่สามารถเข้าถึงไฟล์ได้",
+        });
+      }
+      const owningDoc = db_documents.find((d) => d.id === meta.documentId);
+      if (!owningDoc) {
+        return res.status(403).json({
+          error: "ORPHANED_FILE",
+          message: "ไม่พบเอกสารต้นทางที่ผูกกับไฟล์นี้",
+        });
+      }
+      // Check Document Department Authorization
+      if (!canAccessDocument(currentDbUser, owningDoc)) {
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารและไฟล์ของแผนกนี้",
+        });
+      }
+      // Check QP Rule: QP files cannot be downloaded/signed by non-Admin
+      if (owningDoc.type === "QP" && currentDbUser.role !== "Admin") {
+        return res.status(403).json({
+          error: "QP_RESTRICTED",
+          message:
+            "ระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์การดาวน์โหลดเฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
+        });
+      }
+    } else {
+      // Unbound file: only uploader or Admin can sign/access
+      if (
+        meta.uploadedBy !== currentDbUser.employeeId &&
+        currentDbUser.role !== "Admin"
+      ) {
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "ไฟล์นี้ยังไม่ได้ผูกกับเอกสาร และคุณไม่ใช่ผู้อัปโหลดไฟล์",
+        });
+      }
+    }
+
+    const token = signFileToken(filename, currentDbUser);
     res.json({ url: `/uploads/${filename}?t=${token}` });
   });
 
-  // รับได้ทั้ง Authorization header ปกติ (เรียกผ่าน fetch/JS) หรือ query token
-  // จาก /api/files/sign (ใช้กับ src/href ที่แนบ header เองไม่ได้)
+  // รับได้ทั้ง Authorization header ปกติ หรือ query token จาก /api/files/sign
+  // Resolve current DB user เสมอ
   function fileRequestAuth(
     req: express.Request,
     res: express.Response,
     next: express.NextFunction,
   ) {
+    let rawAuth: { id?: string; employeeId?: string; role?: string } | null =
+      null;
     const header = req.headers.authorization;
     if (header && header.startsWith("Bearer ")) {
       try {
-        req.authUser = jwt.verify(
-          header.slice("Bearer ".length),
-          JWT_SECRET,
-        ) as AuthPayload;
-        return next();
+        rawAuth = jwt.verify(header.slice("Bearer ".length), JWT_SECRET) as any;
       } catch {
-        // ตกไปลองทาง query token ต่อ
+        // continue to query token
       }
     }
     const queryToken = req.query.t;
-    if (typeof queryToken === "string") {
+    if (!rawAuth && typeof queryToken === "string") {
       try {
         const decoded = jwt.verify(queryToken, JWT_SECRET) as FileToken;
         if (decoded.filename !== req.params.filename) {
           return res.status(403).json({ error: "TOKEN_FILE_MISMATCH" });
         }
-        req.authUser = {
-          id: decoded.id,
-          employeeId: decoded.employeeId,
-          role: decoded.role,
-        };
-        return next();
+        rawAuth = decoded;
       } catch {
         return res.status(401).json({
           error: "INVALID_TOKEN",
@@ -808,151 +1056,169 @@ async function startServer() {
         });
       }
     }
-    return res
-      .status(401)
-      .json({ error: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบก่อนใช้งาน" });
+
+    if (!rawAuth) {
+      return res
+        .status(401)
+        .json({ error: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบก่อนใช้งาน" });
+    }
+
+    const userInDb = db_users.find(
+      (u) =>
+        (rawAuth?.id && u.id === rawAuth.id) ||
+        (rawAuth?.employeeId && u.employeeId === rawAuth.employeeId),
+    );
+    if (!userInDb) {
+      return res.status(401).json({ error: "UNAUTHORIZED" });
+    }
+    if (userInDb.status === "Suspended" || userInDb.status === "Terminated") {
+      return res.status(403).json({ error: "ACCOUNT_DISABLED" });
+    }
+
+    req.authUser = {
+      id: userInDb.id,
+      employeeId: userInDb.employeeId,
+      role: userInDb.role,
+      departmentId: userInDb.departmentId,
+      name: userInDb.name,
+      status: userInDb.status,
+    };
+    next();
   }
 
-  // Serve the uploaded files (ไฟล์ที่อัปโหลดแล้ว อ่านได้เมื่อ login เท่านั้น)
+  // Serve the uploaded files (Security invariant 9: defense-in-depth authorization check)
   app.get("/uploads/:filename", fileRequestAuth, (req, res) => {
     const filename = req.params.filename;
-    // sidecar metadata ไม่ใช่ไฟล์แนบที่ควรเปิดเผยให้ใครเรียกดูได้
     if (filename.endsWith(".meta.json")) {
       return res.status(403).json({ error: "FORBIDDEN" });
     }
 
-    const sendWithHeaders = (buffer: Buffer, mimeType: string) => {
-      res.setHeader("Content-Type", mimeType);
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
-      res.send(buffer);
-    };
+    const currentDbUser = req.authUser!;
+    const meta = loadSidecar(filename);
+    if (!meta) {
+      return res.status(404).send("File not found");
+    }
 
-    if (uploadedFiles.has(filename)) {
-      const file = uploadedFiles.get(filename)!;
+    // Defense-in-depth: resolve owning document & verify authorization
+    if (meta.documentId) {
       if (
-        file.restricted &&
-        req.authUser!.role !== "Admin" &&
-        file.uploadedBy !== req.authUser!.employeeId
+        meta.documentId.startsWith("deleted:") ||
+        meta.documentId.startsWith("replaced:")
+      ) {
+        return res.status(403).json({
+          error: "ORPHANED_FILE",
+          message: "เอกสารที่ผูกกับไฟล์นี้ถูกลบหรือเปลี่ยนไฟล์แล้ว",
+        });
+      }
+      const owningDoc = db_documents.find((d) => d.id === meta.documentId);
+      if (!owningDoc) {
+        return res.status(403).json({
+          error: "ORPHANED_FILE",
+          message: "ไม่พบเอกสารต้นทางที่ผูกกับไฟล์นี้",
+        });
+      }
+      if (!canAccessDocument(currentDbUser, owningDoc)) {
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารและไฟล์ของแผนกนี้",
+        });
+      }
+      if (owningDoc.type === "QP" && currentDbUser.role !== "Admin") {
+        return res.status(403).json({
+          error: "QP_RESTRICTED",
+          message:
+            "ระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
+        });
+      }
+    } else {
+      if (
+        meta.uploadedBy !== currentDbUser.employeeId &&
+        currentDbUser.role !== "Admin"
       ) {
         return res.status(403).json({
           error: "FORBIDDEN",
-          message: "ไฟล์นี้จำกัดสิทธิ์เฉพาะผู้ดูแลระบบหรือผู้อัปโหลดเท่านั้น",
+          message: "ไฟล์นี้ยังไม่ได้ผูกกับเอกสาร และคุณไม่ใช่ผู้อัปโหลดไฟล์",
         });
       }
-      return sendWithHeaders(file.buffer, file.mimeType);
     }
-    // Try to read from filesystem (server restart case) — ต้องเช็ค restricted
-    // จาก sidecar .meta.json ด้วย ไม่งั้นไฟล์ QP ที่ restricted จะเปิดอ่านได้ฟรี
-    const candidateDirs = [
-      path.join(process.cwd(), "public", "uploads"),
-      path.join(process.cwd(), "dist", "uploads"),
-    ];
-    for (const dir of candidateDirs) {
-      const filePath = path.join(dir, filename);
-      if (!fs.existsSync(filePath)) continue;
 
-      const metaPath = path.join(dir, `${filename}.meta.json`);
-      let mimeType = "application/octet-stream";
-      if (fs.existsSync(metaPath)) {
-        try {
-          const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
-          mimeType = meta.mimeType || mimeType;
-          if (
-            meta.restricted &&
-            req.authUser!.role !== "Admin" &&
-            meta.uploadedBy !== req.authUser!.employeeId
-          ) {
-            return res.status(403).json({
-              error: "FORBIDDEN",
-              message:
-                "ไฟล์นี้จำกัดสิทธิ์เฉพาะผู้ดูแลระบบหรือผู้อัปโหลดเท่านั้น",
-            });
-          }
-        } catch (e) {
-          console.warn("Failed to parse upload metadata:", metaPath, e);
-        }
-      }
-      return sendWithHeaders(fs.readFileSync(filePath), mimeType);
-    }
-    res.status(404).send("File not found");
+    res.setHeader("Content-Type", meta.mimeType);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.send(meta.buffer);
   });
 
   // --- Secure Server-side Semantic RAG API Endpoint (ต้อง login) ---
+  // Server-authoritative context: client ห้ามเป็น authority ของ context/documents/courses/identity
   app.post("/api/chat", requireAuth, async (req, res) => {
     try {
-      const {
-        query,
-        currentUser,
-        documents,
-        kbArticles,
-        courses,
-        customResources,
-      } = req.body;
-
-      if (!query) {
+      const { query } = req.body;
+      if (!query || typeof query !== "string") {
         return res.status(400).json({ error: "Query is required" });
       }
 
-      // Support database fallback or client-provided context
-      const docList =
-        documents && documents.length > 0 ? documents : db_documents;
-      const kbList =
-        kbArticles && kbArticles.length > 0 ? kbArticles : db_kb_articles;
-      const courseList = courses && courses.length > 0 ? courses : db_courses;
-      const customResList =
-        customResources && customResources.length > 0
-          ? customResources
-          : db_custom_resources;
+      const currentDbUser = req.authUser!;
+
+      // Context is built purely from authorized resources on the server
+      const authorizedDocs = db_documents.filter(
+        (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
+      );
+      const approvedKBs = db_kb_articles.filter((k) => k.status === "Approved");
+      const approvedCourses = db_courses.filter((c) => c.isApproved !== false);
+      const resources = db_custom_resources;
 
       // Compile current RMP Knowledge Base as a structured context list
       const serializedRMPContext = [
-        ...docList
-          .filter((d: any) => d.status === "Published")
-          .map((d: any) => ({
-            id: d.id,
-            title: `[เอกสารระบบ ${d.type}] ${d.title} (Rev.${d.revision})`,
-            type: `เอกสารมาตรฐาน ${d.type}`,
-            category: d.departmentId || d.department || "",
-            content: d.exampleText || d.description,
-          })),
-        ...kbList
-          .filter((k: any) => k.status === "Approved")
-          .map((k: any) => ({
-            id: k.id,
-            title: `[ขุมพลังช่าง Kaizen] ${k.title}`,
-            type: `คลังสมองช่างเทคนิค`,
-            category: k.authorDept,
-            content: `ปัญหา: ${k.problem}\nสาเหตุ: ${k.cause}\nวิธีแก้ไข: ${k.solution}\nการป้องกัน: ${k.prevention}\nหมวดหมู่ช่าง: ${k.type}`,
-          })),
-        ...courseList.flatMap((c: any) =>
-          c.lessons.map((l: any) => ({
+        ...authorizedDocs.map((d) => ({
+          id: d.id,
+          title: `[เอกสารระบบ ${d.type}] ${d.title} (Rev.${d.revision})`,
+          type: `เอกสารมาตรฐาน ${d.type}`,
+          category: d.departmentId || "",
+          content: d.exampleText || d.description,
+        })),
+        ...approvedKBs.map((k) => ({
+          id: k.id,
+          title: `[ขุมพลังช่าง Kaizen] ${k.title}`,
+          type: `คลังสมองช่างเทคนิค`,
+          category: k.authorDept,
+          content: `ปัญหา: ${k.problem}\nสาเหตุ: ${k.cause || ""}\nวิธีแก้ไข: ${k.solution}\nการป้องกัน: ${k.prevention || ""}\nหมวดหมู่ช่าง: ${k.type}`,
+        })),
+        ...approvedCourses.flatMap((c) =>
+          c.lessons.map((l) => ({
             id: `${c.id}-${l.id}`,
             title: `[สอนงาน Onboarding] ${c.title} -> ${l.title}`,
             type: "บทเรียนฝึกอบรม",
-            category: c.departmentId || c.department || "",
+            category: c.badgeKey || "Onboarding",
             content: l.content,
           })),
         ),
-        ...customResList.map((cs: any) => ({
+        ...resources.map((cs) => ({
           id: cs.id,
           title: `[คู่มือเพิ่มเติม] ${cs.title}`,
-          type: `คูมือนอกคลัง (${cs.sourceType})`,
+          type: `คู่มือนอกคลัง (${cs.sourceType})`,
           category: "ส่วนกลาง / สารสนเทศเพิ่มเติม",
           content: cs.content,
         })),
       ];
 
+      const userDeptObj = getDepartmentById(currentDbUser.departmentId);
+      const deptName = userDeptObj
+        ? userDeptObj.name
+        : currentDbUser.departmentId;
+
       const rmpSystemInstruction = `You are "RMP AI Knowledge Assistant", a state-of-the-art secure semantic RAG system developed for Royal Meiwa Pax Co., Ltd. (บริษัท รอแยล เมอิวะ แพ็คซ์ จำกัด).
 Your ultimate mission is to resolve technical questions from operators & engineers while preserving 100% security against hallucinations and preventing industrial machinery accidents (melted barrels, rolls, electric shocks, or manufacturing fires).
 
-User Information: Name: "${currentUser?.name || "Guest User"}", Department: "${currentUser?.departmentId || currentUser?.department || "Production"}". Always greet or reference them politely in Thai.
+User Information: Name: "${currentDbUser.name}", Department: "${deptName}". Always greet or reference them politely in Thai.
 
 🛡️ ABSOLUTE ANTI-HALLUCINATION & ANTI-SLOP GUARDRAILS:
 1. Ground your answers ONLY on the real-world RMP technical context passed below.
-2. If the user asks for specific mechanical parameters (such as extruder barrel temperatures, linespeed, raw material mixtures Co-Polymer ratios / LLDPE / LDPE, safety speed limits, or system configurations) and they are NOT explicitly specified in the context, you must output a safe fallback.
-3. CRITICAL: Never invent or calculate machinery temperatures (e.g. heating zones, extrusion degrees) based on standard industrial web guides or standard plastic manufacturing guidelines. Royal Meiwa Pax machinery operates under tailored constraints; a wrong thermal setting can cause safety catastrophes. If values are missing, explicitly state: "⚠️ ระบบตรวจไม่พบอุณหภูมิมาตรฐานสำหรับกรณีนี้บนเว็บบอร์ดอ้างอิงของโรงงานเมอิวะ แพ็คซ์ เพื่อหลีกเลี่ยงเหตุสุญญากาศทางเทคนิคหรือไฟไหม้เครื่องจักรของโรงงาน โปรดติดต่อหัวหน้าช่างหรือแผนกวิศวกรรม"
-4. Avoid any system credit footer, metadata mentions, or ports references.
+2. If the answer cannot be found in the provided RMP context, strictly respond in polite Thai explaining that this information is not found in the verified RMP library.
+3. Every answer should be respectful, professional, and audit-compliant.
+4. Output must be in JSON matching the specified responseSchema. No external text wrapper.
+5. If the user asks for specific mechanical parameters (such as extruder barrel temperatures, linespeed, raw material mixtures Co-Polymer ratios / LLDPE / LDPE, safety speed limits, or system configurations) and they are NOT explicitly specified in the context, you must output a safe fallback.
+6. CRITICAL: Never invent or calculate machinery temperatures (e.g. heating zones, extrusion degrees) based on standard industrial web guides or standard plastic manufacturing guidelines. Royal Meiwa Pax machinery operates under tailored constraints; a wrong thermal setting can cause safety catastrophes. If values are missing, explicitly state: "⚠️ ระบบตรวจไม่พบอุณหภูมิมาตรฐานสำหรับกรณีนี้บนเว็บบอร์ดอ้างอิงของโรงงานเมอิวะ แพ็คซ์ เพื่อหลีกเลี่ยงเหตุสุญญากาศทางเทคนิคหรือไฟไหม้เครื่องจักรของโรงงาน โปรดติดต่อหัวหน้าช่างหรือแผนกวิศวกรรม"
+7. Avoid any system credit footer, metadata mentions, or ports references.
 
 🧠 SMART SEMANTIC KNOWLEDGE MAPPING (SYNONYM RESOLUTION):
 1. Users might use terms like "Hot Extrusion", "จุดสะสมความร้อน", "extruder heat", "Barrel temperature", or other casual technical terms.
@@ -1356,80 +1622,188 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   );
 
   // Documents APIs
+  // GET /api/documents: Role & Department Authorization Enforcement
   app.get("/api/documents", requireAuth, (req, res) => {
-    const role = req.authUser!.role;
-    // เอกสาร QP ที่ผู้เรียกไม่ใช่ Admin ต้องไม่เห็นเนื้อหาไฟล์ Excel ที่ฝังมากับ record
-    // (เดิมส่งให้ทุก role เสมอ ทำให้การล็อกไฟล์ตอนดาวน์โหลด/เปิดดูไม่มีความหมาย)
-    const sanitize = (doc: DocumentItem): DocumentItem => {
+    const currentDbUser = req.authUser!;
+    const role = currentDbUser.role;
+
+    const sanitizeQP = (doc: DocumentItem): DocumentItem => {
       if (doc.type === "QP" && role !== "Admin") {
         const { parsedExcelSheets, ...rest } = doc;
         return rest as DocumentItem;
       }
       return doc;
     };
-    // Viewer เห็นเฉพาะเอกสารที่ Published เท่านั้น — ก่อนหน้านี้กรองแค่ฝั่ง client
-    // (DocumentList.tsx) ทำให้ title/description/exampleText ของ Draft & Pending
-    // หลุดไปถึง browser ของ Viewer อยู่ดี ต้องกรองที่ server ด้วย
-    const visible =
-      role === "Viewer"
-        ? db_documents.filter((d) => d.status === "Published")
-        : db_documents;
-    res.json(visible.map(sanitize));
-  });
-  // ตั้งค่า restricted ของไฟล์แนบให้ตรงกับประเภทเอกสารจริงตอนบันทึก/แก้ไข document
-  // (แทนการเดาจากนามสกุล/ชื่อไฟล์ตอนอัปโหลดแบบเดิม)
-  function syncFileRestriction(doc: DocumentItem) {
-    const url = doc.realFileUrl || doc.fileUrl;
-    if (!url || !url.startsWith("/uploads/")) return;
-    const storedName = url.replace("/uploads/", "").split("?")[0];
-    const shouldRestrict = doc.type === "QP";
 
-    const existing = uploadedFiles.get(storedName);
-    if (existing) {
-      existing.restricted = shouldRestrict;
+    if (role === "Admin") {
+      return res.json(
+        db_documents.map((d) => ({ ...sanitizeQP(d), accessible: true })),
+      );
     }
-    const uploadsDirs = [
-      path.join(process.cwd(), "public", "uploads"),
-      path.join(process.cwd(), "dist", "uploads"),
-    ];
-    uploadsDirs.forEach((dir) => {
-      const metaPath = path.join(dir, `${storedName}.meta.json`);
-      if (!fs.existsSync(metaPath)) return;
-      try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
-        meta.restricted = shouldRestrict;
-        fs.writeFileSync(metaPath, JSON.stringify(meta));
-      } catch (e) {
-        console.warn("Failed to update file restriction metadata:", e);
-      }
-    });
-  }
 
+    if (role === "Viewer") {
+      // Viewer เห็นเฉพาะเอกสารที่ Published และตนเองได้รับอนุญาตตามแผนกเท่านั้น
+      const visible = db_documents.filter(
+        (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
+      );
+      return res.json(
+        visible.map((d) => ({ ...sanitizeQP(d), accessible: true })),
+      );
+    }
+
+    if (role === "Editor") {
+      // Editor: เห็นเฉพาะเอกสารของแผนกที่ตนเองได้รับสิทธิ์เท่านั้น (ทั้ง Draft, Pending, Published)
+      // เอกสารข้ามแผนกที่ไม่มีสิทธิ์ จะไม่แสดงในระบบเลยเช่นเดียวกับ Viewer
+      const visible = db_documents.filter((d) =>
+        canAccessDocument(currentDbUser, d),
+      );
+      return res.json(
+        visible.map((d) => ({ ...sanitizeQP(d), accessible: true })),
+      );
+    }
+
+    // Default fallback (role อื่นๆ)
+    const fallbackVisible = db_documents.filter(
+      (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
+    );
+    res.json(
+      fallbackVisible.map((d) => ({ ...sanitizeQP(d), accessible: true })),
+    );
+  });
+
+  // GET /api/documents/stats: Global Stats (สำหรับ Dashboard KPI ส่วนกลาง)
+  app.get("/api/documents/stats", requireAuth, (req, res) => {
+    try {
+      const currentMonthKey = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+      const publishedDocs = db_documents.filter(
+        (d) => d.status === "Published",
+      );
+      const pendingDocs = db_documents.filter(
+        (d) => d.status === "Pending Approval",
+      );
+      const approvedKBs = db_kb_articles.filter((k) => k.status === "Approved");
+
+      const docViews = db_documents.reduce((sum, d) => sum + (d.views || 0), 0);
+      const docDownloads = db_documents.reduce(
+        (sum, d) => sum + (d.downloads || 0),
+        0,
+      );
+      const kbViews = approvedKBs.reduce((sum, k) => sum + (k.views || 0), 0);
+
+      const newDocsThisMonth = publishedDocs.filter((d) =>
+        d.createdAt?.startsWith(currentMonthKey),
+      ).length;
+      const newKBsThisMonth = approvedKBs.filter((k) =>
+        k.createdAt?.startsWith(currentMonthKey),
+      ).length;
+
+      res.json({
+        total: db_documents.length,
+        published: publishedDocs.length,
+        pending: pendingDocs.length,
+        views: docViews + kbViews,
+        downloads: docDownloads,
+        newThisMonth: newDocsThisMonth + newKBsThisMonth,
+        kbApproved: approvedKBs.length,
+        kbViews,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/documents: First Binding (Server-owned file ownership)
   app.post(
     "/api/documents",
     requireAuth,
     requireRole("Admin", "Editor"),
     (req, res) => {
       try {
-        const newDoc = req.body;
+        const newDoc: DocumentItem = { ...req.body };
         if (!newDoc.id) {
           newDoc.id = `doc-${Date.now()}`;
         }
-        const isAdmin = req.authUser!.role === "Admin";
+        const currentDbUser = req.authUser!;
+        const isAdmin = currentDbUser.role === "Admin";
+
+        // Validate owner department
+        if (!isAdmin) {
+          newDoc.departmentId = currentDbUser.departmentId;
+        } else if (
+          !newDoc.departmentId ||
+          !getDepartmentById(newDoc.departmentId)
+        ) {
+          return res.status(400).json({
+            error: "INVALID_DEPARTMENT",
+            message: "กรุณาระบุรหัสแผนกที่ถูกต้อง",
+          });
+        }
+
+        // Normalize allowed departments - rejects invalid IDs with 400
+        try {
+          newDoc.allowedDepartmentIds = normalizeAllowedDepartments(
+            newDoc.departmentId,
+            newDoc.allowedDepartmentIds,
+          );
+        } catch (deptErr: any) {
+          return res.status(400).json({
+            error: "INVALID_DEPARTMENT_ACCESS",
+            message: deptErr.message || "รหัสแผนกไม่ถูกต้องหรือไม่พบในระบบ",
+          });
+        }
+
+        // Security Invariant: Server-owned file binding (First binding)
+        const fileRef = newDoc.realFileUrl || newDoc.fileUrl;
+        let attachedStoredName: string | null = null;
+        if (fileRef && fileRef.startsWith("/uploads/")) {
+          attachedStoredName = fileRef.replace("/uploads/", "").split("?")[0];
+          const fileMeta = loadSidecar(attachedStoredName);
+          if (!fileMeta) {
+            return res.status(404).json({
+              error: "FILE_NOT_FOUND",
+              message: "ไม่พบไฟล์ที่แนบในระบบ กรุณาอัปโหลดใหม่",
+            });
+          }
+          // Invariant 5 & 7: If file already has a documentId (active or deleted) -> 409 Conflict
+          if (fileMeta.documentId) {
+            return res.status(409).json({
+              error: "DUPLICATE_FILE_BINDING",
+              message:
+                "ไฟล์นี้ถูกผูกไว้กับเอกสารอื่นในระบบแล้ว ไม่สามารถผูกซ้ำได้",
+            });
+          }
+          // Invariant 4: Caller must be uploader or Admin
+          if (fileMeta.uploadedBy !== currentDbUser.employeeId && !isAdmin) {
+            return res.status(403).json({
+              error: "FORBIDDEN",
+              message: "คุณไม่มีสิทธิ์นำไฟล์ที่ผู้อื่นอัปโหลดมาผูกกับเอกสารนี้",
+            });
+          }
+        }
+
         newDoc.status = isAdmin ? "Published" : "Pending Approval";
-        newDoc.approvedBy = isAdmin ? req.authUser!.employeeId : undefined;
+        newDoc.approvedBy = isAdmin ? currentDbUser.employeeId : undefined;
         newDoc.approvedAt = isAdmin ? new Date().toISOString() : undefined;
-        // views/downloads นับที่ server เท่านั้น ไม่เชื่อค่าที่ client ส่งมา
         newDoc.views = 0;
         newDoc.downloads = 0;
-        syncFileRestriction(newDoc);
+
+        // Perform server-owned file binding
+        if (attachedStoredName) {
+          updateSidecar(attachedStoredName, {
+            documentId: newDoc.id,
+            restricted: newDoc.type === "QP",
+          });
+        }
+
         db_documents.unshift(newDoc);
-        res.json(newDoc);
+        res.json({ ...newDoc, accessible: true });
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
     },
   );
+
+  // PUT /api/documents/:id: Whitelist editable fields & enforce ownership preservation
   app.put(
     "/api/documents/:id",
     requireAuth,
@@ -1441,51 +1815,182 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         if (!existing) {
           return res.status(404).json({ error: "NOT_FOUND" });
         }
-        const isAdmin = req.authUser!.role === "Admin";
+
+        const currentDbUser = req.authUser!;
+        const isAdmin = currentDbUser.role === "Admin";
+
+        // Must be authorized to access this document
+        if (!canAccessDocument(currentDbUser, existing)) {
+          return res.status(403).json({
+            error: "FORBIDDEN",
+            message: "คุณไม่มีสิทธิ์แก้ไขเอกสารของแผนกนี้",
+          });
+        }
+
+        // Allow Admin to change owner department if selected incorrectly initially
+        let targetDepartmentId = existing.departmentId;
+        if (
+          isAdmin &&
+          typeof req.body.departmentId === "string" &&
+          req.body.departmentId.trim()
+        ) {
+          const newDept = getDepartmentById(req.body.departmentId.trim());
+          if (!newDept) {
+            return res.status(400).json({
+              error: "INVALID_DEPARTMENT",
+              message: "รหัสแผนกไม่ถูกต้องหรือไม่พบในระบบ",
+            });
+          }
+          targetDepartmentId = req.body.departmentId.trim();
+        }
+
+        // Whitelist editable fields and normalize departments (reject invalid IDs with 400)
+        let normalizedAllowed = existing.allowedDepartmentIds;
+        if (
+          req.body.allowedDepartmentIds !== undefined ||
+          targetDepartmentId !== existing.departmentId
+        ) {
+          try {
+            normalizedAllowed = normalizeAllowedDepartments(
+              targetDepartmentId,
+              req.body.allowedDepartmentIds !== undefined
+                ? req.body.allowedDepartmentIds
+                : existing.allowedDepartmentIds,
+            );
+          } catch (deptErr: any) {
+            return res.status(400).json({
+              error: "INVALID_DEPARTMENT_ACCESS",
+              message: deptErr.message || "รหัสแผนกไม่ถูกต้องหรือไม่พบในระบบ",
+            });
+          }
+        }
+
+        // Security Invariant: File binding is IMMUTABLE via PUT /api/documents/:id.
+        // Client cannot control file ownership or change attached files through this endpoint.
         const updatedDoc: DocumentItem = {
-          ...req.body,
-          id,
-          // Editor แก้เนื้อหาเอกสารได้ แต่ห้ามเปลี่ยนสถานะอนุมัติ ประเภทเอกสาร
-          // (QP/WI/FORM มีผลต่อ restricted flag ของไฟล์) หรือยอดวิว/ดาวน์โหลดเอง
-          status: isAdmin ? req.body.status : existing.status,
-          approvedBy: isAdmin ? req.body.approvedBy : existing.approvedBy,
-          approvedAt: isAdmin ? req.body.approvedAt : existing.approvedAt,
-          type: isAdmin ? req.body.type : existing.type,
+          ...existing,
+          title:
+            typeof req.body.title === "string"
+              ? req.body.title
+              : existing.title,
+          description:
+            typeof req.body.description === "string"
+              ? req.body.description
+              : existing.description,
+          owner:
+            typeof req.body.owner === "string" && req.body.owner.trim()
+              ? req.body.owner.trim()
+              : existing.owner,
+          allowedDepartmentIds: normalizedAllowed,
+          exampleText:
+            req.body.exampleText !== undefined
+              ? req.body.exampleText
+              : existing.exampleText,
+          exampleImage:
+            req.body.exampleImage !== undefined
+              ? req.body.exampleImage
+              : existing.exampleImage,
+          exampleVideo:
+            req.body.exampleVideo !== undefined
+              ? req.body.exampleVideo
+              : existing.exampleVideo,
+          tags: Array.isArray(req.body.tags) ? req.body.tags : existing.tags,
+          // Admin-only fields:
+          status: isAdmin
+            ? req.body.status || existing.status
+            : existing.status,
+          approvedBy: isAdmin
+            ? req.body.approvedBy !== undefined
+              ? req.body.approvedBy
+              : existing.approvedBy
+            : existing.approvedBy,
+          approvedAt: isAdmin
+            ? req.body.approvedAt !== undefined
+              ? req.body.approvedAt
+              : existing.approvedAt
+            : existing.approvedAt,
+          type: isAdmin ? req.body.type || existing.type : existing.type,
+          revision:
+            isAdmin && typeof req.body.revision === "number"
+              ? req.body.revision
+              : existing.revision,
+          // Immutable file fields: Preserved 100% from existing server state
+          fileUrl: existing.fileUrl,
+          realFileUrl: existing.realFileUrl,
+          fileType: existing.fileType,
+          parsedExcelSheets: existing.parsedExcelSheets,
+          // Preserved server fields (never overwritten by client PUT):
           views: existing.views,
           downloads: existing.downloads,
+          departmentId: targetDepartmentId,
         };
-        syncFileRestriction(updatedDoc);
+
         db_documents = db_documents.map((d) => (d.id === id ? updatedDoc : d));
-        res.json(updatedDoc);
+        res.json({ ...updatedDoc, accessible: true });
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
     },
   );
+
+  // POST /api/documents/:id/view: Verify department authorization before incrementing view count
   app.post("/api/documents/:id/view", requireAuth, (req, res) => {
     try {
       const { id } = req.params;
-      db_documents = db_documents.map((doc) =>
-        doc.id === id ? { ...doc, views: (doc.views || 0) + 1 } : doc,
-      );
-      const updated = db_documents.find((doc) => doc.id === id);
-      res.json(updated);
+      const currentDbUser = req.authUser!;
+      const doc = db_documents.find((d) => d.id === id);
+      if (!doc) {
+        return res.status(404).json({ error: "NOT_FOUND" });
+      }
+      if (!canAccessDocument(currentDbUser, doc)) {
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารนี้",
+        });
+      }
+      doc.views = (doc.views || 0) + 1;
+      const role = currentDbUser.role;
+      const safe =
+        doc.type === "QP" && role !== "Admin"
+          ? (({ parsedExcelSheets, ...r }) => r)(doc)
+          : doc;
+      res.json({ ...safe, accessible: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // POST /api/documents/:id/download: Verify department authorization & QP restriction
   app.post("/api/documents/:id/download", requireAuth, (req, res) => {
     try {
       const { id } = req.params;
-      db_documents = db_documents.map((doc) =>
-        doc.id === id ? { ...doc, downloads: (doc.downloads || 0) + 1 } : doc,
-      );
-      const updated = db_documents.find((doc) => doc.id === id);
-      res.json(updated);
+      const currentDbUser = req.authUser!;
+      const doc = db_documents.find((d) => d.id === id);
+      if (!doc) {
+        return res.status(404).json({ error: "NOT_FOUND" });
+      }
+      if (!canAccessDocument(currentDbUser, doc)) {
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารนี้",
+        });
+      }
+      // QP Rule: Non-admin cannot download QP documents
+      if (doc.type === "QP" && currentDbUser.role !== "Admin") {
+        return res.status(403).json({
+          error: "QP_RESTRICTED",
+          message:
+            "เอกสารระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
+        });
+      }
+      doc.downloads = (doc.downloads || 0) + 1;
+      res.json({ ...doc, accessible: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // DELETE /api/documents/:id: Admin only & mark file as orphaned (Invariant 7)
   app.delete(
     "/api/documents/:id",
     requireAuth,
@@ -1493,6 +1998,16 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     (req, res) => {
       try {
         const { id } = req.params;
+        const existing = db_documents.find((d) => d.id === id);
+        if (!existing) {
+          return res.status(404).json({ error: "NOT_FOUND" });
+        }
+        // Invariant 7: If owning doc is deleted, mark file as orphaned
+        const fileRef = existing.realFileUrl || existing.fileUrl;
+        if (fileRef && fileRef.startsWith("/uploads/")) {
+          const storedName = fileRef.replace("/uploads/", "").split("?")[0];
+          updateSidecar(storedName, { documentId: `deleted:${id}` });
+        }
         db_documents = db_documents.filter((d) => d.id !== id);
         res.json({ success: true });
       } catch (err: any) {
@@ -1500,6 +2015,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       }
     },
   );
+
   app.post(
     "/api/documents/:id/approve",
     requireAuth,
@@ -1519,7 +2035,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             : doc,
         );
         const updated = db_documents.find((doc) => doc.id === id);
-        res.json(updated);
+        res.json(updated ? { ...updated, accessible: true } : null);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -2226,27 +2742,51 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     }
   });
 
-  // Search Logs APIs
+  // Search Logs APIs: Server-authoritative hasResult calculation
   app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {
     res.json(db_search_logs);
   });
-  app.post(
-    "/api/search_logs",
-    requireAuth,
-    requireOwnField("userId"),
-    (req, res) => {
-      try {
-        const log = req.body;
-        if (!log.id) {
-          log.id = `sl-${Date.now()}`;
-        }
-        db_search_logs.unshift(log);
-        res.json(log);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+  app.post("/api/search_logs", requireAuth, (req, res) => {
+    try {
+      const currentDbUser = req.authUser!;
+      const rawKeyword =
+        typeof req.body.keyword === "string" ? req.body.keyword : "";
+      const keyword = rawKeyword.toLowerCase().trim();
+      if (!keyword) {
+        return res.status(400).json({ error: "KEYWORD_REQUIRED" });
       }
-    },
-  );
+
+      // Server computes hasResult authoritatively from authorized documents & approved KBs
+      const hasDocMatch = db_documents.some(
+        (d) =>
+          d.status === "Published" &&
+          canAccessDocument(currentDbUser, d) &&
+          (d.title.toLowerCase().includes(keyword) ||
+            d.description.toLowerCase().includes(keyword)),
+      );
+      const hasKBMatch = db_kb_articles.some(
+        (k) =>
+          k.status === "Approved" &&
+          (k.title.toLowerCase().includes(keyword) ||
+            k.problem.toLowerCase().includes(keyword) ||
+            k.solution.toLowerCase().includes(keyword)),
+      );
+
+      const hasResult = hasDocMatch || hasKBMatch;
+
+      const log: SearchLog = {
+        id: `sl-${Date.now()}`,
+        keyword: rawKeyword,
+        userId: currentDbUser.id,
+        timestamp: new Date().toISOString(),
+        hasResult,
+      };
+      db_search_logs.unshift(log);
+      res.json(log);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // Contact Requests APIs
   app.get("/api/contact_requests", requireAuth, (req, res) => {

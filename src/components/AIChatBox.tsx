@@ -32,6 +32,7 @@ import {
   CustomResource,
 } from "../types";
 import { getDepartmentById } from "../utils/departmentUtils";
+import { api, getApiErrorMessage } from "../services/api";
 
 interface AIChatBoxProps {
   currentUser: User;
@@ -175,6 +176,8 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
     // Index & Score Documents
     documents.forEach((doc) => {
       if (doc.status !== "Published") return;
+      if (doc.accessible === false) return; // ข้ามเอกสารจำกัดสิทธิ์ข้ามแผนก
+      if (doc.type === "QP" && currentUser.role !== "Admin") return; // ข้ามเอกสาร QP สำหรับผู้ใช้ทั่วไป
       const deptName =
         getDepartmentById(doc.departmentId)?.name || doc.departmentId || "";
       const textToSearch = `${doc.title} ${doc.description} ${doc.exampleText || ""} ${deptName} ${doc.type}`;
@@ -337,26 +340,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
 
     try {
       if (chatMode === "CONVERSATIONAL") {
-        const response = await fetch("/api/chat", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            query: userMsgText,
-            currentUser,
-            documents,
-            kbArticles,
-            courses,
-            customResources,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Server returned HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = await api.chat(userMsgText);
         const botMessage: ChatMessage = {
           id: `bot-${Date.now()}`,
           sender: "bot",
@@ -1087,8 +1071,7 @@ export const AIChatBox: React.FC<AIChatBoxProps> = ({
                   id: 10,
                   title: "10. Chatbot องค์กร 24 ชั่วโมง",
                   icon: "💬",
-                  query:
-                    "มาตรฐานความปลอดภัยและการควบคุมคลังสินค้า",
+                  query: "มาตรฐานความปลอดภัยและการควบคุมคลังสินค้า",
                 },
               ].map((uc) => (
                 <button

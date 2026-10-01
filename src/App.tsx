@@ -476,52 +476,56 @@ export default function App() {
 
   // Document Control center: Add document draft
   const handleAddDocument = async (newDoc: DocumentItem) => {
-    setDocuments((prev) => [newDoc, ...prev]);
     try {
-      await api.createDocument(newDoc);
+      const created = await api.createDocument(newDoc);
+      setDocuments((prev) => [created, ...prev]);
+      return created;
     } catch (e) {
-      console.error(e);
+      console.error("Create document failed:", e);
+      throw e;
     }
   };
 
   // Document Control center: Approve draft
   const handleApproveDocument = async (id: string, approverName: string) => {
-    setDocuments((prev) =>
-      prev.map((doc) =>
-        doc.id === id
-          ? {
-              ...doc,
-              status: "Published",
-              approvedBy: approverName,
-              approvedAt: new Date().toISOString(),
-            }
-          : doc,
-      ),
-    );
     try {
-      await api.approveDocument(id, approverName);
+      const approved = await api.approveDocument(id, approverName);
+      setDocuments((prev) =>
+        prev.map((doc) => (doc.id === id ? approved : doc)),
+      );
+      return approved;
     } catch (e) {
-      console.error(e);
+      console.error("Approve document failed:", e);
+      throw e;
     }
   };
 
-  const handleUpdateDocument = async (updatedDoc: DocumentItem) => {
+  const handleLocalDocumentSync = (updatedDoc: DocumentItem) => {
     setDocuments((prev) =>
       prev.map((doc) => (doc.id === updatedDoc.id ? updatedDoc : doc)),
     );
+  };
+
+  const handleUpdateDocument = async (updatedDoc: DocumentItem) => {
     try {
-      await api.updateDocument(updatedDoc);
+      const saved = await api.updateDocument(updatedDoc);
+      setDocuments((prev) =>
+        prev.map((doc) => (doc.id === saved.id ? saved : doc)),
+      );
+      return saved;
     } catch (e) {
-      console.error(e);
+      console.error("Update document failed:", e);
+      throw e;
     }
   };
 
   const handleDeleteDocument = async (id: string) => {
-    setDocuments((prev) => prev.filter((doc) => doc.id !== id));
     try {
       await api.deleteDocument(id);
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
     } catch (e) {
-      console.error(e);
+      console.error("Delete document failed:", e);
+      throw e;
     }
   };
 
@@ -1195,6 +1199,29 @@ export default function App() {
                     พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
                   </p>
                 </div>
+
+                {/* 4. QUICK FILL DEFAULT ADMIN */}
+                <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-left space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-amber-900 uppercase tracking-wider">
+                      👤 บัญชีเริ่มต้นระบบ (Default Admin)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginEmployeeId("ADMIN001");
+                        setLoginPassword("123456");
+                      }}
+                      className="text-[10px] font-bold text-[#15329c] hover:underline cursor-pointer bg-white px-2 py-0.5 rounded border border-amber-300 shadow-xs"
+                    >
+                      กรอกอัตโนมัติ ⚡
+                    </button>
+                  </div>
+                  <p className="text-[9.5px] text-amber-800 font-mono">
+                    รหัสพนักงาน: <strong>ADMIN001</strong> | PIN:{" "}
+                    <strong>123456</strong>
+                  </p>
+                </div>
               </div>
             ) : (
               /* REGISTRATION INTERACTIVE PORTAL */
@@ -1694,6 +1721,7 @@ export default function App() {
                   onApproveDocument={handleApproveDocument}
                   onUpdateDocument={handleUpdateDocument}
                   onDeleteDocument={handleDeleteDocument}
+                  onLocalDocumentSync={handleLocalDocumentSync}
                   comments={ratings}
                   onAddComment={handleAddRating}
                 />
