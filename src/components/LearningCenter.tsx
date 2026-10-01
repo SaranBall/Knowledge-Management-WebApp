@@ -4364,17 +4364,16 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                       lessonMediaUrl: data.url, // ใช้ URL จริงที่ได้จาก Server
                                     }));
                                   } catch (error) {
-                                    console.error(
-                                      "Upload error, using local object url fallback:",
-                                      error,
-                                    );
-                                    const localUrl = URL.createObjectURL(base);
+                                    console.error("Upload error:", error);
                                     setNewCourseState((prev) => ({
                                       ...prev,
                                       isSimulatedUploading: false,
-                                      simulatedFileName: base.name,
-                                      lessonMediaUrl: localUrl,
+                                      simulatedFileName: "",
+                                      lessonMediaUrl: "",
                                     }));
+                                    alert(
+                                      `⚠️ อัปโหลดไฟล์ "${base.name}" ไม่สำเร็จ\nกรุณาตรวจสอบการเชื่อมต่อหรือทดลองอัปโหลดใหม่อีกครั้ง`,
+                                    );
                                   }
                                 };
                                 reader.readAsDataURL(base);
@@ -4399,8 +4398,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                             )}
                           </div>
                           <p className="text-[10px] text-slate-400">
-                            รองรับไฟล์เอกสารการศึกษาขนาดย่อม (จำลองระบบด้วย
-                            Sandbox WID)
+                            รองรับไฟล์สื่อการเรียนรู้ที่ระบบจัดเก็บไว้
                           </p>
                           <button
                             type="button"
@@ -4423,10 +4421,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 <div className="space-y-1 font-mono">
                   <div className="flex justify-between items-center">
                     <label className="font-semibold text-slate-600 block">
-                      ลิงก์ความจริงทางอินเทอร์เน็ต (หรือใช้ที่อยู่สมมติระบบ):
+                      URL สื่อการเรียนรู้:
                     </label>
                     <span className="text-[9px] text-slate-400">
-                      ระบุเองหรือให้ระบบสุ่มตามประเภทสื่อข้อมูล
+                      ระบุ URL ของสื่อภายนอก หรือใช้ไฟล์ที่อัปโหลดเข้าสู่ระบบ
                     </span>
                   </div>
                   <input
@@ -4438,7 +4436,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         lessonMediaUrl: e.target.value,
                       })
                     }
-                    placeholder="เช่น https://domain.com/files/manual.pdf หรือปล่อยว่างเพื่อสุ่มชุดสาธิต"
+                    placeholder="เช่น https://domain.com/files/manual.pdf"
                     className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-[10.5px] font-mono text-slate-600"
                   />
                 </div>

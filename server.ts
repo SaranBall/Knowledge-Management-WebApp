@@ -386,22 +386,40 @@ async function startServer() {
         });
       }
 
-      // ต่ออายุใบรับรองที่ผูกกับหลักสูตรนี้ทุกครั้งที่สอบผ่าน (รวมสอบซ้ำเพื่อต่ออายุ)
+      // ออกหรือ ต่ออายุใบรับรองที่ผูกกับหลักสูตรนี้ทุกครั้งที่สอบผ่าน
       const todayStr = nowIso.split("T")[0];
       const nextYearStr = new Date(Date.now() + 365 * 24 * 3600 * 1000)
         .toISOString()
         .split("T")[0];
-      db_user_certificates = db_user_certificates.map((cert) =>
-        cert.userId === sub.userId && cert.courseId === sub.courseId
-          ? {
-              ...cert,
-              issueDate: todayStr,
-              expiryDate: nextYearStr,
-              status: "Valid" as const,
-              daysRemaining: 365,
-            }
-          : cert,
+
+      const certificateIndex = db_user_certificates.findIndex(
+        (cert) => cert.userId === sub.userId && cert.courseId === sub.courseId,
       );
+
+      if (certificateIndex !== -1) {
+        // มี Certificate เดิม → ต่ออายุ
+        db_user_certificates[certificateIndex] = {
+          ...db_user_certificates[certificateIndex],
+          issueDate: todayStr,
+          expiryDate: nextYearStr,
+          status: "Valid" as const,
+          daysRemaining: 365,
+        };
+      } else {
+        // ยังไม่มี Certificate → ออกใบใหม่หลังสอบผ่านครั้งแรก
+        db_user_certificates.push({
+          id: `cert-${crypto.randomUUID()}`,
+          userId: sub.userId,
+          employeeId: sub.employeeId,
+          title: sub.courseTitle,
+          type: course.type,
+          courseId: sub.courseId,
+          issueDate: todayStr,
+          expiryDate: nextYearStr,
+          status: "Valid" as const,
+          daysRemaining: 365,
+        });
+      }
     }
   }
 
