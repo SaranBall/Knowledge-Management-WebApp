@@ -41,7 +41,12 @@ import {
   SystemAuditLog,
 } from "./types";
 
-import { api, setAuthToken, getApiErrorMessage } from "./services/api";
+import {
+  api,
+  setAuthToken,
+  setUnauthorizedHandler,
+  getApiErrorMessage,
+} from "./services/api";
 import { getDepartmentById } from "./utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "./utils/assets";
 
@@ -144,7 +149,13 @@ export default function App() {
   // Load all entities from real API on mount or when logged in
   useEffect(() => {
     const token = localStorage.getItem("rm_auth_token");
-    if (!isLogged || !token) {
+    if (!isLogged) {
+      setIsLoading(false);
+      return;
+    }
+    if (!token) {
+      // N9: สถานะ "ล็อกอินอยู่" แต่ไม่มี token = session ไม่สมบูรณ์ → บังคับออกจากระบบ
+      endSession("เซสชันไม่สมบูรณ์ กรุณาเข้าสู่ระบบใหม่");
       setIsLoading(false);
       return;
     }
@@ -231,6 +242,43 @@ export default function App() {
   const [loginEmployeeId, setLoginEmployeeId] = useState<string>("");
   const [loginPassword, setLoginPassword] = useState<string>("");
   const [loginError, setLoginError] = useState<string>("");
+
+  // N9/N10: ล้างข้อมูลที่โหลดมาของ session เดิมทั้งหมดเมื่อออกจากระบบ
+  // (เดิมค้างใน state — ถ้า fetch บางตัวล้ม เช่น searchLogs ของ Admin จะเห็นต่อใน session ถัดไป)
+  const resetSessionData = () => {
+    setUsers(INITIAL_USERS);
+    setDocuments(INITIAL_DOCUMENTS);
+    setCourses(INITIAL_COURSES);
+    setKbArticles(INITIAL_KB_ARTICLES);
+    setExperts(INITIAL_EXPERTS);
+    setRatings(INITIAL_RATINGS);
+    setUserProgress(INITIAL_USER_PROGRESS);
+    setExamResults(INITIAL_EXAM_RESULTS);
+    setSearchLogs(INITIAL_SEARCH_LOGS);
+    setContactRequests(INITIAL_CONTACT_REQUESTS);
+    setCustomResources([]);
+    setUserCompetencies([]);
+    setUserCertificates([]);
+    setKmContributionLogs([]);
+    setEmployeeMaster(INITIAL_EMPLOYEE_MASTER);
+    setSystemAuditLogs([]);
+    setActiveMenu("Dashboard");
+    setGlobalSearch("");
+  };
+
+  const endSession = (message?: string) => {
+    resetSessionData();
+    setIsLogged(false);
+    setCurrentUser(null);
+    setAuthToken(null);
+    setLoginError(message ?? "");
+  };
+
+  // N9: เจอ 401 / บัญชีถูกระงับจาก API ใดๆ → logout อัตโนมัติพร้อมข้อความจาก server
+  useEffect(() => {
+    setUnauthorizedHandler((message) => endSession(message));
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   // Navigation state
   const [activeMenu, setActiveMenu] = useState<string>("Dashboard");
@@ -456,19 +504,12 @@ export default function App() {
     }
   };
 
-  // Add search log (on query)
-  const handleLogSearch = async (keyword: string, hasResult: boolean) => {
+  // N15: hasResult คำนวณที่ server (ตามสิทธิ์เอกสารของผู้ค้น + ฟิลด์ KB จริง) — client ไม่ตัดสินเอง
+  const handleLogSearch = async (keyword: string) => {
     if (!currentUser || !keyword.trim()) return;
-    const newLog: SearchLog = {
-      id: `sl-${Date.now()}`,
-      keyword,
-      userId: currentUser.id,
-      timestamp: new Date().toISOString(),
-      hasResult,
-    };
-    setSearchLogs((prev) => [newLog, ...prev]);
     try {
-      await api.createSearchLog(newLog);
+      const saved = await api.createSearchLog(keyword);
+      setSearchLogs((prev) => [saved, ...prev]);
     } catch (e) {
       console.error(e);
     }
@@ -809,19 +850,8 @@ export default function App() {
   const handleGlobalSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!globalSearch.trim()) return;
-
-    // Check if what they searched matches any articles
-    const keyword = globalSearch.toLowerCase();
-
-    // Log query search for Executive GAP Analysis
-    const hasMatch =
-      documents.some((d) => d.title.toLowerCase().includes(keyword)) ||
-      kbArticles.some(
-        (a) =>
-          a.title.toLowerCase().includes(keyword) && a.status === "Approved",
-      );
-
-    handleLogSearch(globalSearch, hasMatch);
+    // บันทึกคำค้นเพื่อ Gap Analysis (server เป็นผู้ตัดสิน hasResult)
+    handleLogSearch(globalSearch);
 
     // Redirect user to Technical KB to witness the multi-match dashboard
     setActiveMenu("Technical Knowledge Base");
@@ -862,6 +892,14 @@ export default function App() {
     }
 
     // Success
+    // N7: ถ้าแผนกยังเป็นข้อความดิบจากการ import (unresolved) ห้ามไปต่อ — ต้องให้ Admin กำหนดแผนกจริงก่อน
+    if (!getDepartmentById(match.departmentId)) {
+      setRegError(
+        `⚠️ รหัสพนักงาน "${cleanId}" ยังไม่ได้ระบุแผนกที่ถูกต้องในฐานข้อมูล กรุณาติดต่อผู้ดูแลระบบเพื่อกำหนดแผนกและอนุมัติบัญชี`,
+      );
+      return;
+    }
+
     setMatchedEmployee(match);
   };
   // Registration: อัปโหลดรูปโปรไฟล์จริง (บังคับก่อนยืนยันลงทะเบียน)
@@ -1017,11 +1055,7 @@ export default function App() {
   };
 
   // Logout/Switch simulation
-  const handleLogout = () => {
-    setIsLogged(false);
-    setCurrentUser(null);
-    setAuthToken(null);
-  };
+  const handleLogout = () => endSession();
 
   // --- RENDERING CONFIGS ---
   const menuList = [

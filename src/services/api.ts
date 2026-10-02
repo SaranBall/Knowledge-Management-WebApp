@@ -31,6 +31,21 @@ export function setAuthToken(token: string | null) {
     localStorage.removeItem("rm_auth_token");
   }
 }
+// N9: ให้ App ลงทะเบียน callback เพื่อ logout อัตโนมัติเมื่อ session ใช้ไม่ได้แล้ว
+let sessionEndedHandler: ((message: string) => void) | null = null;
+export function setUnauthorizedHandler(
+  handler: ((message: string) => void) | null,
+) {
+  sessionEndedHandler = handler;
+}
+
+function extractServerMessage(raw: string, fallback: string): string {
+  try {
+    return JSON.parse(raw).message || fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -42,19 +57,21 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     },
   });
 
-  if (response.status === 401) {
-    // token หมดอายุหรือไม่ถูกต้อง → เคลียร์ auth token เฉพาะเมื่อไม่ใช่การพยายาม login
-    if (!url.includes("/api/login")) {
-      setAuthToken(null);
-    }
-    const errorText = await response.text();
-    throw new Error(
-      `API Error: ${response.status} ${response.statusText} - ${errorText}`,
-    );
-  }
-
   if (!response.ok) {
     const errorText = await response.text();
+    const isAuthEntry =
+      url.includes("/api/login") || url.includes("/api/register");
+    // session ใช้ไม่ได้: token หมดอายุ/ไม่ถูกต้อง/ผู้ใช้ถูกลบ (401) หรือบัญชีถูกระงับ (403 ACCOUNT_DISABLED)
+    const isSessionDead =
+      !isAuthEntry &&
+      (response.status === 401 ||
+        (response.status === 403 && errorText.includes('"ACCOUNT_DISABLED"')));
+    if (isSessionDead) {
+      setAuthToken(null);
+      sessionEndedHandler?.(
+        extractServerMessage(errorText, "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่"),
+      );
+    }
     throw new Error(
       `API Error: ${response.status} ${response.statusText} - ${errorText}`,
     );
@@ -250,10 +267,11 @@ export const api = {
 
   // Search Logs APIs
   getSearchLogs: () => request<SearchLog[]>("/api/search_logs"),
-  createSearchLog: (log: SearchLog) =>
+  // hasResult คำนวณที่ server — ส่งแค่ keyword
+  createSearchLog: (keyword: string) =>
     request<SearchLog>("/api/search_logs", {
       method: "POST",
-      body: JSON.stringify(log),
+      body: JSON.stringify({ keyword }),
     }),
 
   // Contact Requests APIs

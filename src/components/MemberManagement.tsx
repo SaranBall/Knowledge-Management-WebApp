@@ -3075,7 +3075,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                         : ""
                                     }
                                   >
-                                    {emp.departmentId}
+                                    {isDeptUnresolved
+                                      ? emp.departmentId || "(ไม่ระบุ)"
+                                      : getDepartmentById(emp.departmentId)
+                                          ?.name || emp.departmentId}
                                   </span>
                                   {isDeptUnresolved && (
                                     <span className="ml-1.5 text-[9px] bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded font-sans font-bold">
@@ -3238,7 +3241,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                               {emp.name}
                             </td>
                             <td className="p-3 text-slate-650 font-semibold">
-                              {emp.departmentId}
+                              {getDepartmentById(emp.departmentId)?.name || (
+                                <span className="text-rose-700">
+                                  {emp.departmentId || "-"} (ยังไม่ระบุแผนกจริง)
+                                </span>
+                              )}
                             </td>
                             <td className="p-3 text-slate-500 font-medium">
                               {emp.position}

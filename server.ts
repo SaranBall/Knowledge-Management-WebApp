@@ -25,6 +25,8 @@ import { DEFAULT_AVATAR_URL } from "./src/utils/assets";
 import {
   getDepartmentById,
   getMainDepartmentOf,
+  getDepartmentByCode,
+  getAllDepartmentsFlat,
 } from "./src/utils/departmentUtils";
 import {
   getInitialCompetencies,
@@ -53,6 +55,14 @@ import {
 } from "./src/types";
 
 dotenv.config();
+
+// ข้อ 25: ชื่อโมเดล Gemini ตั้งผ่าน env ได้ (มี default กัน deploy เดิมพัง)
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+if (!process.env.GEMINI_MODEL) {
+  console.warn(
+    `⚠️ GEMINI_MODEL ไม่ได้ตั้งค่าใน .env — ใช้ค่าเริ่มต้น "${GEMINI_MODEL}"`,
+  );
+}
 
 // Initialize Gemini SDK lazily with telemetry header requested by standard guidelines
 let aiClient: GoogleGenAI | null = null;
@@ -90,6 +100,38 @@ function sanitizeUserForViewer(user: UserType, viewerId: string) {
     email: "••••@royalmeiwa.com",
     phone: "0XX-XXX-XXXX",
   };
+}
+
+// N7: avatar ที่รับจาก client ต้องเป็น data URI ของรูปแรสเตอร์เท่านั้น (ไม่รับ SVG กัน XSS)
+const AVATAR_DATA_URI_RE =
+  /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+const AVATAR_MAX_CHARS = 2_000_000;
+function sanitizeAvatarUrl(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || raw.length > AVATAR_MAX_CHARS) {
+    return undefined;
+  }
+  return AVATAR_DATA_URI_RE.test(raw) ? raw : undefined;
+}
+
+// N7: map แผนกที่ AI อ่านได้ -> Department จริงใน departmentUtils (ไม่เดา ถ้าไม่ตรงคืน undefined)
+function resolveDepartment(code: unknown, rawName: unknown) {
+  const c = String(code ?? "")
+    .trim()
+    .toUpperCase();
+  if (c) {
+    const byCode = getDepartmentByCode(c);
+    if (byCode) return byCode;
+  }
+  const n = String(rawName ?? "")
+    .trim()
+    .toLowerCase();
+  if (!n) return undefined;
+  const byRawCode = getDepartmentByCode(n.toUpperCase());
+  if (byRawCode) return byRawCode;
+  return getAllDepartmentsFlat().find(
+    (d) =>
+      d.name.toLowerCase() === n || d.name.split(" (")[0].toLowerCase() === n,
+  );
 }
 
 // ============================================================
@@ -291,6 +333,11 @@ function requireRole(...allowedRoles: string[]) {
     }
     next();
   };
+}
+
+// N10: Admin/Editor เห็นข้อมูลผลเรียนทั้งหมด (ตามที่ UI รายงานต้องใช้) / Viewer เห็นเฉพาะของตัวเอง
+function canViewAllLearningData(user: CurrentUserAuth | undefined): boolean {
+  return user?.role === "Admin" || user?.role === "Editor";
 }
 //ตรวจว่า field ที่ระบุ (userId หรือ employeeId) ในbody ตรงกับเจ้าของ token จริง
 // Admin bypass ได้เสมอ (เผื่อกรณีแอดมินต้องแก้ไข/บันทึกข้อมูลของคนอื่น)
@@ -707,7 +754,7 @@ async function startServer() {
   // แยกจาก /api/users (ซึ่งตอนนี้สงวนไว้ให้ Admin จัดการคนอื่นเท่านั้น)
   app.post("/api/register", async (req, res) => {
     try {
-      const { password, employeeId } = req.body; // รับเฉพาะฟิลด์ที่จำเป็น ไม่รับ role จาก client
+      const { password, employeeId, avatarUrl } = req.body; // รับเฉพาะฟิลด์ที่จำเป็น ไม่รับ role จาก client
       if (!employeeId || !password) {
         return res.status(400).json({
           error: "MISSING_FIELDS",
@@ -725,6 +772,17 @@ async function startServer() {
       // รวม error ทั้ง "ไม่พบรหัส" และ "ซ้ำ" ให้เป็นข้อความ/สถานะเดียวกัน
       // เพื่อไม่ให้ใครใช้ endpoint นี้ตรวจสอบ (enumerate) ว่ารหัสพนักงานไหนมีอยู่จริงในระบบได้
       if (!employeeRecord || alreadyRegistered) {
+        return res.status(400).json({
+          error: "REGISTRATION_FAILED",
+          message:
+            "ไม่สามารถลงทะเบียนด้วยข้อมูลนี้ได้ กรุณาตรวจสอบรหัสพนักงานอีกครั้ง หรือติดต่อผู้ดูแลระบบ",
+        });
+      }
+
+      // N7: แผนกใน Employee Master ต้องเป็น Department ID จริงเท่านั้น
+      // ถ้ายังเป็นข้อความดิบที่ import มา (unresolved) ห้ามนำไปสร้าง user อัตโนมัติ
+      // ต้องให้ Admin อนุมัติผ่าน modal เลือกแผนกจริงก่อน
+      if (!getDepartmentById(employeeRecord.departmentId)) {
         return res.status(400).json({
           error: "REGISTRATION_FAILED",
           message:
@@ -752,6 +810,8 @@ async function startServer() {
         role: assignedRole, // ← มาจาก server เท่านั้น
         email: employeeRecord.email,
         phone: employeeRecord.phone,
+        // N7: เก็บรูปที่ผู้ลงทะเบียนอัปโหลดจริง ถ้า format ไม่ผ่านใช้ default
+        avatarUrl: sanitizeAvatarUrl(avatarUrl) || DEFAULT_AVATAR_URL,
         password: hashedPassword,
         startDate: employeeRecord.startDate,
       };
@@ -1240,7 +1300,7 @@ You must return your response conforming to the JSON schema specified in respons
 }`;
 
       const response = await getAI().models.generateContent({
-        model: "gemini-2.5-flash",
+        model: GEMINI_MODEL,
         contents: [
           {
             text: `RMP Context Library:\n${JSON.stringify(serializedRMPContext, null, 2)}`,
@@ -1299,11 +1359,27 @@ You must return your response conforming to the JSON schema specified in respons
     async (req, res) => {
       try {
         const { base64Data, fileType, fileName } = req.body;
-        if (!base64Data || !fileType) {
-          return res
-            .status(400)
-            .json({ error: "base64Data and fileType are required" });
+        if (
+          typeof base64Data !== "string" ||
+          !base64Data ||
+          typeof fileType !== "string" ||
+          !/^(application\/pdf|image\/(png|jpe?g|webp|heic|heif))$/i.test(
+            fileType,
+          )
+        ) {
+          return res.status(400).json({
+            error: "INVALID_INPUT",
+            message: "รองรับเฉพาะไฟล์ PDF หรือรูปภาพ (PNG, JPG, WEBP, HEIC)",
+          });
         }
+
+        // ชื่อไฟล์เป็นข้อมูลจาก client: ตัดอักขระควบคุม/ขึ้นบรรทัดก่อนใส่ prompt
+        const safeFileName = String(fileName || "document")
+          .replace(/[\r\n"]/g, " ")
+          .slice(0, 100);
+        const deptList = getAllDepartmentsFlat()
+          .map((d) => `${d.code} = ${d.name}`)
+          .join("\n");
 
         const contents = [
           {
@@ -1313,27 +1389,30 @@ You must return your response conforming to the JSON schema specified in respons
             },
           },
           {
-            text: `You are an expert HR Data Structurer and OCR extraction system for Royal Meiwa Pax Co., Ltd.
-Analyze this uploaded file ("${fileName || "document"}") and extract all employee records.
+            text: `You are an HR data extraction system for Royal Meiwa Pax Co., Ltd.
+Extract employee records from this uploaded file ("${safeFileName}").
 
-CRITICAL INSTRUCTIONS:
-1. Identify all employees mentioned in the document.
-2. For each employee, extract or reasonably deduce:
-   - employeeId: The employee code/ID (e.g., RMP-XXXX). If not found, generate a unique sequential ID in format RMP-XXXX starting from a random 4-digit series.
-   - name: The full name of the employee (usually in Thai).
-   - department: The department or section (e.g., "ฝ่ายผลิต (Production)", "ฝ่ายประกันและควบคุมคุณภาพ (QA/QC)", "แผนกซ่อมบำรุง", "ฝ่ายคลังสินค้าและโลจิสติกส์"). Map to reasonable Thai department names.
-   - position: The work position/title (e.g., "Blow Molding Operator", "QA Inspector").
-   - startDate: Date in format YYYY-MM-DD. If missing, use current date or default to "2026-06-23".
-   - level: The employee level (e.g., "Junior Staff", "Senior Staff", "Supervisor", "Probation Staff").
-   - email: Corporate email (e.g. name.firstletter@royalmeiwa.co.th).
-   - phone: Thai phone number format (e.g., 08X-XXX-XXXX).
-3. Do not invent unrelated data, but make sure all 9 fields of the EmployeeMaster interface are correctly populated.
-4. Output must be in JSON matching the specified responseSchema. No external text wrapper.`,
+STRICT RULES — DO NOT FABRICATE:
+1. Return only employees that are actually listed in the document.
+2. Copy values exactly as printed. If a field is not present, return an empty string "". Never guess or generate values (no invented employee IDs, emails, phone numbers, levels or dates).
+3. Fields:
+   - employeeId: the employee code exactly as printed, or "".
+   - name: full name as printed (usually Thai).
+   - department: the department/section text exactly as printed, or "".
+   - departmentCode: ONLY if the printed department clearly matches one entry in the list below, return that entry's code. Otherwise "".
+   - position, level, email, phone: as printed, or "".
+   - startDate: YYYY-MM-DD only if a full date is printed (if the year is a Buddhist Era year, subtract 543). Otherwise "".
+4. status: always "Imported".
+5. If the document contains no employee records, return success=false, an empty employees array, and a short Thai explanation in message.
+6. Output JSON only, matching the responseSchema.
+
+Valid departments (code = name):
+${deptList}`,
           },
         ];
 
         const response = await getAI().models.generateContent({
-          model: "gemini-2.5-flash",
+          model: GEMINI_MODEL,
           contents: contents,
           config: {
             responseMimeType: "application/json",
@@ -1349,6 +1428,7 @@ CRITICAL INSTRUCTIONS:
                       employeeId: { type: Type.STRING },
                       name: { type: Type.STRING },
                       department: { type: Type.STRING },
+                      departmentCode: { type: Type.STRING },
                       position: { type: Type.STRING },
                       startDate: { type: Type.STRING },
                       level: { type: Type.STRING },
@@ -1360,6 +1440,7 @@ CRITICAL INSTRUCTIONS:
                       "employeeId",
                       "name",
                       "department",
+                      "departmentCode",
                       "position",
                       "startDate",
                       "level",
@@ -1378,7 +1459,57 @@ CRITICAL INSTRUCTIONS:
 
         const responseString = response.text || "{}";
         const parsedData = JSON.parse(responseString.trim());
-        res.json(parsedData);
+        const rawEmployees: any[] = Array.isArray(parsedData.employees)
+          ? parsedData.employees
+          : [];
+        const str = (v: unknown) => String(v ?? "").trim();
+        const employees: EmployeeMaster[] = [];
+        const seenIds = new Set<string>();
+        for (const raw of rawEmployees) {
+          const employeeId = str(raw?.employeeId);
+          const name = str(raw?.name);
+          // ไม่มีรหัส/ชื่อจริงในเอกสาร = ใช้สร้างบัญชีไม่ได้ ห้ามสร้างแทน
+          if (!employeeId || !name) continue;
+          const idKey = employeeId.toLowerCase();
+          if (seenIds.has(idKey)) continue;
+          seenIds.add(idKey);
+
+          const resolved = resolveDepartment(
+            raw?.departmentCode,
+            raw?.department,
+          );
+          const rawStart = str(raw?.startDate);
+          const startDate =
+            /^\d{4}-\d{2}-\d{2}$/.test(rawStart) && !isNaN(Date.parse(rawStart))
+              ? rawStart
+              : "";
+
+          employees.push({
+            employeeId,
+            name,
+            // รูปแบบเดียวกับเส้นทาง Excel: จับคู่ได้ใช้ id จริง ไม่ได้เก็บข้อความดิบ + isDeptResolved=false
+            departmentId: resolved ? resolved.id : str(raw?.department),
+            position: str(raw?.position),
+            startDate,
+            level: str(raw?.level),
+            email: str(raw?.email),
+            phone: str(raw?.phone),
+            status: "Imported",
+            isDeptResolved: !!resolved,
+          });
+        }
+        const skipped = rawEmployees.length - employees.length;
+        res.json({
+          success: employees.length > 0,
+          employees,
+          message:
+            employees.length === 0
+              ? str(parsedData.message) ||
+                "ไม่พบรายชื่อพนักงานที่มีรหัสและชื่อครบในเอกสารนี้"
+              : skipped > 0
+                ? `ข้าม ${skipped} แถวที่ไม่มีรหัสพนักงานหรือชื่อในเอกสาร หรือรหัสซ้ำ`
+                : undefined,
+        });
       } catch (error: any) {
         console.error("AI Document Parse Error:", error);
         res.status(500).json({
@@ -1460,7 +1591,7 @@ ${JSON.stringify(simpleWIs, null, 2)}
 Format your output strictly in the requested JSON schema. No additional wrap text outside of JSON.`;
 
       const response = await getAI().models.generateContent({
-        model: "gemini-2.5-flash",
+        model: GEMINI_MODEL,
         contents: [{ text: "Suggest career learning roadmap path." }],
         config: {
           systemInstruction: systemInstruction,
@@ -1720,9 +1851,16 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     (req, res) => {
       try {
         const newDoc: DocumentItem = { ...req.body };
-        if (!newDoc.id) {
-          newDoc.id = `doc-${Date.now()}`;
+        // Server-owned identity: ห้ามใช้ req.body.id เป็น document ID
+        // คง format เดิม `doc-<timestamp>` และกัน collision ก่อน push
+        let generatedId = `doc-${Date.now()}`;
+        while (db_documents.some((d) => d.id === generatedId)) {
+          generatedId = `doc-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
         }
+        newDoc.id = generatedId;
+        // `accessible` เป็นค่าที่ server คำนวณตอนตอบกลับเท่านั้น ไม่เก็บค่าจาก client
+        delete (newDoc as Partial<DocumentItem> & { accessible?: boolean })
+          .accessible;
         const currentDbUser = req.authUser!;
         const isAdmin = currentDbUser.role === "Admin";
 
@@ -1865,6 +2003,15 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           }
         }
 
+        // Approval identity เป็น server-owned: เปลี่ยน approvedBy/approvedAt
+        // เฉพาะตอนที่ Admin เปลี่ยนสถานะเป็น Published จริงๆ ในรอบนี้
+        // นอกนั้น preserve ค่าเดิม ห้ามรับ approvedBy/approvedAt จาก req.body
+        const nextStatus = isAdmin
+          ? req.body.status || existing.status
+          : existing.status;
+        const becomingPublished =
+          nextStatus === "Published" && existing.status !== "Published";
+
         // Security Invariant: File binding is IMMUTABLE via PUT /api/documents/:id.
         // Client cannot control file ownership or change attached files through this endpoint.
         const updatedDoc: DocumentItem = {
@@ -1896,18 +2043,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
               : existing.exampleVideo,
           tags: Array.isArray(req.body.tags) ? req.body.tags : existing.tags,
           // Admin-only fields:
-          status: isAdmin
-            ? req.body.status || existing.status
-            : existing.status,
-          approvedBy: isAdmin
-            ? req.body.approvedBy !== undefined
-              ? req.body.approvedBy
-              : existing.approvedBy
+          status: nextStatus,
+          approvedBy: becomingPublished
+            ? currentDbUser.employeeId
             : existing.approvedBy,
-          approvedAt: isAdmin
-            ? req.body.approvedAt !== undefined
-              ? req.body.approvedAt
-              : existing.approvedAt
+          approvedAt: becomingPublished
+            ? new Date().toISOString()
             : existing.approvedAt,
           type: isAdmin ? req.body.type || existing.type : existing.type,
           revision:
@@ -2023,13 +2164,16 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     (req, res) => {
       try {
         const { id } = req.params;
-        const { approverName } = req.body;
+        // approvedBy มาจาก authenticated user (ผ่าน requireAuth + requireRole("Admin"))
+        // เท่านั้น — ไม่อ่าน approverName จาก req.body (client ส่งมาก็ถูก ignore)
+        // ใช้ employeeId ให้สอดคล้องกับ POST /api/documents ที่ Admin สร้างแล้ว Published ทันที
+        const approverId = req.authUser!.employeeId;
         db_documents = db_documents.map((doc) =>
           doc.id === id
             ? {
                 ...doc,
                 status: "Published",
-                approvedBy: approverName,
+                approvedBy: approverId,
                 approvedAt: new Date().toISOString(),
               }
             : doc,
@@ -2453,7 +2597,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // User Progress APIs — เขียนได้ทุก login (เป็นข้อมูลของตัวเอง)
   app.get("/api/user_progress", requireAuth, (req, res) => {
-    res.json(db_user_progress);
+    if (canViewAllLearningData(req.authUser)) {
+      return res.json(db_user_progress);
+    }
+    res.json(db_user_progress.filter((p) => p.userId === req.authUser!.id));
   });
   app.post(
     "/api/user_progress",
@@ -2510,7 +2657,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Exam Results APIs
   app.get("/api/exam_results", requireAuth, (req, res) => {
-    res.json(db_exam_results);
+    if (canViewAllLearningData(req.authUser)) {
+      return res.json(db_exam_results);
+    }
+    res.json(
+      db_exam_results.filter((e) => e.employeeId === req.authUser!.employeeId),
+    );
   });
   app.post(
     "/api/exam_results",
@@ -2764,13 +2916,22 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           (d.title.toLowerCase().includes(keyword) ||
             d.description.toLowerCase().includes(keyword)),
       );
-      const hasKBMatch = db_kb_articles.some(
-        (k) =>
-          k.status === "Approved" &&
-          (k.title.toLowerCase().includes(keyword) ||
-            k.problem.toLowerCase().includes(keyword) ||
-            k.solution.toLowerCase().includes(keyword)),
-      );
+      // N15: ฟิลด์ตรงกับ matchStr ใน TechnicalKB.tsx (title/problem/cause/solution/prevention/tags/relatedWIs)
+      const hasKBMatch = db_kb_articles.some((k) => {
+        if (k.status !== "Approved") return false;
+        const haystack = [
+          k.title,
+          k.problem,
+          k.cause ?? "",
+          k.solution,
+          k.prevention ?? "",
+          (k.tags || []).join(" "),
+          (k.relatedWIs || []).join(" "),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(keyword);
+      });
 
       const hasResult = hasDocMatch || hasKBMatch;
 
@@ -2906,7 +3067,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Certificates APIs
   app.get("/api/user_certificates", requireAuth, (req, res) => {
-    res.json(db_user_certificates);
+    if (canViewAllLearningData(req.authUser)) {
+      return res.json(db_user_certificates);
+    }
+    res.json(db_user_certificates.filter((c) => c.userId === req.authUser!.id));
   });
   app.post("/api/user_certificates", requireAuth, (req, res) => {
     try {
@@ -2925,7 +3089,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           }
         });
       }
-      res.json(db_user_certificates);
+      res.json(
+        canViewAllLearningData(req.authUser)
+          ? db_user_certificates
+          : db_user_certificates.filter((c) => c.userId === req.authUser!.id),
+      );
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2933,7 +3101,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // KM Contribution Logs APIs
   app.get("/api/km_contribution_logs", requireAuth, (req, res) => {
-    res.json(db_km_contribution_logs);
+    if (canViewAllLearningData(req.authUser)) {
+      return res.json(db_km_contribution_logs);
+    }
+    res.json(
+      db_km_contribution_logs.filter((l) => l.userId === req.authUser!.id),
+    );
   });
   app.post(
     "/api/km_contribution_logs",
@@ -2968,11 +3141,19 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     requireRole("Admin", "Editor"),
     (req, res) => {
       try {
-        const { employeeMaster } = req.body;
-        if (!Array.isArray(employeeMaster)) {
+        const { employeeMaster: incomingMaster } = req.body;
+        if (!Array.isArray(incomingMaster)) {
           return res.status(400).json({ error: "INVALID_PAYLOAD" });
         }
 
+        // N7: server เป็นผู้ตัดสิน isDeptResolved เอง (ไม่เชื่อค่าจาก client)
+        // resolved = departmentId ตรงกับ Department จริงในระบบ, ไม่ตรง = unresolved (ไม่สร้างแผนกใหม่)
+        const employeeMaster: EmployeeMaster[] = incomingMaster.map(
+          (e: EmployeeMaster) => ({
+            ...e,
+            isDeptResolved: !!getDepartmentById(String(e?.departmentId ?? "")),
+          }),
+        );
         if (req.authUser!.role === "Admin") {
           // Admin เท่านั้นที่ full-replace ได้ (รองรับ "เคลียร์ทั้งหมด" และ
           // import ที่ตั้งใจแทนที่ฐานทั้งก้อน)
