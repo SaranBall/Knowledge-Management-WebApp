@@ -56,8 +56,11 @@ import {
 
 dotenv.config();
 
-// ข้อ 25: ชื่อโมเดล Gemini ตั้งผ่าน env ได้ (มี default กัน deploy เดิมพัง)
-const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+// ข้อ 25: ชื่อโมเดล Gemini ตั้งผ่าน env ได้ — ถ้าตั้ง GEMINI_MODEL จะใช้ค่านั้นเสมอ
+// fallback เป็น gemini-3.5-flash เพราะ gemini-2.5-flash ถูกจำกัดสิทธิ์สำหรับโปรเจกต์ที่ไม่เคยใช้
+// (ตอบ 404 "no longer available") และ Google แนะนำ 3.5 Flash เป็นตัวแทน
+const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || GEMINI_FALLBACK_MODEL;
 if (!process.env.GEMINI_MODEL) {
   console.warn(
     `⚠️ GEMINI_MODEL ไม่ได้ตั้งค่าใน .env — ใช้ค่าเริ่มต้น "${GEMINI_MODEL}"`,
@@ -1244,7 +1247,7 @@ async function startServer() {
           content: `ปัญหา: ${k.problem}\nสาเหตุ: ${k.cause || ""}\nวิธีแก้ไข: ${k.solution}\nการป้องกัน: ${k.prevention || ""}\nหมวดหมู่ช่าง: ${k.type}`,
         })),
         ...approvedCourses.flatMap((c) =>
-          c.lessons.map((l) => ({
+          (c.lessons ?? []).map((l) => ({
             id: `${c.id}-${l.id}`,
             title: `[สอนงาน Onboarding] ${c.title} -> ${l.title}`,
             type: "บทเรียนฝึกอบรม",
@@ -2914,7 +2917,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           d.status === "Published" &&
           canAccessDocument(currentDbUser, d) &&
           (d.title.toLowerCase().includes(keyword) ||
-            d.description.toLowerCase().includes(keyword)),
+            (d.description ?? "").toLowerCase().includes(keyword)),
       );
       // N15: ฟิลด์ตรงกับ matchStr ใน TechnicalKB.tsx (title/problem/cause/solution/prevention/tags/relatedWIs)
       const hasKBMatch = db_kb_articles.some((k) => {
