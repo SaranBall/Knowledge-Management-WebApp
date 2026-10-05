@@ -91,7 +91,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [modalSelectedCourse, setModalSelectedCourse] = useState<Course | null>(
     null,
   );
-  const [modalSelectedScore, setModalSelectedScore] = useState<number>(100);
+  const [modalSelectedScore, setModalSelectedScore] = useState<
+    number | undefined
+  >(undefined);
   const [modalSelectedDate, setModalSelectedDate] = useState<
     string | undefined
   >(undefined);
@@ -773,7 +775,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div key={courseId} className="space-y-2">
                       <div className="flex justify-between text-xs font-semibold">
                         <span>
-                          {idx + 1}. {courseObj?.title ?? courseId}
+                          {idx + 1}. {courseObj?.title ?? "-"}
                         </span>
                         <span className={`font-bold ${textColors[idx]}`}>
                           {passRate !== null
@@ -983,17 +985,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               </span>
                             )}
                             <div className="text-xs">
-                              <span className="font-medium text-slate-700">
-                                {matchedCourse?.title ??
-                                  `ไม่พบหลักสูตร (${reqCourseId})`}
-                              </span>
+                              {matchedCourse ? (
+                                <span className="font-medium text-slate-700">
+                                  {matchedCourse.title}
+                                </span>
+                              ) : (
+                                <span className="italic text-slate-400">
+                                  ไม่พบหลักสูตรในระบบ{" "}
+                                  <span className="font-mono text-[10px] not-italic">
+                                    (รหัส: {reqCourseId})
+                                  </span>
+                                </span>
+                              )}
                             </div>
                           </div>
 
                           <div className="text-right text-xs">
                             {isCompleted ? (
                               <span className="text-green-600 font-bold font-mono">
-                                ผ่าน ({scoreVal}%)
+                                ผ่าน ({scoreVal != null ? `${scoreVal}%` : "-"})
                               </span>
                             ) : (
                               <span className="text-amber-600 font-medium font-mono">
@@ -1057,8 +1067,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <button
                               type="button"
                               onClick={() => {
+                                if (item.score === undefined) return;
                                 setModalSelectedCourse(item.course);
-                                setModalSelectedScore(item.score as number);
+                                setModalSelectedScore(item.score);
                                 setModalSelectedDate(item.date);
                                 setIsCertBadgeModalOpen(true);
                               }}
@@ -1273,8 +1284,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div>
                             <div className="font-bold text-slate-800">
                               {idx + 1}.{" "}
-                              {matchedCourse?.title ?? "ไม่พบหลักสูตรในระบบ"} (
-                              {reqCourseId})
+                              {matchedCourse ? (
+                                matchedCourse.title
+                              ) : (
+                                <span className="italic font-normal text-slate-400">
+                                  ไม่พบหลักสูตรในระบบ
+                                </span>
+                              )}{" "}
+                              (รหัส: {reqCourseId}){reqCourseId})
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5">
                               ระดับความจำเป็น: สำคัญระดับวิกฤตสำหรับตำแหน่ง{" "}
@@ -1289,7 +1306,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {isCompleted ? (
                               <div className="space-y-0.5">
                                 <span className="text-emerald-800 font-black bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded text-[10px]">
-                                  COMPLIANT (ผ่าน {scoreVal}%)
+                                  COMPLIANT (ผ่าน{" "}
+                                  {scoreVal != null ? `${scoreVal}%` : "-"})
                                 </span>
                                 <div className="text-[9px] text-slate-400">
                                   ประเมินเมื่อ:{" "}
@@ -1505,17 +1523,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       )}
-      {isCertBadgeModalOpen && modalSelectedCourse && (
-        <BadgeCertificateModal
-          isOpen={isCertBadgeModalOpen}
-          onClose={() => setIsCertBadgeModalOpen(false)}
-          user={selectedUserTranscript || currentUser}
-          course={modalSelectedCourse}
-          score={modalSelectedScore}
-          completedDate={modalSelectedDate}
-          onDownloadLog={onCertificateDownloadLog}
-        />
-      )}
+      {isCertBadgeModalOpen &&
+        modalSelectedCourse &&
+        modalSelectedScore !== undefined && (
+          <BadgeCertificateModal
+            isOpen={isCertBadgeModalOpen}
+            onClose={() => setIsCertBadgeModalOpen(false)}
+            user={selectedUserTranscript || currentUser}
+            course={modalSelectedCourse}
+            score={modalSelectedScore}
+            completedDate={modalSelectedDate}
+            onDownloadLog={onCertificateDownloadLog}
+          />
+        )}
     </>
   );
 };

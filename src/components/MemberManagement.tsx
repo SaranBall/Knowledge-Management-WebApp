@@ -1131,7 +1131,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         const isPassed =
           progressObj?.status === "Completed" || (examObj && examObj.pass);
         const scoreVal = examObj?.score ?? progressObj?.score ?? null;
-        const title = courseObj?.title ?? `ไม่พบหลักสูตรในระบบ (${courseId})`;
+        const title = courseObj?.title ?? "-";
         const passingText = courseObj ? `${courseObj.minPassScore}%` : "-";
 
         return [
@@ -2209,8 +2209,13 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                       {courseId.toUpperCase()}
                                     </td>
                                     <td className="p-2.5 font-semibold text-slate-800">
-                                      {courseObj?.title ??
-                                        `ไม่พบหลักสูตรในระบบ (${courseId})`}
+                                      {courseObj ? (
+                                        courseObj.title
+                                      ) : (
+                                        <span className="italic font-normal text-slate-400">
+                                          ไม่พบหลักสูตรในระบบ
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="p-2.5 text-center font-mono">
                                       {courseObj
