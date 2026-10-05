@@ -32,6 +32,33 @@ export interface SearchResolution {
   resolvedAt: string;
 }
 
+export interface LearningStats {
+  scope: "organization" | "self";
+  learners: { total: number; withCompletion: number };
+  completions: { unique: number };
+  exams: {
+    attempts: number;
+    passed: number;
+    averageScore: number | null;
+    pendingEssayReview: number;
+  };
+  trainingMinutes: number | null;
+  perCourse: {
+    courseId: string;
+    courseTitle: string;
+    attempts: number;
+    passed: number;
+  }[];
+  certificates: {
+    total: number;
+    valid: number;
+    expiringSoon: number;
+    expired: number;
+  };
+  xp: { totalPoints: number; entries: number };
+  competency: { total: number; gaps: number; met: number };
+}
+
 let authToken: string | null = localStorage.getItem("rm_auth_token");
 
 export function setAuthToken(token: string | null) {
@@ -107,6 +134,7 @@ export function getApiErrorMessage(err: unknown, fallback: string): string {
 }
 
 export const api = {
+  getLearningStats: () => request<LearningStats>("/api/learning/stats"),
   // Login API
   login: (employeeId: string, password: string) =>
     request<{ user: UserType; token: string }>("/api/login", {

@@ -2697,6 +2697,114 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       }
     },
   );
+  // GET /api/learning/stats — aggregate only
+// Admin/Editor: ระดับองค์กร | Viewer: ของตัวเองเท่านั้น
+// ไม่อ่าน req.query / req.body เลย → ไม่มีช่องให้ client เลือก user
+app.get("/api/learning/stats", requireAuth, (req, res) => {
+  try {
+    const me = req.authUser!;
+    const orgWide = canViewAllLearningData(me);
+
+    const scopedUsers = orgWide
+      ? db_users
+      : db_users.filter((u) => u.id === me.id);
+    const ids = new Set(scopedUsers.map((u) => u.id));
+    const emps = new Set(scopedUsers.map((u) => u.employeeId));
+    const empById = new Map(db_users.map((u) => [u.id, u.employeeId]));
+
+    const progress = db_user_progress.filter((p) => ids.has(p.userId));
+    const exams = db_exam_results.filter((e) => emps.has(e.employeeId));
+    const certs = db_user_certificates.filter((c) => ids.has(c.userId));
+    const logs = db_km_contribution_logs.filter((l) => ids.has(l.userId));
+    const comps = db_user_competencies.filter((c) => ids.has(c.userId));
+    const pendingReview = db_quiz_submissions.filter(
+      (s) => s.status === "PendingReview" && ids.has(s.userId),
+    ).length;
+
+    // unique (employee, course) ที่เรียนจบจริง — นิยามเดียวกับ getUserCompletedCourseIds
+    const completed = new Map<string, { emp: string; courseId: string }>();
+    progress.forEach((p) => {
+      const emp = empById.get(p.userId);
+      if (p.status === "Completed" && emp) {
+        completed.set(`${emp}\u0000${p.courseId}`, { emp, courseId: p.courseId });
+      }
+    });
+    exams.forEach((e) => {
+      if (e.pass) {
+        completed.set(`${e.employeeId}\u0000${e.courseId}`, {
+          emp: e.employeeId,
+          courseId: e.courseId,
+        });
+      }
+    });
+
+    let trainingMinutes = 0;
+    let minutesKnown = false;
+    completed.forEach(({ courseId }) => {
+      const c = db_courses.find((x) => x.id === courseId);
+      if (c?.durationMinutes) {
+        trainingMinutes += c.durationMinutes;
+        minutesKnown = true;
+      }
+    });
+
+    const examScores = exams
+      .map((e) => Number(e.score))
+      .filter((n) => !isNaN(n));
+
+    const perCourse = db_courses
+      .filter((c) => orgWide || c.isApproved !== false)
+      .map((c) => {
+        const ex = exams.filter((e) => e.courseId === c.id);
+        return {
+          courseId: c.id,
+          courseTitle: c.title,
+          attempts: ex.length,
+          passed: ex.filter((e) => e.pass).length,
+        };
+      })
+      .filter((c) => c.attempts > 0)
+      .sort((a, b) => b.attempts - a.attempts);
+
+    const now = Date.now();
+    const certSummary = { total: certs.length, valid: 0, expiringSoon: 0, expired: 0 };
+    certs.forEach((c) => {
+      const d = Math.ceil((Date.parse(c.expiryDate) - now) / 86400000);
+      if (isNaN(d)) return;
+      if (d <= 0) certSummary.expired++;
+      else if (d <= 45) certSummary.expiringSoon++;
+      else certSummary.valid++;
+    });
+
+    res.json({
+      scope: orgWide ? "organization" : "self",
+      learners: {
+        total: scopedUsers.length,
+        withCompletion: new Set(Array.from(completed.values()).map((v) => v.emp)).size,
+      },
+      completions: { unique: completed.size },
+      exams: {
+        attempts: exams.length,
+        passed: exams.filter((e) => e.pass).length,
+        averageScore: examScores.length
+          ? Math.round(examScores.reduce((a, b) => a + b, 0) / examScores.length)
+          : null,
+        pendingEssayReview: pendingReview,
+      },
+      trainingMinutes: minutesKnown ? trainingMinutes : null,
+      perCourse,
+      certificates: certSummary,
+      xp: { totalPoints: logs.reduce((s, l) => s + (l.points || 0), 0), entries: logs.length },
+      competency: {
+        total: comps.length,
+        gaps: comps.filter((c) => c.actualLevel < c.expectedLevel).length,
+        met: comps.filter((c) => c.actualLevel >= c.expectedLevel).length,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
   // Attendance Logs APIs (QR Check-in)
   app.get("/api/attendance_logs", requireAuth, (req, res) => {
