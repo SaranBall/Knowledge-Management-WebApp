@@ -434,6 +434,17 @@ async function seedInitialAdmin(
   return [adminUser];
 }
 
+// N6: บันทึกการปิดช่องว่างความรู้ (Knowledge Gap) จาก Report D
+interface SearchResolution {
+  id: string;
+  keyword: string; // ตรงกับ SearchLog.keyword แบบดิบ
+  action: string; // มาตรการ/SOP ที่ใช้ปิดช่องว่าง
+  assignedTo?: string; // ผู้เชี่ยวชาญ/ผู้รับมอบ (ไม่บังคับ)
+  resolvedBy: string; // employeeId จาก token
+  resolvedByName: string;
+  resolvedAt: string;
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -463,6 +474,7 @@ async function startServer() {
   let db_attendance_logs: AttendanceLog[] = [];
   let db_training_sessions: TrainingSession[] = [];
   let db_quiz_submissions: QuizSubmission[] = [];
+  let db_search_resolutions: SearchResolution[] = [];
 
   // --- Quiz grading helpers: server เป็นผู้ตัดสินคะแนนเท่านั้น ไม่เชื่อค่าที่ client ส่ง ---
   // ตรวจข้อที่ตรวจอัตโนมัติได้ (SingleChoice / TrueFalse / Matching) — Essay ไม่ผ่านฟังก์ชันนี้
@@ -2951,6 +2963,85 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       res.status(500).json({ error: err.message });
     }
   });
+
+  // Search Resolutions (N6) — การปิดช่องว่างความรู้ Admin เท่านั้น (ตรงกับ search_logs)
+  // ผู้ปิดมาจาก token ไม่ใช่ body และปิดได้เฉพาะ keyword ที่เป็น gap จริงใน search_logs
+  app.get(
+    "/api/search_resolutions",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      res.json(db_search_resolutions);
+    },
+  );
+  app.post(
+    "/api/search_resolutions",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const keyword =
+          typeof req.body.keyword === "string" ? req.body.keyword : "";
+        const action =
+          typeof req.body.action === "string" ? req.body.action.trim() : "";
+        const assignedTo =
+          typeof req.body.assignedTo === "string"
+            ? req.body.assignedTo.trim().slice(0, 200)
+            : "";
+
+        if (!keyword.trim()) {
+          return res.status(400).json({
+            error: "KEYWORD_REQUIRED",
+            message: "ไม่พบคำค้นหาที่ต้องการปิดช่องว่าง",
+          });
+        }
+        if (!action) {
+          return res.status(400).json({
+            error: "ACTION_REQUIRED",
+            message: "กรุณากรอกมาตรการปิดช่องว่างความรู้",
+          });
+        }
+        const isRealGap = db_search_logs.some(
+          (l) => l.keyword === keyword && !l.hasResult,
+        );
+        if (!isRealGap) {
+          return res.status(404).json({
+            error: "GAP_NOT_FOUND",
+            message: "ไม่พบช่องว่างความรู้ของคำค้นหานี้ในประวัติการสืบค้น",
+          });
+        }
+        if (db_search_resolutions.some((r) => r.keyword === keyword)) {
+          return res.status(409).json({
+            error: "ALREADY_RESOLVED",
+            message: "ช่องว่างความรู้นี้ถูกปิดไปแล้ว",
+          });
+        }
+
+        const resolution: SearchResolution = {
+          id: `sr-${crypto.randomUUID()}`,
+          keyword,
+          action: action.slice(0, 2000),
+          assignedTo: assignedTo || undefined,
+          resolvedBy: req.authUser!.employeeId,
+          resolvedByName: req.authUser!.name,
+          resolvedAt: new Date().toISOString(),
+        };
+        db_search_resolutions.unshift(resolution);
+
+        db_system_audit_logs.unshift({
+          id: `log-${crypto.randomUUID()}`,
+          action: "RESOLVE_GAP",
+          details: `ปิดช่องว่างความรู้ "${keyword.slice(0, 200)}" มาตรการ: ${resolution.action.slice(0, 200)}`,
+          performedBy: `${req.authUser!.name} (${req.authUser!.employeeId})`,
+          timestamp: resolution.resolvedAt,
+        });
+
+        res.json(resolution);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
 
   // Contact Requests APIs
   app.get("/api/contact_requests", requireAuth, (req, res) => {

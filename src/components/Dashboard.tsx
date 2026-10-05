@@ -1291,7 +1291,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                   ไม่พบหลักสูตรในระบบ
                                 </span>
                               )}{" "}
-                              (รหัส: {reqCourseId}){reqCourseId})
+                              (รหัส: {reqCourseId})
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5">
                               ระดับความจำเป็น: สำคัญระดับวิกฤตสำหรับตำแหน่ง{" "}

@@ -21,6 +21,17 @@ import {
   EssayGrade,
 } from "../types";
 
+// N6: การปิดช่องว่างความรู้ (ตรงกับ SearchResolution ใน server.ts)
+export interface SearchResolution {
+  id: string;
+  keyword: string;
+  action: string;
+  assignedTo?: string;
+  resolvedBy: string; // employeeId
+  resolvedByName: string;
+  resolvedAt: string;
+}
+
 let authToken: string | null = localStorage.getItem("rm_auth_token");
 
 export function setAuthToken(token: string | null) {
@@ -272,6 +283,19 @@ export const api = {
     request<SearchLog>("/api/search_logs", {
       method: "POST",
       body: JSON.stringify({ keyword }),
+    }),
+
+  // Search Resolutions APIs (N6) — Admin เท่านั้น
+  getSearchResolutions: () =>
+    request<SearchResolution[]>("/api/search_resolutions"),
+  createSearchResolution: (input: {
+    keyword: string;
+    action: string;
+    assignedTo?: string;
+  }) =>
+    request<SearchResolution>("/api/search_resolutions", {
+      method: "POST",
+      body: JSON.stringify(input),
     }),
 
   // Contact Requests APIs

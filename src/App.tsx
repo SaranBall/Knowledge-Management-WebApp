@@ -1233,29 +1233,6 @@ export default function App() {
                     พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
                   </p>
                 </div>
-
-                {/* 4. QUICK FILL DEFAULT ADMIN */}
-                <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-left space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-amber-900 uppercase tracking-wider">
-                      👤 บัญชีเริ่มต้นระบบ (Default Admin)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLoginEmployeeId("ADMIN001");
-                        setLoginPassword("123456");
-                      }}
-                      className="text-[10px] font-bold text-[#15329c] hover:underline cursor-pointer bg-white px-2 py-0.5 rounded border border-amber-300 shadow-xs"
-                    >
-                      กรอกอัตโนมัติ ⚡
-                    </button>
-                  </div>
-                  <p className="text-[9.5px] text-amber-800 font-mono">
-                    รหัสพนักงาน: <strong>ADMIN001</strong> | PIN:{" "}
-                    <strong>123456</strong>
-                  </p>
-                </div>
               </div>
             ) : (
               /* REGISTRATION INTERACTIVE PORTAL */

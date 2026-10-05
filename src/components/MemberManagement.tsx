@@ -45,6 +45,11 @@ import {
   UserStatus,
   SystemAuditLog,
 } from "../types";
+import {
+  api,
+  getApiErrorMessage,
+  type SearchResolution,
+} from "../services/api";
 import { INITIAL_EMPLOYEE_MASTER } from "../data/initialData";
 import { getUserBadges } from "../utils/badgeUtils";
 import { BadgePill } from "./BadgeDisplay";
@@ -555,10 +560,24 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const [searchReportTab, setSearchReportTab] = useState<
     "GAPS" | "TOP_KEYWORDS" | "RAW_LOGS"
   >("GAPS");
-  const [resolvedGaps, setResolvedGaps] = useState<string[]>([]);
+  const [searchResolutions, setSearchResolutions] = useState<
+    SearchResolution[]
+  >([]);
+  // keyword ที่ปิดแล้ว derive จากข้อมูลจริงของ server (ไม่ใช่ state ชั่วคราวอีกต่อไป)
+  const resolvedGaps = searchResolutions.map((r) => r.keyword);
   const [assigningGap, setAssigningGap] = useState<string | null>(null);
   const [quickAnswerText, setQuickAnswerText] = useState("");
-  const [assignedExpert, setAssignedExpert] = useState("Select Employee");
+  const [assignedExpert, setAssignedExpert] = useState("");
+  const [isSavingGap, setIsSavingGap] = useState(false);
+  const [gapError, setGapError] = useState("");
+
+  React.useEffect(() => {
+    if (currentUser.role !== "Admin") return;
+    api
+      .getSearchResolutions()
+      .then(setSearchResolutions)
+      .catch((err) => console.error("Failed to load gap resolutions:", err));
+  }, [currentUser.role]);
 
   React.useEffect(() => {
     if (currentUser.role === "Viewer") {
@@ -628,6 +647,36 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     resolvedGaps.includes(k),
   ).length;
   const openGapCount = gapKeywords.length - resolvedGapCount;
+
+  const handleResolveGap = async (keyword: string) => {
+    if (isSavingGap) return;
+    if (!quickAnswerText.trim()) {
+      setGapError("กรุณากรอกมาตรการปิดช่องว่างความรู้ก่อนบันทึก");
+      return;
+    }
+    setIsSavingGap(true);
+    setGapError("");
+    try {
+      const saved = await api.createSearchResolution({
+        keyword,
+        action: quickAnswerText,
+        assignedTo: assignedExpert,
+      });
+      setSearchResolutions((prev) => [saved, ...prev]);
+      setAssigningGap(null);
+      setQuickAnswerText("");
+      setAssignedExpert("");
+    } catch (err) {
+      setGapError(getApiErrorMessage(err, "บันทึกการปิดช่องว่างไม่สำเร็จ"));
+      // เผื่อมีคนปิดไปก่อนแล้ว (409) ให้รายการตรงกับ server
+      api
+        .getSearchResolutions()
+        .then(setSearchResolutions)
+        .catch(() => {});
+    } finally {
+      setIsSavingGap(false);
+    }
+  };
 
   const handleCreateUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -948,26 +997,36 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
       // Group failed and successful search logs by keyword to list them as aggregated queries
       const queryStats: {
-        [key: string]: { keyword: string; count: number; hasResult: boolean };
+        [key: string]: {
+          keyword: string;
+          count: number;
+          hasResult: boolean;
+          hasFailure: boolean;
+        };
       } = {};
       searchLogs.forEach((log) => {
         if (!queryStats[log.keyword]) {
           queryStats[log.keyword] = {
             keyword: log.keyword,
             count: 0,
-            hasResult: log.hasResult,
+            hasResult: false,
+            hasFailure: false,
           };
         }
         queryStats[log.keyword].count += 1;
-        // if any instance hasResult is true, let's treat it as true
         if (log.hasResult) {
           queryStats[log.keyword].hasResult = true;
+        } else {
+          queryStats[log.keyword].hasFailure = true;
         }
       });
 
       const rows2 = Object.values(queryStats).map((stat) => {
-        const isGap = !stat.hasResult;
-        const isResolved = resolvedGaps.includes(stat.keyword);
+        // gap = เคยค้นไม่เจออย่างน้อย 1 ครั้ง (นิยามเดียวกับตาราง GAPS และ server)
+        const isGap = stat.hasFailure;
+        const resolution = searchResolutions.find(
+          (r) => r.keyword === stat.keyword,
+        );
         const hasMatch = stat.hasResult
           ? "พบบทความองค์ความรู้ในระบบ"
           : "ไม่พบบทความในระบบ";
@@ -979,19 +1038,17 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         let expertAssigned = "N/A";
 
         if (isGap) {
-          if (isResolved) {
-            resolutionText =
-              "ปิดช่องว่างเรียบร้อย: อนุมัติคู่มือการแก้ปัญหาและนำขึ้น Knowledge Base สำเร็จ";
-            expertAssigned =
-              "ทีมผู้เชี่ยวชาญประจำแผนกที่เกี่ยวข้อง & ทีมแอดมินกลาง";
+          if (resolution) {
+            resolutionText = `ปิดช่องว่างโดย ${resolution.resolvedByName} เมื่อ ${new Date(resolution.resolvedAt).toLocaleString("th-TH")}: ${resolution.action}`;
+            expertAssigned = resolution.assignedTo || "ไม่ระบุ";
           } else {
             resolutionText =
               "รอดำเนินการทบทวน: ต้องประสานงานผู้เชี่ยวชาญเพิ่มเติมเพื่อกำหนดเอกสาร SOP";
             expertAssigned = "รอระบุผู้ตรวจประเมินระบบ";
           }
         } else {
-          resolutionText = "คู่มือความปลอดภัยเข้าถึงสมบูรณ์ดีเยี่ยม";
-          expertAssigned = "ทีมวิศวกรระบบดูแล";
+          resolutionText = "ไม่พบช่องว่างความรู้";
+          expertAssigned = "-";
         }
 
         return [
@@ -2424,9 +2481,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                             }
 
                             return gapItems.map((item, idx) => {
-                              const isResolved = resolvedGaps.includes(
-                                item.keyword,
+                              const resolution = searchResolutions.find(
+                                (r) => r.keyword === item.keyword,
                               );
+                              const isResolved = !!resolution;
                               return (
                                 <tr
                                   key={idx}
@@ -2460,19 +2518,23 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                     </div>
                                   </td>
                                   <td className="p-3 text-right">
-                                    {isResolved ? (
+                                    {resolution ? (
                                       <div className="text-left max-w-xs ml-auto space-y-0.5 bg-green-50/10 p-2.5 rounded-lg border border-green-150">
                                         <p className="text-[10.5px] text-slate-650 leading-relaxed font-semibold">
-                                          ✓ ดำเนินการอนุมัติ SOP
-                                          คู่มือการแก้ไขเรียบร้อย
-                                          พร้อมเพิ่มเข้าหน้าบทความ KB แล้ว
+                                          ✓ {resolution.action}
                                         </p>
                                         <p className="text-[9.5px] text-[#15329c] font-black mt-1">
-                                          ผู้เชี่ยวชาญร่วมปิด:{" "}
-                                          {assignedExpert !== "Select Employee"
-                                            ? assignedExpert
-                                            : "ทีมผู้เชี่ยวชาญประจำแผนก"}
+                                          ปิดโดย {resolution.resolvedByName} •{" "}
+                                          {new Date(
+                                            resolution.resolvedAt,
+                                          ).toLocaleString("th-TH")}
                                         </p>
+                                        {resolution.assignedTo && (
+                                          <p className="text-[9.5px] text-slate-500 mt-0.5">
+                                            ผู้เชี่ยวชาญ/ผู้รับมอบ:{" "}
+                                            {resolution.assignedTo}
+                                          </p>
+                                        )}
                                       </div>
                                     ) : assigningGap === item.keyword ? (
                                       <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-left space-y-2.5 max-w-sm ml-auto">
@@ -2487,6 +2549,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                             onChange={(e) =>
                                               setAssignedExpert(e.target.value)
                                             }
+                                            placeholder="ไม่บังคับ"
                                             className="w-full bg-white border border-slate-250 p-1.5 rounded text-[11px] font-medium"
                                           />
                                         </div>
@@ -2500,10 +2563,16 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                             onChange={(e) =>
                                               setQuickAnswerText(e.target.value)
                                             }
+                                            placeholder="ระบุมาตรการ/SOP ที่ใช้ปิดช่องว่างนี้"
                                             className="w-full bg-white border border-slate-250 p-1.5 rounded text-[11px] leading-snug"
                                             rows={2}
                                           />
                                         </div>
+                                        {gapError && (
+                                          <p className="text-[10px] text-rose-600 font-semibold">
+                                            {gapError}
+                                          </p>
+                                        )}
                                         <div className="flex justify-end gap-1.5">
                                           <button
                                             type="button"
@@ -2516,26 +2585,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                           </button>
                                           <button
                                             type="button"
-                                            onClick={() => {
-                                              if (!quickAnswerText.trim()) {
-                                                alert(
-                                                  "กรุณากรอกมาตรการปิดช่องว่างความรู้เพื่อใช้เป็นหลักฐานประกอบการตรวจประเมินครับ",
-                                                );
-                                                return;
-                                              }
-                                              setResolvedGaps([
-                                                ...resolvedGaps,
-                                                item.keyword,
-                                              ]);
-                                              setAssigningGap(null);
-                                              setQuickAnswerText("");
-                                              alert(
-                                                `🍀 ความคืบหน้าสำเร็จ!\nอัปเดตระบบตรวจสอบสิทธิ์ปิดช่องว่างการค้นหาสำหรับประชากรหัวข้อ "${item.keyword}" บันทึกมาตรการปิดช่องว่างความรู้และเผยแพร่ในระบบเรียบร้อยแล้วครับ`,
-                                              );
-                                            }}
-                                            className="text-[9.5px] bg-[#15329c] hover:bg-[#11297e] text-white rounded px-3 py-1 font-extrabold cursor-pointer transition shadow"
+                                            onClick={() =>
+                                              handleResolveGap(item.keyword)
+                                            }
+                                            disabled={isSavingGap}
+                                            className="text-[9.5px] bg-[#15329c] hover:bg-[#11297e] text-white rounded px-3 py-1 font-extrabold cursor-pointer transition shadow disabled:opacity-50 disabled:cursor-not-allowed"
                                           >
-                                            บันทึกปิดช่องว่าง
+                                            {isSavingGap
+                                              ? "กำลังบันทึก..."
+                                              : "บันทึกปิดช่องว่าง"}
                                           </button>
                                         </div>
                                       </div>
@@ -2544,9 +2602,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                         type="button"
                                         onClick={() => {
                                           setAssigningGap(item.keyword);
-                                          setQuickAnswerText(
-                                            `จัดพิมพ์คู่มือปฏิบัติการพิเศษ SOP เพื่อความปลอดภัย และอัปเดตลงระบบคลังเอกสารแชร์เพื่อปิด Gap ของฝ่ายงาน`,
-                                          );
+                                          setQuickAnswerText("");
+                                          setAssignedExpert("");
+                                          setGapError("");
                                         }}
                                         className="bg-indigo-50 hover:bg-indigo-100 text-[#15329c] font-black text-[10.5px] px-3.5 py-1.5 rounded-lg border border-indigo-200 cursor-pointer transition flex items-center gap-1.5 ml-auto shadow-2xs"
                                       >
@@ -3891,6 +3949,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 <option value="GRADE_ESSAY">
                   🟠 ตรวจข้อสอบอัตนัย (GRADE_ESSAY)
                 </option>
+                <option value="RESOLVE_GAP">
+                  🟤 ปิดช่องว่างความรู้ (RESOLVE_GAP)
+                </option>
                 <option value="DELETE_MEMBER">
                   🔴 ลบสิทธิ์จากฐานข้อมูล (DELETE)
                 </option>
@@ -3931,6 +3992,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       actionBadgeColor =
                         "bg-amber-50 text-amber-800 border-amber-200";
                       actionName = "ตรวจข้อสอบอัตนัย";
+                    } else if (log.action === "RESOLVE_GAP") {
+                      actionBadgeColor =
+                        "bg-teal-50 text-teal-800 border-teal-200";
+                      actionName = "ปิดช่องว่างความรู้";
                     }
 
                     return (
