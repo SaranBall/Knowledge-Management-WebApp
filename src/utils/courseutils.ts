@@ -31,6 +31,25 @@ export const formatDuration = (minutes?: number): string => {
   return `${m} นาที`;
 };
 
+// Single source of truth: รหัสคอร์สที่พนักงานคนนี้ "เรียนจบจริง" แบบไม่ซ้ำ
+// (progress = Completed หรือมีผลสอบผ่าน) — server เขียนทั้งสองที่ทุกครั้งที่สอบผ่าน
+// ห้ามนับ progress + exam บวกกันตรงๆ ให้รวมเป็น Set ตาม courseId เสมอ
+export const getUserCompletedCourseIds = (
+  userId: string,
+  employeeId: string,
+  progress: UserCourseProgress[],
+  exams: any[],
+): Set<string> => {
+  const done = new Set<string>();
+  progress.forEach((p) => {
+    if (p.userId === userId && p.status === "Completed") done.add(p.courseId);
+  });
+  exams.forEach((e) => {
+    if (e.employeeId === employeeId && e.pass) done.add(e.courseId);
+  });
+  return done;
+};
+
 // รวมนาทีจากคอร์สที่พนักงานเรียนจบจริง (progress หรือสอบผ่าน ไม่นับซ้ำ)
 // คืน null ถ้าไม่มีคอร์สไหนที่จบแล้วระบุเวลาไว้ เพื่อให้แสดง "-" ไม่ใช่ 0
 export const getUserTrainingMinutes = (
@@ -40,13 +59,7 @@ export const getUserTrainingMinutes = (
   progress: UserCourseProgress[],
   exams: any[],
 ): number | null => {
-  const done = new Set<string>();
-  progress.forEach((p) => {
-    if (p.userId === userId && p.status === "Completed") done.add(p.courseId);
-  });
-  exams.forEach((e) => {
-    if (e.employeeId === employeeId && e.pass) done.add(e.courseId);
-  });
+  const done = getUserCompletedCourseIds(userId, employeeId, progress, exams);
   let total = 0;
   let known = false;
   done.forEach((id) => {

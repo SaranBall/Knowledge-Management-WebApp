@@ -37,6 +37,7 @@ import { DEFAULT_AVATAR_URL } from "../utils/assets";
 import {
   getRequiredCoursesForPosition,
   getUserTrainingMinutes,
+  getUserCompletedCourseIds,
   formatHours,
 } from "../utils/courseutils";
 
@@ -219,17 +220,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
     kbArticles.reduce((sum, k) => sum + k.views, 0);
   const totalDownloads = documents.reduce((sum, d) => sum + d.downloads, 0);
 
-  // 2. Learning Calculations (Assigned = 500, Completed = 450 as requested by spec, but we dynamically calculate based on our simulation)
-  const totalCompleted =
-    examResults.filter((e) => e.pass).length +
-    userProgressList.filter((u) => u.status === "Completed").length;
-  const totalAssignedCount = visibleUsers.reduce(
-    (sum, u) => sum + getRequiredCoursesForPosition(u.position).length,
-    0,
+  // 2. Learning Calculations — นับจาก getUserCompletedCourseIds (ไม่ซ้ำต่อ user+course)
+  //    assigned = หลักสูตรบังคับทั้งหมด, requiredDone = หลักสูตรบังคับที่จบแล้ว,
+  //    uniqueCompletions = จำนวนคู่ (พนักงาน, คอร์ส) ที่จบจริง
+  const completionStats = visibleUsers.reduce(
+    (acc, u) => {
+      const doneIds = getUserCompletedCourseIds(
+        u.id,
+        u.employeeId,
+        userProgressList,
+        examResults,
+      );
+      const reqIds = getRequiredCoursesForPosition(u.position);
+      acc.assigned += reqIds.length;
+      acc.requiredDone += reqIds.filter((id) => doneIds.has(id)).length;
+      acc.uniqueCompletions += doneIds.size;
+      return acc;
+    },
+    { assigned: 0, requiredDone: 0, uniqueCompletions: 0 },
   );
+  const totalAssignedCount = completionStats.assigned;
   const completionRate =
     totalAssignedCount > 0
-      ? Math.round((totalCompleted / totalAssignedCount) * 100)
+      ? Math.round((completionStats.requiredDone / totalAssignedCount) * 100)
       : 0;
 
   const totalCompletedCountForScore =
@@ -760,7 +773,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div key={courseId} className="space-y-2">
                       <div className="flex justify-between text-xs font-semibold">
                         <span>
-                          {idx + 1}. {courseObj?.title || "หลักสูตรมาตรฐาน"}
+                          {idx + 1}. {courseObj?.title ?? courseId}
                         </span>
                         <span className={`font-bold ${textColors[idx]}`}>
                           {passRate !== null
@@ -791,10 +804,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <span className="text-slate-500">
                 จำนวนการสอบผ่านสะสมในระบบ:{" "}
                 <strong className="text-slate-800">
-                  {examResults.filter((e) => e.pass).length +
-                    userProgressList.filter((p) => p.status === "Completed")
-                      .length}{" "}
-                  ครั้ง
+                  {completionStats.uniqueCompletions} ครั้ง
                 </strong>
               </span>
               <button
@@ -974,7 +984,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             )}
                             <div className="text-xs">
                               <span className="font-medium text-slate-700">
-                                {matchedCourse?.title || "หลักสูตรเฉพาะทาง"}
+                                {matchedCourse?.title ??
+                                  `ไม่พบหลักสูตร (${reqCourseId})`}
                               </span>
                             </div>
                           </div>
@@ -1262,8 +1273,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div>
                             <div className="font-bold text-slate-800">
                               {idx + 1}.{" "}
-                              {matchedCourse?.title || "หลักสูตรมาตรฐานโรงงาน"}{" "}
-                              ({reqCourseId})
+                              {matchedCourse?.title ?? "ไม่พบหลักสูตรในระบบ"} (
+                              {reqCourseId})
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5">
                               ระดับความจำเป็น: สำคัญระดับวิกฤตสำหรับตำแหน่ง{" "}

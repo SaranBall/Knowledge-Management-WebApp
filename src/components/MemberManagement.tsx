@@ -52,6 +52,7 @@ import { DEFAULT_AVATAR_URL } from "../utils/assets";
 import {
   getRequiredCoursesForPosition,
   getUserTrainingMinutes,
+  getUserCompletedCourseIds,
   formatHours,
 } from "../utils/courseutils";
 import {
@@ -602,6 +603,32 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     return matchesSearch && matchesAction;
   });
 
+  // ความคืบหน้าการอบรมต่อคน: นับคอร์สที่จบจริงแบบไม่ซ้ำ (progress + exam รวมเป็น Set)
+  // และนับ "หลักสูตรบังคับที่จบแล้ว" แยก เพื่อไม่ให้คอร์สนอกเกณฑ์ไปทำให้ผ่านเกณฑ์
+  const getCompletionSummary = (u: User) => {
+    const doneIds = getUserCompletedCourseIds(
+      u.id,
+      u.employeeId,
+      userProgressList,
+      examResults,
+    );
+    const reqIds = getRequiredCoursesForPosition(u.position);
+    return {
+      completed: doneIds.size,
+      required: reqIds.length,
+      requiredDone: reqIds.filter((id) => doneIds.has(id)).length,
+    };
+  };
+
+  // Gap analysis: นับตาม unique keyword (ตรงกับตาราง GAPS ที่ group ตาม keyword)
+  const gapKeywords = Array.from(
+    new Set(searchLogs.filter((l) => !l.hasResult).map((l) => l.keyword)),
+  );
+  const resolvedGapCount = gapKeywords.filter((k) =>
+    resolvedGaps.includes(k),
+  ).length;
+  const openGapCount = gapKeywords.length - resolvedGapCount;
+
   const handleCreateUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUser.name || !newUser.employeeId || !newUser.email) return;
@@ -779,9 +806,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
       // CSV Rows
       const rows = targetUsers.map((u) => {
-        const completions = userProgressList.filter(
-          (p) => p.userId === u.id && p.status === "Completed",
-        ).length;
+        const {
+          completed: completions,
+          required: reqs,
+          requiredDone,
+        } = getCompletionSummary(u);
         const attempts = examResults.filter(
           (e) => e.employeeId === u.employeeId,
         );
@@ -791,7 +820,6 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 attempts.reduce((acc, c) => acc + c.score, 0) / attempts.length,
               )
             : null;
-        const reqs = getRequiredCoursesForPosition(u.position).length;
         const hoursText = formatHours(
           getUserTrainingMinutes(
             u.id,
@@ -804,7 +832,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         const statusText =
           reqs === 0
             ? "ยังไม่กำหนดหลักสูตรบังคับ"
-            : completions >= reqs
+            : requiredDone >= reqs
               ? "ผ่านเกณฑ์ครบหลักสูตร"
               : "รอดำเนินการอบรม";
 
@@ -858,11 +886,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
       const targetUsers = users;
       const rows1 = targetUsers.map((u) => {
-        const completions = userProgressList.filter(
-          (p) => p.userId === u.id && p.status === "Completed",
-        ).length;
-        const reqs = getRequiredCoursesForPosition(u.position).length;
-        const rate = reqs > 0 ? Math.round((completions / reqs) * 100) : null;
+        const {
+          completed: completions,
+          required: reqs,
+          requiredDone,
+        } = getCompletionSummary(u);
+        const rate = reqs > 0 ? Math.round((requiredDone / reqs) * 100) : null;
         const attempts = examResults.filter(
           (e) => e.employeeId === u.employeeId,
         );
@@ -884,7 +913,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         const statusText =
           reqs === 0
             ? "ยังไม่กำหนดหลักสูตรบังคับ"
-            : completions >= reqs
+            : requiredDone >= reqs
               ? "ผ่านเกณฑ์แบบฟอร์ม ISO"
               : "รอดำเนินการประเมินศึกษา";
 
@@ -1102,8 +1131,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         const isPassed =
           progressObj?.status === "Completed" || (examObj && examObj.pass);
         const scoreVal = examObj?.score ?? progressObj?.score ?? null;
-        const title = courseObj ? courseObj.title : "หลักสูตรมาตรฐานโรงงาน";
-        const passingScore = courseObj ? courseObj.minPassScore : 80;
+        const title = courseObj?.title ?? `ไม่พบหลักสูตรในระบบ (${courseId})`;
+        const passingText = courseObj ? `${courseObj.minPassScore}%` : "-";
 
         return [
           u.employeeId,
@@ -1112,7 +1141,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           u.position,
           courseId,
           title,
-          `${passingScore}%`,
+          passingText,
           scoreVal !== null ? `${scoreVal}%` : "-",
           isPassed ? "ผ่านเกณฑ์ (PASSED)" : "รอดำเนินการอบรม (PENDING)",
           progressObj?.status || "Not Started",
@@ -1888,9 +1917,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     </thead>
                     <tbody className="divide-y divide-slate-150">
                       {visibleUsers.map((u) => {
-                        const completions = userProgressList.filter(
-                          (p) => p.userId === u.id && p.status === "Completed",
-                        ).length;
+                        const {
+                          completed: completions,
+                          required: reqs,
+                          requiredDone,
+                        } = getCompletionSummary(u);
                         const attempts = examResults.filter(
                           (e) => e.employeeId === u.employeeId,
                         );
@@ -1901,9 +1932,6 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                   attempts.length,
                               )
                             : null;
-                        const reqs = getRequiredCoursesForPosition(
-                          u.position,
-                        ).length;
 
                         return (
                           <tr key={u.id} className="hover:bg-slate-50/50">
@@ -1941,7 +1969,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                             <td className="p-2.5 text-right font-medium text-emerald-600 font-sans">
                               {reqs === 0
                                 ? "⚪ ยังไม่กำหนดหลักสูตรบังคับ"
-                                : completions >= reqs
+                                : requiredDone >= reqs
                                   ? "💚 ผ่านการอบรมครบถ้วน"
                                   : "💛 รอดำเนินการอบรม"}
                             </td>
@@ -2018,11 +2046,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                               </tr>
                             ) : (
                               deptUsers.map((u) => {
-                                const completions = userProgressList.filter(
-                                  (p) =>
-                                    p.userId === u.id &&
-                                    p.status === "Completed",
-                                ).length;
+                                const { completed: completions } =
+                                  getCompletionSummary(u);
                                 const attempts = examResults.filter(
                                   (e) => e.employeeId === u.employeeId,
                                 );
@@ -2184,11 +2209,13 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                       {courseId.toUpperCase()}
                                     </td>
                                     <td className="p-2.5 font-semibold text-slate-800">
-                                      {courseObj?.title ||
-                                        "หลักสูตรมาตรฐาน ISO 9001 / Kaizen โรงงาน"}
+                                      {courseObj?.title ??
+                                        `ไม่พบหลักสูตรในระบบ (${courseId})`}
                                     </td>
                                     <td className="p-2.5 text-center font-mono">
-                                      {courseObj?.minPassScore || 80}%
+                                      {courseObj
+                                        ? `${courseObj.minPassScore}%`
+                                        : "-"}
                                     </td>
                                     <td className="p-2.5 text-center font-mono font-bold text-[#15329c]">
                                       {scoreVal !== null ? `${scoreVal}%` : "-"}
@@ -2255,7 +2282,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       พบช่องว่างความรู้ (Gaps)
                     </span>
                     <strong className="text-xl text-amber-600 block mt-1 font-mono">
-                      {searchLogs.filter((l) => !l.hasResult).length} ประเด็น
+                      {gapKeywords.length} ประเด็น
                     </strong>
                   </div>
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
@@ -2263,14 +2290,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       อัตราการแก้ไขช่องว่าง (Closure)
                     </span>
                     <strong className="text-xl text-[#15329c] block mt-1 font-mono font-bold">
-                      {searchLogs.filter((l) => !l.hasResult).length > 0
-                        ? Math.round(
-                            (resolvedGaps.length /
-                              searchLogs.filter((l) => !l.hasResult).length) *
-                              100,
-                          )
-                        : 100}
-                      %
+                      {gapKeywords.length > 0
+                        ? `${Math.round((resolvedGapCount / gapKeywords.length) * 100)}%`
+                        : "-"}
                     </strong>
                   </div>
                 </div>
@@ -2288,13 +2310,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   >
                     <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
                     <span>
-                      ช่องว่างความรู้ที่ต้องทบทวน (
-                      {Math.max(
-                        0,
-                        searchLogs.filter((l) => !l.hasResult).length -
-                          resolvedGaps.length,
-                      )}{" "}
-                      ประเด็นรอแก้)
+                      ช่องว่างความรู้ที่ต้องทบทวน ({openGapCount} ประเด็นรอแก้)
                     </span>
                   </button>
 
@@ -3867,6 +3883,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 <option value="UPDATE_ROLE">
                   🟣 เปลี่ยนแปลงสิทธิ์ (UPDATE_ROLE)
                 </option>
+                <option value="GRADE_ESSAY">
+                  🟠 ตรวจข้อสอบอัตนัย (GRADE_ESSAY)
+                </option>
                 <option value="DELETE_MEMBER">
                   🔴 ลบสิทธิ์จากฐานข้อมูล (DELETE)
                 </option>
@@ -3903,6 +3922,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       actionBadgeColor =
                         "bg-rose-50 text-rose-800 border-rose-250";
                       actionName = "ลบพนักงาน";
+                    } else if (log.action === "GRADE_ESSAY") {
+                      actionBadgeColor =
+                        "bg-amber-50 text-amber-800 border-amber-200";
+                      actionName = "ตรวจข้อสอบอัตนัย";
                     }
 
                     return (
