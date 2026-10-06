@@ -199,7 +199,6 @@ export default function App() {
           api.getContributionLogs(),
           api.getEmployeeMaster().catch(() => undefined),
           api.getAuditLogs().catch(() => undefined),
-          api.getAuditLogs().catch(() => undefined),
           api.getDocumentStats().catch(() => undefined),
         ]);
 

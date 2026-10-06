@@ -3255,9 +3255,9 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Competencies APIs
   app.get("/api/user_competencies", requireAuth, (req, res) => {
-    // Admin เห็นทุกคน | Editor/Viewer เห็นของตัวเองเท่านั้น
+    // Admin/Editor เห็นทุกคน (ตาม N10) | Viewer เห็นของตัวเองเท่านั้น
     // scope มาจาก req.authUser เท่านั้น — ไม่อ่าน query/body
-    if (req.authUser!.role === "Admin") {
+    if (canViewAllLearningData(req.authUser)) {
       return res.json(db_user_competencies);
     }
     res.json(db_user_competencies.filter((c) => c.userId === req.authUser!.id));
