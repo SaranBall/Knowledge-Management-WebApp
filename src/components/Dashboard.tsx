@@ -203,25 +203,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   // 1. Knowledge Calculations
-  const totalKnowledgeCount =
-    documents.filter((d) => d.status === "Published").length +
-    kbArticles.filter((k) => k.status === "Approved").length;
-  const currentMonthKey = new Date().toISOString().slice(0, 7); // "YYYY-MM"
-  const newKnowledgeThisMonth =
-    documents.filter(
-      (d) =>
-        d.status === "Published" && d.createdAt?.startsWith(currentMonthKey),
-    ).length +
-    kbArticles.filter(
-      (k) =>
-        k.status === "Approved" && k.createdAt?.startsWith(currentMonthKey),
-    ).length;
-
-  const totalViews =
-    documents.reduce((sum, d) => sum + d.views, 0) +
-    kbArticles.reduce((sum, k) => sum + k.views, 0);
-  const totalDownloads = documents.reduce((sum, d) => sum + d.downloads, 0);
-
+  // Global KPI — มาจาก server เท่านั้น ไม่นับจาก documents ที่ถูก filter
+  const totalKnowledgeCount = documentStats
+    ? documentStats.published + documentStats.kbApproved
+    : null;
+  const newKnowledgeThisMonth = documentStats?.newThisMonth ?? null;
+  const totalViews = documentStats?.views ?? null;
+  const totalDownloads = documentStats?.downloads ?? null;
+  const isoReadinessPct =
+    documentStats && documentStats.total > 0
+      ? Math.round((documentStats.published / documentStats.total) * 100)
+      : null;
   // 2. Learning Calculations — นับจาก getUserCompletedCourseIds (ไม่ซ้ำต่อ user+course)
   //    assigned = หลักสูตรบังคับทั้งหมด, requiredDone = หลักสูตรบังคับที่จบแล้ว,
   //    uniqueCompletions = จำนวนคู่ (พนักงาน, คอร์ส) ที่จบจริง

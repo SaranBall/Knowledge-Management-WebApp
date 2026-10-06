@@ -59,6 +59,17 @@ export interface LearningStats {
   competency: { total: number; gaps: number; met: number };
 }
 
+export interface DocumentStats {
+  total: number;
+  published: number;
+  pending: number;
+  views: number;
+  downloads: number;
+  newThisMonth: number;
+  kbApproved: number;
+  kbViews: number;
+}
+
 let authToken: string | null = localStorage.getItem("rm_auth_token");
 
 export function setAuthToken(token: string | null) {
@@ -134,6 +145,7 @@ export function getApiErrorMessage(err: unknown, fallback: string): string {
 }
 
 export const api = {
+  getDocumentStats: () => request<DocumentStats>("/api/documents/stats"),
   getLearningStats: () => request<LearningStats>("/api/learning/stats"),
   // Login API
   login: (employeeId: string, password: string) =>
@@ -353,20 +365,18 @@ export const api = {
 
   // Competencies APIs
   getCompetencies: () => request<UserCompetency[]>("/api/user_competencies"),
-  saveCompetencies: (competencies: UserCompetency[]) =>
-    request<UserCompetency[]>("/api/user_competencies", {
-      method: "POST",
-      body: JSON.stringify({ competencies }),
-    }),
 
   // Certificates APIs
   getCertificates: () => request<UserCertificate[]>("/api/user_certificates"),
-  saveCertificates: (certificates: UserCertificate[]) =>
-    request<UserCertificate[]>("/api/user_certificates", {
-      method: "POST",
-      body: JSON.stringify({ certificates }),
-    }),
-
+  updateCompetencyLevel: (
+    userId: string,
+    skillId: string,
+    actualLevel: number,
+  ) =>
+    request<UserCompetency>(
+      `/api/user_competencies/${encodeURIComponent(userId)}/${encodeURIComponent(skillId)}`,
+      { method: "PUT", body: JSON.stringify({ actualLevel }) },
+    ),
   // KM Contribution Logs APIs
   getContributionLogs: () =>
     request<KMContributionLog[]>("/api/km_contribution_logs"),

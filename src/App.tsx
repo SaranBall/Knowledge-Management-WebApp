@@ -46,6 +46,7 @@ import {
   setAuthToken,
   setUnauthorizedHandler,
   getApiErrorMessage,
+  type DocumentStats,
 } from "./services/api";
 import { getDepartmentById } from "./utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "./utils/assets";
@@ -180,6 +181,7 @@ export default function App() {
           fetchedContribLogs,
           fetchedEmpMaster,
           fetchedAuditLogs,
+          fetchedDocStats,
         ] = await Promise.all([
           api.getUsers(),
           api.getDocuments(),
@@ -197,6 +199,8 @@ export default function App() {
           api.getContributionLogs(),
           api.getEmployeeMaster().catch(() => undefined),
           api.getAuditLogs().catch(() => undefined),
+          api.getAuditLogs().catch(() => undefined),
+          api.getDocumentStats().catch(() => undefined),
         ]);
 
         if (fetchedUsers) setUsers(fetchedUsers);
@@ -215,6 +219,7 @@ export default function App() {
         if (fetchedContribLogs) setKmContributionLogs(fetchedContribLogs);
         if (fetchedEmpMaster) setEmployeeMaster(fetchedEmpMaster);
         if (fetchedAuditLogs) setSystemAuditLogs(fetchedAuditLogs);
+        if (fetchedDocStats) setDocumentStats(fetchedDocStats);
       } catch (err) {
         console.error(
           "Failed to load data from server, falling back to static datasets:",
@@ -264,6 +269,18 @@ export default function App() {
     setSystemAuditLogs([]);
     setActiveMenu("Dashboard");
     setGlobalSearch("");
+  };
+  const [documentStats, setDocumentStats] = useState<DocumentStats | null>(
+    null,
+  );
+
+  // helper: ใช้หลังเพิ่ม/อนุมัติ/ลบเอกสาร เพื่อไม่ให้ KPI ค้าง
+  const refreshDocumentStats = async () => {
+    try {
+      setDocumentStats(await api.getDocumentStats());
+    } catch (e) {
+      console.error("Failed to refresh document stats:", e);
+    }
   };
 
   const endSession = (message?: string) => {
@@ -594,27 +611,34 @@ export default function App() {
     }
   };
 
+  // XP ของสอง activity นี้ยังไม่มี server-side validation → ไม่ให้ XP จริง ทั้งใน state และ server
+  const NO_CLIENT_XP = new Set<string>([
+    "AI_CAREER_ROADMAP",
+    "SKILL_EVALUATION",
+  ]);
+
   const awardPoints = async (
     userId: string,
     activityType: KMContributionLog["activityType"],
     points: number,
     description: string,
   ) => {
-    const matchedUser = users.find((u) => u.id === userId);
-    const userName = matchedUser ? matchedUser.name : "Unknown User";
+    if (NO_CLIENT_XP.has(activityType as string)) return;
 
+    const matchedUser = users.find((u) => u.id === userId);
     const newLog: KMContributionLog = {
       id: `km-log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       userId,
-      userName,
+      userName: matchedUser ? matchedUser.name : "Unknown User",
       points,
       activityType,
       description,
       timestamp: new Date().toISOString(),
     };
-    setKmContributionLogs((prev) => [newLog, ...prev]);
+    // ยืนยันกับ server ก่อน แล้วค่อยแสดงใน state (เดิม optimistic-add ทำให้ XP ปลอมค้างบนจอ)
     try {
-      await api.createContributionLog(newLog);
+      const saved = await api.createContributionLog(newLog);
+      setKmContributionLogs((prev) => [saved, ...prev]);
     } catch (e) {
       console.error(e);
     }
@@ -918,7 +942,6 @@ export default function App() {
       return;
     }
 
-    // Check once more to be safe
     const alreadyRegistered = users.some(
       (u) => u.employeeId === matchedEmployee.employeeId,
     );
@@ -927,7 +950,6 @@ export default function App() {
       return;
     }
 
-    // Validate 6-digit numeric PIN password
     const cleanPass = regPassword.trim();
     if (!cleanPass) {
       setRegError(
@@ -940,23 +962,14 @@ export default function App() {
       return;
     }
 
-    // Determine default role based on position/level
-    let assignedRole: Role = "Viewer";
-    if (
-      matchedEmployee.level.toLowerCase().includes("senior") ||
-      matchedEmployee.position.toLowerCase().includes("engineer") ||
-      matchedEmployee.position.toLowerCase().includes("supervisor")
-    ) {
-      assignedRole = "Editor"; // Give Editor privileges to Supervisors or Senior Engineers
-    }
-
-    const newUserObj: UserType = {
+    // payload เดิม — server คำนวณ id/role เอง และ ignore ค่าจาก client
+    const payload: UserType = {
       id: `usr-${Date.now()}`,
       name: matchedEmployee.name,
       employeeId: matchedEmployee.employeeId,
       departmentId: matchedEmployee.departmentId,
       position: matchedEmployee.position,
-      role: assignedRole,
+      role: "Viewer",
       email: matchedEmployee.email,
       phone: matchedEmployee.phone,
       password: cleanPass,
@@ -965,47 +978,44 @@ export default function App() {
         matchedEmployee.startDate || new Date().toISOString().split("T")[0],
     };
 
-    // Update global users state
-    setUsers((prev) => [...prev, newUserObj]);
-
-    // Provision competencies & certificates automatically upon register
-    const newComp = getInitialCompetencies(
-      newUserObj.id,
-      newUserObj.departmentId,
-      newUserObj.position,
-    );
-    setUserCompetencies((prev) => [...prev, ...newComp]);
-
-    const newCerts = getInitialCertificates(
-      newUserObj.id,
-      newUserObj.employeeId,
-    );
-    setUserCertificates((prev) => [...prev, ...newCerts]);
-
-    // Update employee master registration status
-    const updatedEmpMaster = employeeMaster.map((emp) =>
-      emp.employeeId === matchedEmployee.employeeId
-        ? { ...emp, status: "Registered" as const }
-        : emp,
-    );
-    setEmployeeMaster(updatedEmpMaster);
-
-    // Persist registration details to backend REST API
+    // 1) API ก่อน — ถ้าล้มเหลว หยุดทันที ไม่แตะ state ใดๆ
+    setRegError("");
+    let result: { user: UserType; token: string };
     try {
-      const { token } = await api.register(newUserObj);
-      setAuthToken(token);
-      await api.saveCompetencies(newComp);
-      await api.saveCertificates(newCerts);
-      await api.updateEmployeeMaster(updatedEmpMaster);
+      result = await api.register(payload);
     } catch (e) {
-      console.error("Failed to persist registration details to server:", e);
+      setRegError(
+        getApiErrorMessage(e, "ลงทะเบียนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"),
+      );
+      return;
     }
 
-    const { password: _plainPin, ...safeUser } = newUserObj;
-    setCurrentUser(safeUser as UserType);
+    // 2) สำเร็จแล้วค่อย update state โดยใช้ user ที่ server สร้างจริง (id/role จาก server)
+    setAuthToken(result.token);
+    const serverUser = result.user;
+    setUsers((prev) => [...prev, serverUser]);
+    setUserCompetencies((prev) => [
+      ...prev,
+      ...getInitialCompetencies(
+        serverUser.id,
+        serverUser.departmentId,
+        serverUser.position,
+      ),
+    ]);
+    setUserCertificates((prev) => [
+      ...prev,
+      ...getInitialCertificates(serverUser.id, serverUser.employeeId),
+    ]);
+    setEmployeeMaster((prev) =>
+      prev.map((emp) =>
+        emp.employeeId === matchedEmployee.employeeId
+          ? { ...emp, status: "Registered" as const }
+          : emp,
+      ),
+    );
+    setCurrentUser(serverUser);
     setIsLogged(true);
 
-    // Reset registration screen
     setIsRegistering(false);
     setRegEmployeeId("");
     setRegPassword("");
@@ -1013,7 +1023,7 @@ export default function App() {
     setMatchedEmployee(null);
 
     alert(
-      `🎉 ยินดีต้อนรับคุณ ${matchedEmployee.name} ลงทะเบียนและเข้าสู่ระบบสำเร็จในบทบาทสิทธิ์ ${assignedRole === "Editor" ? "Editor (ผู้เขียนข้อมูล)" : "Viewer (ผู้เข้าชมทั่วไป)"}!`,
+      `🎉 ยินดีต้อนรับคุณ ${serverUser.name} ลงทะเบียนและเข้าสู่ระบบสำเร็จในบทบาทสิทธิ์ ${serverUser.role === "Editor" ? "Editor (ผู้เขียนข้อมูล)" : "Viewer (ผู้เข้าชมทั่วไป)"}!`,
     );
   };
 

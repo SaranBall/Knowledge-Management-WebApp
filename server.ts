@@ -2698,113 +2698,128 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     },
   );
   // GET /api/learning/stats — aggregate only
-// Admin/Editor: ระดับองค์กร | Viewer: ของตัวเองเท่านั้น
-// ไม่อ่าน req.query / req.body เลย → ไม่มีช่องให้ client เลือก user
-app.get("/api/learning/stats", requireAuth, (req, res) => {
-  try {
-    const me = req.authUser!;
-    const orgWide = canViewAllLearningData(me);
+  // Admin/Editor: ระดับองค์กร | Viewer: ของตัวเองเท่านั้น
+  // ไม่อ่าน req.query / req.body เลย → ไม่มีช่องให้ client เลือก user
+  app.get("/api/learning/stats", requireAuth, (req, res) => {
+    try {
+      const me = req.authUser!;
+      const orgWide = canViewAllLearningData(me);
 
-    const scopedUsers = orgWide
-      ? db_users
-      : db_users.filter((u) => u.id === me.id);
-    const ids = new Set(scopedUsers.map((u) => u.id));
-    const emps = new Set(scopedUsers.map((u) => u.employeeId));
-    const empById = new Map(db_users.map((u) => [u.id, u.employeeId]));
+      const scopedUsers = orgWide
+        ? db_users
+        : db_users.filter((u) => u.id === me.id);
+      const ids = new Set(scopedUsers.map((u) => u.id));
+      const emps = new Set(scopedUsers.map((u) => u.employeeId));
+      const empById = new Map(db_users.map((u) => [u.id, u.employeeId]));
 
-    const progress = db_user_progress.filter((p) => ids.has(p.userId));
-    const exams = db_exam_results.filter((e) => emps.has(e.employeeId));
-    const certs = db_user_certificates.filter((c) => ids.has(c.userId));
-    const logs = db_km_contribution_logs.filter((l) => ids.has(l.userId));
-    const comps = db_user_competencies.filter((c) => ids.has(c.userId));
-    const pendingReview = db_quiz_submissions.filter(
-      (s) => s.status === "PendingReview" && ids.has(s.userId),
-    ).length;
+      const progress = db_user_progress.filter((p) => ids.has(p.userId));
+      const exams = db_exam_results.filter((e) => emps.has(e.employeeId));
+      const certs = db_user_certificates.filter((c) => ids.has(c.userId));
+      const logs = db_km_contribution_logs.filter((l) => ids.has(l.userId));
+      const comps = db_user_competencies.filter((c) => ids.has(c.userId));
+      const pendingReview = db_quiz_submissions.filter(
+        (s) => s.status === "PendingReview" && ids.has(s.userId),
+      ).length;
 
-    // unique (employee, course) ที่เรียนจบจริง — นิยามเดียวกับ getUserCompletedCourseIds
-    const completed = new Map<string, { emp: string; courseId: string }>();
-    progress.forEach((p) => {
-      const emp = empById.get(p.userId);
-      if (p.status === "Completed" && emp) {
-        completed.set(`${emp}\u0000${p.courseId}`, { emp, courseId: p.courseId });
-      }
-    });
-    exams.forEach((e) => {
-      if (e.pass) {
-        completed.set(`${e.employeeId}\u0000${e.courseId}`, {
-          emp: e.employeeId,
-          courseId: e.courseId,
-        });
-      }
-    });
+      // unique (employee, course) ที่เรียนจบจริง — นิยามเดียวกับ getUserCompletedCourseIds
+      const completed = new Map<string, { emp: string; courseId: string }>();
+      progress.forEach((p) => {
+        const emp = empById.get(p.userId);
+        if (p.status === "Completed" && emp) {
+          completed.set(`${emp}\u0000${p.courseId}`, {
+            emp,
+            courseId: p.courseId,
+          });
+        }
+      });
+      exams.forEach((e) => {
+        if (e.pass) {
+          completed.set(`${e.employeeId}\u0000${e.courseId}`, {
+            emp: e.employeeId,
+            courseId: e.courseId,
+          });
+        }
+      });
 
-    let trainingMinutes = 0;
-    let minutesKnown = false;
-    completed.forEach(({ courseId }) => {
-      const c = db_courses.find((x) => x.id === courseId);
-      if (c?.durationMinutes) {
-        trainingMinutes += c.durationMinutes;
-        minutesKnown = true;
-      }
-    });
+      let trainingMinutes = 0;
+      let minutesKnown = false;
+      completed.forEach(({ courseId }) => {
+        const c = db_courses.find((x) => x.id === courseId);
+        if (c?.durationMinutes) {
+          trainingMinutes += c.durationMinutes;
+          minutesKnown = true;
+        }
+      });
 
-    const examScores = exams
-      .map((e) => Number(e.score))
-      .filter((n) => !isNaN(n));
+      const examScores = exams
+        .map((e) => Number(e.score))
+        .filter((n) => !isNaN(n));
 
-    const perCourse = db_courses
-      .filter((c) => orgWide || c.isApproved !== false)
-      .map((c) => {
-        const ex = exams.filter((e) => e.courseId === c.id);
-        return {
-          courseId: c.id,
-          courseTitle: c.title,
-          attempts: ex.length,
-          passed: ex.filter((e) => e.pass).length,
-        };
-      })
-      .filter((c) => c.attempts > 0)
-      .sort((a, b) => b.attempts - a.attempts);
+      const perCourse = db_courses
+        .filter((c) => orgWide || c.isApproved !== false)
+        .map((c) => {
+          const ex = exams.filter((e) => e.courseId === c.id);
+          return {
+            courseId: c.id,
+            courseTitle: c.title,
+            attempts: ex.length,
+            passed: ex.filter((e) => e.pass).length,
+          };
+        })
+        .filter((c) => c.attempts > 0)
+        .sort((a, b) => b.attempts - a.attempts);
 
-    const now = Date.now();
-    const certSummary = { total: certs.length, valid: 0, expiringSoon: 0, expired: 0 };
-    certs.forEach((c) => {
-      const d = Math.ceil((Date.parse(c.expiryDate) - now) / 86400000);
-      if (isNaN(d)) return;
-      if (d <= 0) certSummary.expired++;
-      else if (d <= 45) certSummary.expiringSoon++;
-      else certSummary.valid++;
-    });
+      const now = Date.now();
+      const certSummary = {
+        total: certs.length,
+        valid: 0,
+        expiringSoon: 0,
+        expired: 0,
+      };
+      certs.forEach((c) => {
+        const d = Math.ceil((Date.parse(c.expiryDate) - now) / 86400000);
+        if (isNaN(d)) return;
+        if (d <= 0) certSummary.expired++;
+        else if (d <= 45) certSummary.expiringSoon++;
+        else certSummary.valid++;
+      });
 
-    res.json({
-      scope: orgWide ? "organization" : "self",
-      learners: {
-        total: scopedUsers.length,
-        withCompletion: new Set(Array.from(completed.values()).map((v) => v.emp)).size,
-      },
-      completions: { unique: completed.size },
-      exams: {
-        attempts: exams.length,
-        passed: exams.filter((e) => e.pass).length,
-        averageScore: examScores.length
-          ? Math.round(examScores.reduce((a, b) => a + b, 0) / examScores.length)
-          : null,
-        pendingEssayReview: pendingReview,
-      },
-      trainingMinutes: minutesKnown ? trainingMinutes : null,
-      perCourse,
-      certificates: certSummary,
-      xp: { totalPoints: logs.reduce((s, l) => s + (l.points || 0), 0), entries: logs.length },
-      competency: {
-        total: comps.length,
-        gaps: comps.filter((c) => c.actualLevel < c.expectedLevel).length,
-        met: comps.filter((c) => c.actualLevel >= c.expectedLevel).length,
-      },
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json({
+        scope: orgWide ? "organization" : "self",
+        learners: {
+          total: scopedUsers.length,
+          withCompletion: new Set(
+            Array.from(completed.values()).map((v) => v.emp),
+          ).size,
+        },
+        completions: { unique: completed.size },
+        exams: {
+          attempts: exams.length,
+          passed: exams.filter((e) => e.pass).length,
+          averageScore: examScores.length
+            ? Math.round(
+                examScores.reduce((a, b) => a + b, 0) / examScores.length,
+              )
+            : null,
+          pendingEssayReview: pendingReview,
+        },
+        trainingMinutes: minutesKnown ? trainingMinutes : null,
+        perCourse,
+        certificates: certSummary,
+        xp: {
+          totalPoints: logs.reduce((s, l) => s + (l.points || 0), 0),
+          entries: logs.length,
+        },
+        competency: {
+          total: comps.length,
+          gaps: comps.filter((c) => c.actualLevel < c.expectedLevel).length,
+          met: comps.filter((c) => c.actualLevel >= c.expectedLevel).length,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // Attendance Logs APIs (QR Check-in)
   app.get("/api/attendance_logs", requireAuth, (req, res) => {
@@ -3240,65 +3255,53 @@ app.get("/api/learning/stats", requireAuth, (req, res) => {
 
   // Competencies APIs
   app.get("/api/user_competencies", requireAuth, (req, res) => {
-    res.json(db_user_competencies);
-  });
-  app.post("/api/user_competencies", requireAuth, (req, res) => {
-    try {
-      const { competencies } = req.body;
-      if (Array.isArray(competencies)) {
-        const isAdmin = req.authUser?.role === "Admin";
-        const allowed = isAdmin
-          ? competencies
-          : competencies.filter((c) => c.userId === req.authUser?.id);
-        allowed.forEach((comp) => {
-          const idx = db_user_competencies.findIndex(
-            (c) => c.userId === comp.userId && c.skillId === comp.skillId,
-          );
-          if (idx !== -1) {
-            db_user_competencies[idx] = comp;
-          } else {
-            db_user_competencies.push(comp);
-          }
-        });
-      }
-      res.json(db_user_competencies);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    // Admin เห็นทุกคน | Editor/Viewer เห็นของตัวเองเท่านั้น
+    // scope มาจาก req.authUser เท่านั้น — ไม่อ่าน query/body
+    if (req.authUser!.role === "Admin") {
+      return res.json(db_user_competencies);
     }
+    res.json(db_user_competencies.filter((c) => c.userId === req.authUser!.id));
   });
-
+  // PUT /api/user_competencies/:userId/:skillId — Admin เท่านั้น แก้ได้เฉพาะ actualLevel
+  app.put(
+    "/api/user_competencies/:userId/:skillId",
+    requireAuth,
+    requireRole("Admin"),
+    (req, res) => {
+      try {
+        const { userId, skillId } = req.params;
+        const level = req.body?.actualLevel;
+        if (!Number.isInteger(level) || level < 1 || level > 4) {
+          return res.status(400).json({
+            error: "INVALID_LEVEL",
+            message: "actualLevel ต้องเป็นจำนวนเต็ม 1 ถึง 4",
+          });
+        }
+        const idx = db_user_competencies.findIndex(
+          (c) => c.userId === userId && c.skillId === skillId,
+        );
+        if (idx === -1) {
+          return res
+            .status(404)
+            .json({ error: "NOT_FOUND", message: "ไม่พบรายการ competency" });
+        }
+        // preserve ทุก field อื่น — เขียนทับเฉพาะ actualLevel
+        db_user_competencies[idx] = {
+          ...db_user_competencies[idx],
+          actualLevel: level,
+        };
+        res.json(db_user_competencies[idx]);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
   // Certificates APIs
   app.get("/api/user_certificates", requireAuth, (req, res) => {
     if (canViewAllLearningData(req.authUser)) {
       return res.json(db_user_certificates);
     }
     res.json(db_user_certificates.filter((c) => c.userId === req.authUser!.id));
-  });
-  app.post("/api/user_certificates", requireAuth, (req, res) => {
-    try {
-      const { certificates } = req.body;
-      if (Array.isArray(certificates)) {
-        const isAdmin = req.authUser?.role === "Admin";
-        const allowed = isAdmin
-          ? certificates
-          : certificates.filter((c) => c.userId === req.authUser?.id);
-        allowed.forEach((cert) => {
-          const idx = db_user_certificates.findIndex((c) => c.id === cert.id);
-          if (idx !== -1) {
-            db_user_certificates[idx] = cert;
-          } else {
-            db_user_certificates.push(cert);
-          }
-        });
-      }
-      res.json(
-        canViewAllLearningData(req.authUser)
-          ? db_user_certificates
-          : db_user_certificates.filter((c) => c.userId === req.authUser!.id),
-      );
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
   });
 
   // KM Contribution Logs APIs
@@ -3313,13 +3316,26 @@ app.get("/api/learning/stats", requireAuth, (req, res) => {
   app.post(
     "/api/km_contribution_logs",
     requireAuth,
-    requireOwnField("userId"),
+    requireRole("Admin"), // XP จริงสร้างจาก finalizeSubmission เท่านั้น — route นี้เหลือไว้ให้ Admin แก้ด้วยมือ
     (req, res) => {
       try {
-        const log = req.body;
-        if (!log.id) {
-          log.id = `km-log-${Date.now()}`;
+        const target = db_users.find((u) => u.id === req.body?.userId);
+        const points = Number(req.body?.points);
+        if (!target || !Number.isFinite(points)) {
+          return res.status(400).json({
+            error: "INVALID_INPUT",
+            message: "ไม่พบผู้ใช้ หรือคะแนนไม่ถูกต้อง",
+          });
         }
+        const log: KMContributionLog = {
+          id: `km-log-${crypto.randomUUID()}`,
+          userId: target.id,
+          userName: target.name,
+          points,
+          activityType: req.body.activityType,
+          description: String(req.body.description || "").slice(0, 500),
+          timestamp: new Date().toISOString(),
+        };
         db_km_contribution_logs.unshift(log);
         res.json(log);
       } catch (err: any) {
