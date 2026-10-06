@@ -149,6 +149,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
     userProgressList,
     examResults,
     articles,
+    courses,
   );
   const activeEarnedBadges = myBadges.filter((b) => b.earned);
   const [showBadgesPanel, setShowBadgesPanel] = useState<boolean>(false);

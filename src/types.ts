@@ -244,6 +244,7 @@ export interface EmployeeMaster {
 
 // --- Dynamic Competency & Skill Gap Tracking types ---
 export interface UserCompetency {
+  id: string;
   userId: string;
   skillId: string;
   skillName: string;
@@ -283,7 +284,10 @@ export interface KMContributionLog {
     | "COURSE_PERFECT"
     | "COURSE_PASS"
     | "QR_ATTENDANCE"
-    | "EXPERT_REPLY";
+    | "EXPERT_REPLY"
+    | "AI_CAREER_ROADMAP"
+    | "SKILL_EVALUATION"
+    | "OFFLINE_CHECKIN";
   description: string;
   timestamp: string;
 }

@@ -36,6 +36,16 @@ interface BadgeCertificateModalProps {
     metalTint?: string;
     desc?: string;
   };
+  // บันทึก log เมื่อผู้ใช้กดพิมพ์/บันทึกใบเซอร์จริง (ส่งต่อจาก App → addAuditLog)
+  onDownloadLog?: (info: {
+    userId: string;
+    employeeId: string;
+    userName: string;
+    courseId: string;
+    courseTitle: string;
+    certId: string;
+    timestamp: string;
+  }) => void;
 }
 
 export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
@@ -48,6 +58,7 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
   directorName,
   qaSupervisorName,
   badgeContentOverride,
+  onDownloadLog,
 }) => {
   const [activeTab, setActiveTab] = useState<"cert" | "badge">("cert");
   const [frameStyle, setFrameStyle] = useState<"gold" | "teal" | "indigo">(
@@ -71,6 +82,7 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
   // ที่บริษัทกำหนด (ผ่าน badgeContentOverride prop ด้านบน หรือแก้ตรงนี้โดยตรง)
   const getCourseBadgeDetails = (courseIdentifier: string) => {
     switch (courseIdentifier) {
+      case "logistics":
       case "onboarding-wms":
       case "c-1":
         return {
@@ -91,6 +103,7 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
             badgeContentOverride?.desc ||
             "สอบผ่านหลักสูตรวิชาพนักงานคลังสินค้า จัดเรียง Racking และ ISO 9001 Clause 7.2",
         };
+      case "quality":
       case "quality-chem":
       case "c-2":
         return {
@@ -111,6 +124,7 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
             badgeContentOverride?.desc ||
             "สอบผ่านระบบควบคุมและวิจัยระดับสารละลายเคมี บรรลุกระบวนการผลิตแกนลามิเนต",
         };
+      case "safety":
       case "safety-forklift":
       case "c-3":
         return {
@@ -157,9 +171,7 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
     }
   };
 
-  const badgeProps = getCourseBadgeDetails(
-    (course as { badgeKey?: string }).badgeKey || course.id,
-  );
+  const badgeProps = getCourseBadgeDetails(course.badgeKey || course.id);
 
   // Handle printing certificate (highly targeted A4 styling)
   const handlePrint = () => {
@@ -238,6 +250,15 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
         printWindow.print();
         printWindow.close();
       }, 500);
+      onDownloadLog?.({
+        userId: user.id,
+        employeeId: user.employeeId,
+        userName: user.name,
+        courseId: course.id,
+        courseTitle: course.title,
+        certId,
+        timestamp: new Date().toISOString(),
+      });
     }
   };
 

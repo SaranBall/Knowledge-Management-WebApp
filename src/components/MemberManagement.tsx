@@ -1373,6 +1373,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                             userProgressList,
                             examResults,
                             kbArticles,
+                            courses,
                           )
                             .filter((b) => b.earned)
                             .map((badge) => (
@@ -1383,6 +1384,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                             userProgressList,
                             examResults,
                             kbArticles,
+                            courses,
                           ).filter((b) => b.earned).length === 0 && (
                             <span className="text-[9px] text-slate-450 italic">
                               ไม่มีเข็มตราความรู้สะสม
@@ -2003,6 +2005,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                   userProgressList,
                                   examResults,
                                   kbArticles,
+                                  courses,
                                 )
                                   .filter((b) => b.earned)
                                   .map((badge) => (

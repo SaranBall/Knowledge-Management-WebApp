@@ -913,6 +913,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     userProgressList,
                     examResults,
                     kbArticles,
+                    courses,
                   ).filter((b) => b.earned).length === 0 ? (
                     <span className="text-slate-400 text-[10.5px] italic">
                       ยังไม่มีตราสัญลักษณ์ที่ได้รับในขณะนี้
@@ -924,6 +925,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         userProgressList,
                         examResults,
                         kbArticles,
+                        courses,
                       )
                         .filter((b) => b.earned)
                         .map((badge) => (
@@ -1400,6 +1402,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       userProgressList,
                       examResults,
                       kbArticles,
+                      courses,
                     ).filter((b) => b.earned).length === 0 ? (
                       <span className="text-slate-400 text-xs italic py-1">
                         ไม่มีประวัติตราสัญลักษณ์ความเชี่ยวชาญในรอบการประเมินนี้
@@ -1410,6 +1413,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         userProgressList,
                         examResults,
                         kbArticles,
+                        courses,
                       )
                         .filter((b) => b.earned)
                         .map((badge) => (
