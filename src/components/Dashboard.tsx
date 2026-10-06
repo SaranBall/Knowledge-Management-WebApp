@@ -34,6 +34,7 @@ import { BadgePill } from "./BadgeDisplay";
 import { BadgeCertificateModal } from "./BadgeCertificateModal";
 import { getDepartmentById } from "../utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
+import type { DocumentStats } from "../services/api";
 import {
   getRequiredCoursesForPosition,
   getUserTrainingMinutes,
@@ -44,6 +45,8 @@ import {
 interface DashboardProps {
   currentUser: User;
   documents: DocumentItem[];
+  // Global KPI จาก GET /api/documents/stats (null = ยังโหลดไม่เสร็จ/โหลดไม่สำเร็จ)
+  documentStats: DocumentStats | null;
   kbArticles: KBArticle[];
   experts: Expert[];
   searchLogs: SearchLog[];
@@ -70,6 +73,7 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({
   currentUser,
   documents,
+  documentStats,
   kbArticles,
   experts,
   searchLogs,

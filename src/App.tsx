@@ -145,6 +145,10 @@ export default function App() {
 
   const [systemAuditLogs, setSystemAuditLogs] = useState<SystemAuditLog[]>([]);
 
+  const [documentStats, setDocumentStats] = useState<DocumentStats | null>(
+    null,
+  );
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Load all entities from real API on mount or when logged in
@@ -265,13 +269,10 @@ export default function App() {
     setUserCertificates([]);
     setKmContributionLogs([]);
     setEmployeeMaster(INITIAL_EMPLOYEE_MASTER);
-    setSystemAuditLogs([]);
+    setDocumentStats(null);
     setActiveMenu("Dashboard");
     setGlobalSearch("");
   };
-  const [documentStats, setDocumentStats] = useState<DocumentStats | null>(
-    null,
-  );
 
   // helper: ใช้หลังเพิ่ม/อนุมัติ/ลบเอกสาร เพื่อไม่ให้ KPI ค้าง
   const refreshDocumentStats = async () => {
@@ -536,6 +537,7 @@ export default function App() {
     try {
       const created = await api.createDocument(newDoc);
       setDocuments((prev) => [created, ...prev]);
+      refreshDocumentStats();
       return created;
     } catch (e) {
       console.error("Create document failed:", e);
@@ -550,6 +552,7 @@ export default function App() {
       setDocuments((prev) =>
         prev.map((doc) => (doc.id === id ? approved : doc)),
       );
+      refreshDocumentStats();
       return approved;
     } catch (e) {
       console.error("Approve document failed:", e);
@@ -580,6 +583,7 @@ export default function App() {
     try {
       await api.deleteDocument(id);
       setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      refreshDocumentStats();
     } catch (e) {
       console.error("Delete document failed:", e);
       throw e;
@@ -1720,6 +1724,7 @@ export default function App() {
                 <Dashboard
                   currentUser={currentUser}
                   documents={documents}
+                  documentStats={documentStats}
                   kbArticles={kbArticles}
                   experts={experts}
                   searchLogs={searchLogs}
