@@ -157,6 +157,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     phone: "",
     startDate: new Date().toISOString().split("T")[0],
     avatarUrl: "",
+    pin: "",
   });
 
   // --- REAL IMPORT PARSER STATES ---
@@ -191,6 +192,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     status: UserStatus;
     startDate: string;
     avatarUrl: string;
+    pin: string;
   } | null>(null);
 
   const startEditing = (u: User) => {
@@ -223,6 +225,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     if (!editForm || !editForm.name || !editForm.email) return;
     if (!editForm.avatarUrl) {
       alert("❌ กรุณาอัปโหลดรูปภาพโปรไฟล์จริงของพนักงานก่อนบันทึก");
+      return;
+    }
+
+    const cleanPin = newUser.pin.trim();
+    if (cleanPin.length !== 6 || !/^\d+$/.test(cleanPin)) {
+      alert("❌ รหัสผ่าน PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นครับ");
       return;
     }
 
@@ -686,6 +694,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       return;
     }
 
+    const cleanPin = newUser.pin.trim().replace(/\D/g, "");
+    if (cleanPin.length !== 6) {
+      alert("❌ รหัสผ่าน PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นครับ");
+      return;
+    }
+
     // Check if ID already exists
     if (users.some((u) => u.employeeId === newUser.employeeId)) {
       alert("❌ ขออภัย! รหัสพนักงานนี้มีบัญชีใช้งานอยู่แล้วในระบบ");
@@ -703,6 +717,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       email: newUser.email,
       phone: newUser.phone ? newUser.phone.trim() : "",
       startDate: newUser.startDate || new Date().toISOString().split("T")[0],
+      password: cleanPin,
     };
 
     onAddUser(created);
@@ -718,6 +733,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       phone: "",
       startDate: new Date().toISOString().split("T")[0],
       avatarUrl: "",
+      pin: "",
     });
     alert("🎉 เพิ่มสมาชิกใหม่และกำหนดสิทธิ์สำเร็จ!");
   };
@@ -3695,6 +3711,26 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                 </select>
               </div>
 
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 block">
+                  กำหนดรหัสผ่าน PIN (6 หลัก):
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  pattern="\d*"
+                  value={newUser.pin}
+                  onChange={(e) =>
+                    setNewUser({
+                      ...newUser,
+                      pin: e.target.value.replace(/\D/g, ""),
+                    })
+                  }
+                  placeholder="กรอกตัวเลข 6 หลัก"
+                  required
+                  className="w-full bg-white border border-slate-200 p-2 rounded-lg text-center text-sm font-mono font-black tracking-widest text-[#15329c] focus:outline-none focus:ring-1 focus:ring-[#15329c]"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-500 block">

@@ -94,7 +94,7 @@ export function calculateLeaderboard(
         userId: u.id,
         userName: u.name,
         employeeId: u.employeeId,
-        departmentId: u.departmentId || "Select Department",
+        departmentId: u.departmentId || "",
         points: totalPoints,
         level,
       };

@@ -222,7 +222,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
 
   // Calculate leaderboard
   const rawLeaderboard = calculateLeaderboard(kmContributionLogs);
-  const myKMScoreObj = rawLeaderboard.find((x) => x.userId === currentUser.id);
+  // calculateLeaderboard คืนเฉพาะ user ที่ส่งเข้าไป — ต้องส่ง currentUser เองถึงจะได้ XP/Level จริงของตัวเอง
+  const myKMScoreObj = calculateLeaderboard(kmContributionLogs, [
+    currentUser,
+  ])[0];
   const myKMPoints = myKMScoreObj ? myKMScoreObj.points : 0;
   const myKMLevel = myKMScoreObj ? myKMScoreObj.level : 1;
 
@@ -299,12 +302,6 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       }));
 
       setAiRoadmapResult(normalizedResult);
-      onAwardPoints(
-        currentUser.id,
-        "AI_CAREER_ROADMAP",
-        40,
-        `เปิดทดลองใช้ AI วางกรอบการเรียนรู้ (Career Roadmap) สู่เป้าหมาย "${aiTargetGoal}"`,
-      );
     } catch (err: any) {
       alert(`⚠️ ไม่สามารถติดต่อ AI สำเร็จ: ${err.message || err}`);
     } finally {
@@ -2032,44 +2029,6 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       "ทำได้ด้วยตัวเอง คล่องชำนาญ (Level 3)"}
                     {comp.actualLevel === 4 &&
                       "ผู้เชี่ยวชาญ/แก้ปัญหา และสอนทีมงานได้ (Level 4)"}
-                  </div>
-
-                  {/* User interactive assessment option */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                    <span className="text-[9px] font-black text-slate-450 uppercase tracking-tight">
-                      จำลองการประเมินระดับทักษะ:
-                    </span>
-                    <div className="flex gap-1">
-                      {[1, 2, 3, 4].map((lvl) => (
-                        <button
-                          key={lvl}
-                          onClick={() => {
-                            // Update user competency actual level
-                            setUserCompetencies((prev) =>
-                              prev.map((c) => {
-                                if (c.id === comp.id) {
-                                  return { ...c, actualLevel: lvl };
-                                }
-                                return c;
-                              }),
-                            );
-                            onAwardPoints(
-                              currentUser.id,
-                              "SKILL_EVALUATION",
-                              10,
-                              `ทำการประเมินสมรรถนะทักษะฝีมือจริง "${comp.skillName}" เป็น Lvl ${lvl}`,
-                            );
-                          }}
-                          className={`w-5.5 h-5.5 rounded-md font-mono text-[10px] font-black transition-all flex justify-center items-center cursor-pointer border ${
-                            comp.actualLevel === lvl
-                              ? "bg-[#15329c] border-[#15329c] text-white shadow font-bold"
-                              : "bg-white border-slate-205 text-slate-500 hover:bg-slate-50"
-                          }`}
-                        >
-                          {lvl}
-                        </button>
-                      ))}
-                    </div>
                   </div>
 
                   {/* GAP Recommendation Action Bridge */}
