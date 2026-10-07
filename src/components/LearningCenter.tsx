@@ -52,15 +52,16 @@ import {
   QuizSubmitResult,
 } from "../types";
 import { getUserBadges } from "../utils/badgeUtils";
-import { api, getApiErrorMessage } from "../services/api";
+import {
+  api,
+  getApiErrorMessage,
+  type LeaderboardEntry,
+} from "../services/api";
 import QRCode from "qrcode";
 import { TrainingSession } from "../types";
 import { BadgePill, UserBadgesGrid } from "./BadgeDisplay";
 import { BadgeCertificateModal } from "./BadgeCertificateModal";
-import {
-  calculateLeaderboard,
-  calculateRemainingDays,
-} from "../utils/gamificationUtils";
+import { calculateRemainingDays } from "../utils/gamificationUtils";
 import { getDepartmentById } from "../utils/departmentUtils";
 import { formatDuration } from "../utils/courseutils";
 import { DEFAULT_LESSON_IMAGE_URL } from "../utils/assets";
@@ -220,12 +221,31 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
     userCertificates.filter((c) => c.userId === currentUser.id),
   );
 
-  // Calculate leaderboard
-  const rawLeaderboard = calculateLeaderboard(kmContributionLogs);
-  // calculateLeaderboard คืนเฉพาะ user ที่ส่งเข้าไป — ต้องส่ง currentUser เองถึงจะได้ XP/Level จริงของตัวเอง
-  const myKMScoreObj = calculateLeaderboard(kmContributionLogs, [
-    currentUser,
-  ])[0];
+  // Leaderboard มาจาก server (aggregate ทุก role เหมือนกัน) — โหลดใหม่เมื่อจำนวน log เปลี่ยน
+  // เช่นหลังส่งข้อสอบแล้ว App รีเฟรช kmContributionLogs
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardError, setLeaderboardError] = useState<string>("");
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getLeaderboard()
+      .then((rows) => {
+        if (!cancelled) {
+          setLeaderboard(rows || []);
+          setLeaderboardError("");
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load leaderboard:", err);
+        if (!cancelled) setLeaderboardError("โหลดอันดับไม่สำเร็จ");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kmContributionLogs.length]);
+  const myKMScoreObj = leaderboard.find(
+    (x) => x.employeeId === currentUser.employeeId,
+  );
   const myKMPoints = myKMScoreObj ? myKMScoreObj.points : 0;
   const myKMLevel = myKMScoreObj ? myKMScoreObj.level : 1;
 
@@ -1712,11 +1732,22 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 </div>
 
                 <div className="overflow-hidden border border-slate-200 rounded-xl bg-white text-xs divide-y">
-                  {rawLeaderboard.slice(0, 5).map((entrant, idx) => {
-                    const isCurrentUser = entrant.userId === currentUser.id;
+                  {leaderboardError && (
+                    <div className="p-6 text-center text-rose-600 font-semibold">
+                      {leaderboardError}
+                    </div>
+                  )}
+                  {!leaderboardError && leaderboard.length === 0 && (
+                    <div className="p-6 text-center text-slate-400 italic">
+                      ยังไม่มีข้อมูลอันดับ
+                    </div>
+                  )}
+                  {leaderboard.slice(0, 5).map((entrant, idx) => {
+                    const isCurrentUser =
+                      entrant.employeeId === currentUser.employeeId;
                     return (
                       <div
-                        key={entrant.userId}
+                        key={entrant.employeeId}
                         className={`p-3 flex items-center justify-between gap-3 ${isCurrentUser ? "bg-amber-50/40 font-bold" : "hover:bg-slate-50"}`}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">

@@ -32,6 +32,7 @@ import {
   getInitialCompetencies,
   getInitialCertificates,
   getInitialKMContributionLogs,
+  calculateLeaderboard,
 } from "./src/utils/gamificationUtils";
 import {
   User as UserType,
@@ -3343,6 +3344,28 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       }
     },
   );
+  // Leaderboard: server คำนวณจาก logs ทั้งหมด ทุก role เห็นตารางเดียวกัน
+  // คืนเฉพาะ field แสดงผล (ไม่มี userId / log รายรายการ) และไม่อ่าน query/body
+  app.get("/api/leaderboard", requireAuth, (req, res) => {
+    try {
+      const activeUsers = db_users.filter(
+        (u) => u.status !== "Suspended" && u.status !== "Terminated",
+      );
+      const board = calculateLeaderboard(
+        db_km_contribution_logs,
+        activeUsers,
+      ).map(({ userName, employeeId, departmentId, points, level }) => ({
+        userName,
+        employeeId,
+        departmentId,
+        points,
+        level,
+      }));
+      res.json(board);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // Employee Master APIs — เฉพาะ Admin/Editor เห็นและจัดการได้ (ตรงกับ UI)
   app.get(

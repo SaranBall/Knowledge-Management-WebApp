@@ -19,6 +19,7 @@ import {
   QuizSubmission,
   QuizSubmitResult,
   EssayGrade,
+  UserKMPoints,
 } from "../types";
 
 // N6: การปิดช่องว่างความรู้ (ตรงกับ SearchResolution ใน server.ts)
@@ -31,6 +32,9 @@ export interface SearchResolution {
   resolvedByName: string;
   resolvedAt: string;
 }
+
+// Leaderboard จาก server: aggregate เท่านั้น (ไม่มี userId)
+export type LeaderboardEntry = Omit<UserKMPoints, "userId">;
 
 export interface LearningStats {
   scope: "organization" | "self";
@@ -385,6 +389,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(log),
     }),
+  getLeaderboard: () => request<LeaderboardEntry[]>("/api/leaderboard"),
 
   // Employee Master APIs
   getEmployeeMaster: () => request<EmployeeMaster[]>("/api/employee_master"),
