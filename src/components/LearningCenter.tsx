@@ -1664,13 +1664,26 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       window.print();
                       return;
                     }
+                    // Escape ข้อความ dynamic ก่อนแทรกลง HTML string ของหน้าพิมพ์
+                    // ต้อง replace "&" เป็นตัวแรก ไม่งั้น "&lt;" ฯลฯ ที่เพิ่งสร้างจะถูก escape ซ้ำเป็น "&amp;lt;"
+                    // รองรับ undefined/null โดยแปลงเป็นสตริงว่าง
+                    const escapeHtml = (
+                      value: string | null | undefined,
+                    ): string =>
+                      String(value ?? "")
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;")
+                        .replace(/"/g, "&quot;")
+                        .replace(/'/g, "&#39;");
+
                     const printWindow = window.open("", "_blank");
                     if (printWindow) {
                       const printHTML = `
                         <!DOCTYPE html>
                         <html>
                           <head>
-                            <title>Certificate - ${currentUser.name}</title>
+                            <title>Certificate - ${escapeHtml(currentUser.name)}</title>
                             <style>
                               @media print {
                                 body { background: white; margin: 0; padding: 20px; font-family: sans-serif; }

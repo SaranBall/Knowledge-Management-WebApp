@@ -2475,12 +2475,96 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.post("/api/kb_articles", requireAuth, (req, res) => {
     // ทุก role ที่ login แล้วเสนอความรู้/ร่างบทความได้ (workflow อนุมัติควบคุมที่ /approve)
     try {
-      const newArt = req.body;
-      if (!newArt.id) {
-        newArt.id = `kb-${Date.now()}`;
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const KB_TYPES: KBArticle["type"][] = [
+        "Troubleshooting",
+        "Best Practice",
+        "Lesson Learned",
+        "Kaizen",
+        "FAQ",
+      ];
+      const bad = (message: string) =>
+        res.status(400).json({ error: "INVALID_KB_ARTICLE", message });
+
+      // --- Validation: รับเฉพาะฟิลด์เนื้อหา ตรวจชนิดและความยาว ---
+      const readText = (
+        value: unknown,
+        max: number,
+      ): string | null | undefined => {
+        // undefined = ไม่ได้ส่งมา, null = ผิดชนิด/ยาวเกิน, string = ใช้ได้
+        if (value === undefined) return undefined;
+        if (typeof value !== "string") return null;
+        const trimmed = value.trim();
+        return trimmed.length > max ? null : trimmed;
+      };
+      const readList = (value: unknown): string[] | null => {
+        // undefined = ไม่ได้ส่งมา -> []; null/ชนิดอื่น = ผิดชนิด -> null
+        if (value === undefined) return [];
+        if (!Array.isArray(value) || value.length > 30) return null;
+        const out: string[] = [];
+        for (const item of value) {
+          if (typeof item !== "string" || item.length > 100) return null;
+          const t = item.trim();
+          if (t) out.push(t);
+        }
+        return out;
+      };
+
+      const title = readText(body.title, 300);
+      const problem = readText(body.problem, 10000);
+      const solution = readText(body.solution, 10000);
+      const cause = readText(body.cause, 10000);
+      const prevention = readText(body.prevention, 10000);
+      const tags = readList(body.tags);
+      const relatedWIs = readList(body.relatedWIs);
+
+      if (!title || !problem || !solution) {
+        return bad(
+          "กรุณากรอกหัวข้อ ปัญหา และวิธีแก้ไข (ข้อความ ไม่ว่าง และไม่ยาวเกินกำหนด)",
+        );
       }
-      // บังคับ status จาก role ที่ server ตรวจสอบเองเท่านั้น ห้ามเชื่อ client
-      newArt.status = req.authUser!.role === "Admin" ? "Approved" : "Pending";
+      if (cause === null || prevention === null) {
+        return bad("ข้อมูลสาเหตุหรือวิธีป้องกันไม่ถูกต้องหรือยาวเกินกำหนด");
+      }
+      if (!KB_TYPES.includes(body.type)) {
+        return bad("ประเภทบทความไม่ถูกต้อง");
+      }
+      if (tags === null || relatedWIs === null) {
+        return bad(
+          "แท็กและรหัสเอกสารอ้างอิงต้องเป็นรายการข้อความ (สูงสุด 30 รายการ)",
+        );
+      }
+
+      // --- ฟิลด์ระบบ: มาจากผู้ใช้ที่ server ยืนยันแล้วเท่านั้น ---
+      const me = req.authUser!;
+      const userRecord = db_users.find((u) => u.id === me.id);
+      const authorDeptId = userRecord?.departmentId || me.departmentId;
+
+      // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision
+      let generatedId = `kb-${Date.now()}`;
+      while (db_kb_articles.some((a) => a.id === generatedId)) {
+        generatedId = `kb-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+      }
+
+      const newArt: KBArticle = {
+        id: generatedId,
+        title,
+        type: body.type,
+        problem,
+        ...(cause ? { cause } : {}),
+        solution,
+        ...(prevention ? { prevention } : {}),
+        relatedWIs,
+        tags,
+        author: me.name,
+        authorTitle: userRecord?.position || "",
+        authorDept: getDepartmentById(authorDeptId)?.name || authorDeptId,
+        views: 0,
+        likes: 0,
+        // บังคับ status จาก role ที่ server ตรวจสอบเองเท่านั้น ห้ามเชื่อ client
+        status: me.role === "Admin" ? "Approved" : "Pending",
+        createdAt: new Date().toISOString(),
+      };
       db_kb_articles.unshift(newArt);
       res.json(newArt);
     } catch (err: any) {
@@ -2591,7 +2675,31 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Ratings APIs — เขียนได้ทุก login
   app.get("/api/ratings", requireAuth, (req, res) => {
-    res.json(db_ratings);
+    // กรองฝั่ง server ตามสิทธิ์ผู้ใช้ — กรองเฉพาะข้อมูลที่ส่งกลับ ไม่แก้ db_ratings
+    // ลำดับค้นเหมือน POST /api/ratings: Document ก่อน แล้วค่อย KB (ไม่ใช้ prefix ของ id)
+    const me = req.authUser!;
+    const isAdmin = me.role === "Admin";
+    const isEditor = me.role === "Editor";
+
+    const visible = db_ratings.filter((r) => {
+      const targetDoc = db_documents.find((d) => d.id === r.docOrKBId);
+      if (targetDoc) {
+        // Admin/Editor: ตามสิทธิ์แผนก (ทุกสถานะ); role อื่น: ต้อง Published + มีสิทธิ์แผนก
+        return (
+          canAccessDocument(me, targetDoc) &&
+          (isAdmin || isEditor || targetDoc.status === "Published")
+        );
+      }
+      const targetKB = db_kb_articles.find((a) => a.id === r.docOrKBId);
+      if (targetKB) {
+        // Admin/Editor เห็นทุกสถานะ; Viewer และ role อื่นเห็นเฉพาะ Approved
+        return isAdmin || isEditor || targetKB.status === "Approved";
+      }
+      // Orphan (ไม่ชี้ไปยัง Document/KB ที่มีอยู่): เฉพาะ Admin
+      return isAdmin;
+    });
+
+    res.json(visible);
   });
   app.post(
     "/api/ratings",
@@ -2599,12 +2707,84 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     requireOwnField("userId"),
     (req, res) => {
       try {
-        const rating = req.body;
-        if (!rating.id) {
-          rating.id = `r-${Date.now()}`;
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const bad = (message: string) =>
+          res.status(400).json({ error: "INVALID_RATING", message });
+
+        // --- Validation: รับเฉพาะ docOrKBId, rating, comment (ทุกฟิลด์บังคับ) ---
+        // null/undefined/ชนิดผิด ถือเป็นข้อมูลผิดรูปแบบทั้งหมด ไม่ถูกตีความเป็น "ไม่ส่ง"
+        const docOrKBId =
+          typeof body.docOrKBId === "string" ? body.docOrKBId.trim() : "";
+        if (!docOrKBId || docOrKBId.length > 100) {
+          return bad("กรุณาระบุรหัสเอกสารหรือบทความที่ต้องการให้ความเห็น");
         }
-        db_ratings.unshift(rating);
-        res.json(rating);
+        const ratingValue = body.rating;
+        if (
+          typeof ratingValue !== "number" ||
+          !Number.isInteger(ratingValue) ||
+          ratingValue < 1 ||
+          ratingValue > 5
+        ) {
+          return bad("คะแนนต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 5");
+        }
+        const comment =
+          typeof body.comment === "string" ? body.comment.trim() : "";
+        if (!comment || comment.length > 2000) {
+          return bad("กรุณากรอกความเห็น (ไม่ว่าง และไม่เกิน 2,000 ตัวอักษร)");
+        }
+
+        // --- ตรวจว่าเป้าหมายมีอยู่จริงและผู้ใช้มีสิทธิ์เห็น (ใช้กฎเดียวกับ GET) ---
+        const me = req.authUser!;
+        const targetDoc = db_documents.find((d) => d.id === docOrKBId);
+        if (targetDoc) {
+          // เหมือน GET /api/documents: Admin/Editor เห็นตามสิทธิ์แผนก (ทุกสถานะ),
+          // role อื่นเห็นเฉพาะ Published ที่มีสิทธิ์แผนก
+          const canSee =
+            canAccessDocument(me, targetDoc) &&
+            (me.role === "Admin" ||
+              me.role === "Editor" ||
+              targetDoc.status === "Published");
+          if (!canSee) {
+            return res.status(403).json({
+              error: "FORBIDDEN",
+              message: "คุณไม่มีสิทธิ์ให้ความเห็นกับเอกสารนี้",
+            });
+          }
+        } else {
+          const targetKB = db_kb_articles.find((a) => a.id === docOrKBId);
+          if (!targetKB) {
+            return res.status(404).json({
+              error: "NOT_FOUND",
+              message: "ไม่พบเอกสารหรือบทความที่ระบุ",
+            });
+          }
+          // เหมือน GET /api/kb_articles: Viewer เห็นเฉพาะ Approved
+          if (me.role === "Viewer" && targetKB.status !== "Approved") {
+            return res.status(403).json({
+              error: "FORBIDDEN",
+              message: "คุณไม่มีสิทธิ์ให้ความเห็นกับบทความนี้",
+            });
+          }
+        }
+
+        // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision
+        let generatedId = `r-${Date.now()}`;
+        while (db_ratings.some((r) => r.id === generatedId)) {
+          generatedId = `r-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+        }
+
+        // ฟิลด์ระบุตัวตนและเวลา มาจาก server เสมอ (รวมกรณี Admin)
+        const newRating: RatingAndComment = {
+          id: generatedId,
+          docOrKBId,
+          userId: me.id,
+          userName: me.name,
+          rating: ratingValue,
+          comment,
+          createdAt: new Date().toISOString(),
+        };
+        db_ratings.unshift(newRating);
+        res.json(newRating);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -3182,12 +3362,58 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     requireOwnField("userId"),
     (req, res) => {
       try {
-        const contactReq = req.body;
-        if (!contactReq.id) {
-          contactReq.id = `cr-${Date.now()}`;
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const bad = (message: string) =>
+          res.status(400).json({ error: "INVALID_CONTACT_REQUEST", message });
+
+        // --- Validation: รับเฉพาะ expertId, topic, message (ทุกฟิลด์บังคับ) ---
+        // null/undefined/ชนิดผิด ถือเป็นข้อมูลผิดรูปแบบทั้งหมด ไม่ถูกตีความเป็น "ไม่ส่ง"
+        const expertId =
+          typeof body.expertId === "string" ? body.expertId.trim() : "";
+        if (!expertId || expertId.length > 100) {
+          return bad("กรุณาระบุผู้เชี่ยวชาญที่ต้องการสอบถาม");
         }
-        db_contact_requests.unshift(contactReq);
-        res.json(contactReq);
+        const topic = typeof body.topic === "string" ? body.topic.trim() : "";
+        if (!topic || topic.length > 200) {
+          return bad("กรุณากรอกหัวข้อ (ไม่ว่าง และไม่เกิน 200 ตัวอักษร)");
+        }
+        const message =
+          typeof body.message === "string" ? body.message.trim() : "";
+        if (!message || message.length > 5000) {
+          return bad("กรุณากรอกรายละเอียด (ไม่ว่าง และไม่เกิน 5,000 ตัวอักษร)");
+        }
+
+        // --- ผู้เชี่ยวชาญต้องมีอยู่จริง; expertName มาจาก db_experts ไม่ใช่ client ---
+        const expert = db_experts.find((e) => e.id === expertId);
+        if (!expert) {
+          return res.status(404).json({
+            error: "EXPERT_NOT_FOUND",
+            message: "ไม่พบผู้เชี่ยวชาญที่ระบุ",
+          });
+        }
+
+        // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision
+        let generatedId = `cr-${Date.now()}`;
+        while (db_contact_requests.some((r) => r.id === generatedId)) {
+          generatedId = `cr-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+        }
+
+        // ฟิลด์ระบุตัวตน/สถานะ/เวลา มาจาก server เสมอ (รวมกรณี Admin)
+        const me = req.authUser!;
+        const newRequest: ContactRequest = {
+          id: generatedId,
+          userId: me.id,
+          userName: me.name,
+          userDept: me.departmentId,
+          expertId: expert.id,
+          expertName: expert.name,
+          topic,
+          message,
+          status: "Sent",
+          createdAt: new Date().toISOString(),
+        };
+        db_contact_requests.unshift(newRequest);
+        res.json(newRequest);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }

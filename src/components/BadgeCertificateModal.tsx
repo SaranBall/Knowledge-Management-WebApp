@@ -178,11 +178,20 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
     const printContent = document.getElementById("printable-cert-document");
     if (!printContent) return;
 
-    const originalContent = document.body.innerHTML;
+    // Escape ข้อความ dynamic ก่อนแทรกลง HTML string ของหน้าพิมพ์
+    // ต้อง replace "&" เป็นตัวแรก ไม่งั้น "&lt;" ฯลฯ ที่เพิ่งสร้างจะถูก escape ซ้ำเป็น "&amp;lt;"
+    const escapeHtml = (value: string): string =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
     const printHTML = `
       <html>
         <head>
-          <title>${course.title} - Certificate</title>
+          <title>${escapeHtml(course.title)} - Certificate</title>
           <style>
             @media print {
               body { background: white; color: black; margin: 0; padding: 20px; font-family: 'Inter', sans-serif; }

@@ -155,6 +155,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const printContents =
       document.getElementById("printable-iso-area")?.innerHTML;
     if (printContents) {
+      // Escape ข้อความ dynamic ก่อนแทรกลง HTML string ของหน้าพิมพ์
+      // ต้อง replace "&" เป็นตัวแรก ไม่งั้น "&lt;" ฯลฯ ที่เพิ่งสร้างจะถูก escape ซ้ำเป็น "&amp;lt;"
+      // รองรับ undefined/null โดยแปลงเป็นสตริงว่าง (ไม่ให้ title ขึ้นคำว่า "undefined")
+      const escapeHtml = (value: string | null | undefined): string =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
       const iframe = document.createElement("iframe");
       iframe.style.position = "absolute";
       iframe.style.width = "0px";
@@ -175,7 +186,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         iframeDoc.write(`
           <html>
             <head>
-              <title>RMP ISO-9001 Compliance Audit Certification - ${selectedUserTranscript?.name}</title>
+              <title>RMP ISO-9001 Compliance Audit Certification - ${escapeHtml(selectedUserTranscript?.name)}</title>
               ${styles}
               <style>
                 body { font-family: "Inter", "Sarabun", sans-serif; padding: 24px; background: white; color: #1e293b; }
