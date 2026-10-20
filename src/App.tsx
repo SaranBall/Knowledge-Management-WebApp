@@ -236,16 +236,6 @@ export default function App() {
     fetchAllData();
   }, [isLogged]);
 
-  // --- Registration Flow States ---
-  const [isRegistering, setIsRegistering] = useState<boolean>(false);
-  const [regEmployeeId, setRegEmployeeId] = useState<string>("");
-  const [matchedEmployee, setMatchedEmployee] = useState<EmployeeMaster | null>(
-    null,
-  );
-  const [regError, setRegError] = useState<string>("");
-  const [regPassword, setRegPassword] = useState<string>("");
-  const [regAvatarUrl, setRegAvatarUrl] = useState<string>("");
-
   // --- Manual Login States ---
   const [loginEmployeeId, setLoginEmployeeId] = useState<string>("");
   const [loginPassword, setLoginPassword] = useState<string>("");
@@ -883,153 +873,6 @@ export default function App() {
     // Redirect user to Technical KB to witness the multi-match dashboard
     setActiveMenu("Technical Knowledge Base");
   };
-
-  // Registration Flow Event Handlers
-  const handleVerifyEmployeeId = (searchId: string) => {
-    setRegError("");
-    setMatchedEmployee(null);
-
-    const cleanId = searchId.trim();
-    if (!cleanId) {
-      setRegError("กรุณากรอกรหัสพนักงานของคุณ");
-      return;
-    }
-
-    // 1. Look up in employeeMaster
-    const match = employeeMaster.find(
-      (e) => e.employeeId.toLowerCase() === cleanId.toLowerCase(),
-    );
-
-    if (!match) {
-      setRegError(
-        `❌ ไม่พบรหัสพนักงาน "${cleanId}" ในฐานข้อมูลระเบียนระบบ! กรุณาแจ้งแอดมินหรือผู้ควบคุมดูแลให้อัปโหลดไฟล์ Excel/PDF หรือกรอกเข้าระบบสมาชิกก่อน`,
-      );
-      return;
-    }
-
-    // 2. Check if already exists in registered users
-    const alreadyRegistered = users.some(
-      (u) => u.employeeId.toLowerCase() === cleanId.toLowerCase(),
-    );
-    if (alreadyRegistered) {
-      setRegError(
-        `⚠️ รหัสพนักงาน "${cleanId}" นี้เคยได้ลงทะเบียนเปิดใช้งานไปเรียบร้อยแล้ว! สามารถสลับบัญชีเพื่อเข้าเรียนหลักสูตรได้ทันที`,
-      );
-      return;
-    }
-
-    // Success
-    // N7: ถ้าแผนกยังเป็นข้อความดิบจากการ import (unresolved) ห้ามไปต่อ — ต้องให้ Admin กำหนดแผนกจริงก่อน
-    if (!getDepartmentById(match.departmentId)) {
-      setRegError(
-        `⚠️ รหัสพนักงาน "${cleanId}" ยังไม่ได้ระบุแผนกที่ถูกต้องในฐานข้อมูล กรุณาติดต่อผู้ดูแลระบบเพื่อกำหนดแผนกและอนุมัติบัญชี`,
-      );
-      return;
-    }
-
-    setMatchedEmployee(match);
-  };
-  // Registration: อัปโหลดรูปโปรไฟล์จริง (บังคับก่อนยืนยันลงทะเบียน)
-  const handleRegAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setRegAvatarUrl(reader.result as string);
-    reader.readAsDataURL(file);
-  };
-
-  const handleConfirmRegistration = async () => {
-    if (!matchedEmployee) return;
-    if (!regAvatarUrl) {
-      setRegError("⚠️ กรุณาอัปโหลดรูปภาพโปรไฟล์จริงก่อนยืนยันการลงทะเบียน");
-      return;
-    }
-
-    const alreadyRegistered = users.some(
-      (u) => u.employeeId === matchedEmployee.employeeId,
-    );
-    if (alreadyRegistered) {
-      alert("รหัสพนักงานนี้ได้รับการลงทะเบียนแล้ว");
-      return;
-    }
-
-    const cleanPass = regPassword.trim();
-    if (!cleanPass) {
-      setRegError(
-        "⚠️ กรุณารองรับความปลอดภัยโดยกำหนดรหัสผ่าน PIN ตัวเลข 6 หลัก",
-      );
-      return;
-    }
-    if (cleanPass.length !== 6 || !/^\d+$/.test(cleanPass)) {
-      setRegError("⚠️ รหัสผ่าน PIN ต้องเป็นตัวเลข 6 หลักเพื่อความปลอดภัย");
-      return;
-    }
-
-    // payload เดิม — server คำนวณ id/role เอง และ ignore ค่าจาก client
-    const payload: UserType = {
-      id: `usr-${Date.now()}`,
-      name: matchedEmployee.name,
-      employeeId: matchedEmployee.employeeId,
-      departmentId: matchedEmployee.departmentId,
-      position: matchedEmployee.position,
-      role: "Viewer",
-      email: matchedEmployee.email,
-      phone: matchedEmployee.phone,
-      password: cleanPass,
-      avatarUrl: regAvatarUrl,
-      startDate:
-        matchedEmployee.startDate || new Date().toISOString().split("T")[0],
-    };
-
-    // 1) API ก่อน — ถ้าล้มเหลว หยุดทันที ไม่แตะ state ใดๆ
-    setRegError("");
-    let result: { user: UserType; token: string };
-    try {
-      result = await api.register(payload);
-    } catch (e) {
-      setRegError(
-        getApiErrorMessage(e, "ลงทะเบียนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"),
-      );
-      return;
-    }
-
-    // 2) สำเร็จแล้วค่อย update state โดยใช้ user ที่ server สร้างจริง (id/role จาก server)
-    setAuthToken(result.token);
-    const serverUser = result.user;
-    setUsers((prev) => [...prev, serverUser]);
-    setUserCompetencies((prev) => [
-      ...prev,
-      ...getInitialCompetencies(
-        serverUser.id,
-        serverUser.departmentId,
-        serverUser.position,
-      ),
-    ]);
-    setUserCertificates((prev) => [
-      ...prev,
-      ...getInitialCertificates(serverUser.id, serverUser.employeeId),
-    ]);
-    setEmployeeMaster((prev) =>
-      prev.map((emp) =>
-        emp.employeeId === matchedEmployee.employeeId
-          ? { ...emp, status: "Registered" as const }
-          : emp,
-      ),
-    );
-    setCurrentUser(serverUser);
-    setIsLogged(true);
-
-    setIsRegistering(false);
-    setRegEmployeeId("");
-    setRegPassword("");
-    setRegAvatarUrl("");
-    setMatchedEmployee(null);
-
-    alert(
-      `🎉 ยินดีต้อนรับคุณ ${serverUser.name} ลงทะเบียนและเข้าสู่ระบบสำเร็จในบทบาทสิทธิ์ ${serverUser.role === "Editor" ? "Editor (ผู้เขียนข้อมูล)" : "Viewer (ผู้เข้าชมทั่วไป)"}!`,
-    );
-  };
-
   // Manual login with Employee ID & 6-Digit Password PIN
   const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1151,367 +994,84 @@ export default function App() {
               </div>
             </div>
 
-            {!isRegistering ? (
-              /* Upgraded Dual Mode Login with Manual Form + Quick selection prefill triggers */
-              <div className="space-y-5 pt-4 border-t border-[#e1ded5] text-left">
-                {/* 1. MANUAL LOGIN FORM (Employee ID & PIN) */}
-                <form onSubmit={handleManualLogin} className="space-y-3.5">
-                  <div className="text-center md:text-left mb-1">
-                    <span className="block text-[11px] text-slate-500 font-extrabold uppercase tracking-widest pl-0.5">
-                      🔑 เข้าสู่ระบบ (Employee Login)
+            <div className="space-y-5 pt-4 border-t border-[#e1ded5] text-left">
+              {/* 1. MANUAL LOGIN FORM (Employee ID & PIN) */}
+              <form onSubmit={handleManualLogin} className="space-y-3.5">
+                <div className="text-center md:text-left mb-1">
+                  <span className="block text-[11px] text-slate-500 font-extrabold uppercase tracking-widest pl-0.5">
+                    🔑 เข้าสู่ระบบ (Employee Login)
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 block uppercase">
+                    รหัสพนักงาน (Employee ID):
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                      <User className="w-3.5 h-3.5" />
                     </span>
+                    <input
+                      type="text"
+                      value={loginEmployeeId}
+                      onChange={(e) => setLoginEmployeeId(e.target.value)}
+                      placeholder="เช่น RMP-5022"
+                      className="w-full bg-slate-50 border border-slate-200 py-2 pl-9 pr-4 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#15329c]"
+                    />
                   </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 block uppercase">
-                      รหัสพนักงาน (Employee ID):
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                        <User className="w-3.5 h-3.5" />
-                      </span>
-                      <input
-                        type="text"
-                        value={loginEmployeeId}
-                        onChange={(e) => setLoginEmployeeId(e.target.value)}
-                        placeholder="เช่น RMP-5022"
-                        className="w-full bg-slate-50 border border-slate-200 py-2 pl-9 pr-4 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#15329c]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 block uppercase">
-                      รหัสผ่านความปลอดภัย PIN (6 Digits):
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                        <Shield className="w-3.5 h-3.5" />
-                      </span>
-                      <input
-                        type="password"
-                        maxLength={6}
-                        pattern="\d*"
-                        value={loginPassword}
-                        onChange={(e) =>
-                          setLoginPassword(e.target.value.replace(/\D/g, ""))
-                        }
-                        placeholder="•••••• (ตัวเลข 6 หลัก)"
-                        className="w-full bg-slate-50 border border-slate-200 py-2 pl-9 pr-4 rounded-xl text-xs font-mono font-bold text-slate-800 tracking-widest focus:outline-none focus:ring-1 focus:ring-[#15329c]"
-                      />
-                    </div>
-                  </div>
-
-                  {loginError && (
-                    <p className="text-[10px] text-rose-600 font-semibold bg-rose-50 p-2 rounded-xl border border-rose-100 leading-normal">
-                      ❌ {loginError}
-                    </p>
-                  )}
-
-                  <button
-                    type="submit"
-                    className="w-full bg-[#15329c] hover:bg-[#11297e] text-white py-2 text-xs font-bold rounded-xl transition duration-150 cursor-pointer shadow-md shadow-[#15329c]/10 flex items-center justify-center gap-2"
-                  >
-                    <span>เข้าระบบผู้ใช้งาน &rarr;</span>
-                  </button>
-                </form>
-
-                {/* 2. SPLITTER */}
-                <div className="flex items-center justify-between pt-2">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase">
-                    ยังไม่มีบัญชี?
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsRegistering(true);
-                      setRegEmployeeId("");
-                      setMatchedEmployee(null);
-                      setRegError("");
-                    }}
-                    className="text-xs text-[#15329c] font-black hover:underline cursor-pointer flex items-center gap-1"
-                  >
-                    <span>ลงทะเบียนพนักงานใหม่ &rarr;</span>
-                  </button>
                 </div>
 
-                {/* 3.REGISTER BTN */}
-                <div className="p-3 bg-indigo-50/70 rounded-2xl border border-indigo-100 text-left space-y-1">
-                  <span className="text-[10px] font-bold text-indigo-950 uppercase block tracking-wider">
-                    🔐 ความปลอดภัยด้วยรหัส PIN
-                  </span>
-                  <p className="text-[9.5px] text-slate-600 leading-normal">
-                    ตามข้อกำหนดมาตรฐานสากล ISO9001
-                    <br />
-                    พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 block uppercase">
+                    รหัสผ่านความปลอดภัย PIN (6 Digits):
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                      <Shield className="w-3.5 h-3.5" />
+                    </span>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      pattern="\d*"
+                      value={loginPassword}
+                      onChange={(e) =>
+                        setLoginPassword(e.target.value.replace(/\D/g, ""))
+                      }
+                      placeholder="•••••• (ตัวเลข 6 หลัก)"
+                      className="w-full bg-slate-50 border border-slate-200 py-2 pl-9 pr-4 rounded-xl text-xs font-mono font-bold text-slate-800 tracking-widest focus:outline-none focus:ring-1 focus:ring-[#15329c]"
+                    />
+                  </div>
+                </div>
+
+                {loginError && (
+                  <p className="text-[10px] text-rose-600 font-semibold bg-rose-50 p-2 rounded-xl border border-rose-100 leading-normal">
+                    ❌ {loginError}
                   </p>
-                </div>
-              </div>
-            ) : (
-              /* REGISTRATION INTERACTIVE PORTAL */
-              <div className="space-y-4 pt-5 border-t border-[#e1ded5] text-left">
-                <div className="flex items-center justify-between">
-                  <span className="block text-[11px] text-slate-800 font-bold uppercase tracking-wider">
-                    ✏️ ลงทะเบียนเปิดสิทธิ์ (กรอกแค่รหัสพนักงาน)
-                  </span>
-                  <button
-                    onClick={() => setIsRegistering(false)}
-                    className="text-xs text-indigo-650 hover:text-indigo-800 font-bold cursor-pointer"
-                  >
-                    &larr; ย้อนกลับ
-                  </button>
-                </div>
-
-                {!matchedEmployee ? (
-                  /* STEP 1: ENTER EMPLOYEE ID */
-                  <div className="space-y-3.5">
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      กรอกเพียง <strong>รหัสพนักงาน</strong>{" "}
-                      เพื่อระบุความถูกต้อง ระบบจะสืบค้นแผนก ฝ่าย ชื่อนามสกุล
-                      และระดับจัดเก็บของคุณจากฐานข้อมูลนำเข้าความปลอดภัยกลาง
-                    </p>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-500 block uppercase">
-                        รหัสพนักงานอ้างอิงของคุณ:
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={regEmployeeId}
-                          onChange={(e) => setRegEmployeeId(e.target.value)}
-                          placeholder="เช่น RMP-8041"
-                          className="flex-1 bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#15329c]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleVerifyEmployeeId(regEmployeeId)}
-                          className="bg-[#15329c] hover:bg-[#11297e] text-white text-xs font-bold px-4 rounded-xl cursor-pointer transition shadow-xs"
-                        >
-                          สืบค้นระเบียน
-                        </button>
-                      </div>
-                    </div>
-
-                    {regError && (
-                      <p className="text-[11px] text-rose-600 font-medium bg-rose-50 p-2.5 rounded-xl border border-rose-100 leading-normal">
-                        {regError}
-                      </p>
-                    )}
-
-                    {/* SAMPLE DEMO EMPLOYEE ID TEMPLATE CODES */}
-                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200/60 shadow-xs">
-                      <span className="block text-[9.5px] font-bold text-amber-800 uppercase tracking-wider mb-2">
-                        💡 รหัสพนักงานรอลงทะเบียน (สุ่มจำลองจากการนำเข้า):
-                      </span>
-                      <div className="flex flex-col gap-1.5 text-[10.5px] font-mono text-slate-700">
-                        {employeeMaster.filter((e) => e.status === "Imported")
-                          .length === 0 ? (
-                          <span className="text-slate-400 italic">
-                            ไม่มีข้อมูลพนักงานรอนำเข้า (ลงทะเบียนครบหมดแล้ว)
-                            สามารถกด Import เพิ่มใหม่จากหน้า Member Management
-                          </span>
-                        ) : (
-                          employeeMaster
-                            .filter((e) => e.status === "Imported")
-                            .map((emp, i) => (
-                              <button
-                                key={i}
-                                type="button"
-                                onClick={() => {
-                                  setRegEmployeeId(emp.employeeId);
-                                  handleVerifyEmployeeId(emp.employeeId);
-                                }}
-                                className="text-left py-1 px-1.5 rounded hover:bg-white flex justify-between items-center group transition cursor-pointer"
-                                title="คลิกเพื่อกรอกอัตโนมัติและทดสอบความถูกต้องทันที"
-                              >
-                                <span>
-                                  🆔{" "}
-                                  <strong className="text-indigo-650 font-bold text-xs">
-                                    {emp.employeeId}
-                                  </strong>{" "}
-                                  -{" "}
-                                  {emp.name
-                                    ? emp.name.split(" (")[0]
-                                    : emp.employeeId}
-                                </span>
-                                <span className="text-[9px] text-[#e51a24] opacity-80 group-hover:underline">
-                                  เลือก &rarr;
-                                </span>
-                              </button>
-                            ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  /* STEP 2: SHOW MATCHED RESULTS FOR CONFIRMATION */
-                  <div className="space-y-4">
-                    <div className="p-4 bg-gradient-to-br from-[#15329c]/5 to-indigo-50 border border-indigo-150 rounded-2xl space-y-3">
-                      <div className="flex items-center gap-2 border-b border-indigo-100/60 pb-2">
-                        <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
-                        <span className="text-xs font-black text-slate-800 uppercase tracking-widest">
-                          พบบันทึกการอนุมัตินำเข้าพนักงาน
-                        </span>
-                      </div>
-
-                      <div className="space-y-1.5 text-xs text-slate-700">
-                        <div className="grid grid-cols-3">
-                          <span className="text-slate-400 font-medium">
-                            รหัสพนักงาน:
-                          </span>
-                          <span className="col-span-2 font-mono font-bold text-slate-900">
-                            {matchedEmployee.employeeId}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3">
-                          <span className="text-slate-400 font-medium">
-                            ชื่อ-นามสกุลจริง:
-                          </span>
-                          <span className="col-span-2 font-bold text-[#15329c]">
-                            {matchedEmployee.name}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3">
-                          <span className="text-slate-400 font-medium">
-                            สังกัดฝ่าย/แผนก:
-                          </span>
-                          <span className="col-span-2 text-slate-800 font-semibold">
-                            {getDepartmentById(matchedEmployee.departmentId)
-                              ?.name || matchedEmployee.departmentId}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3">
-                          <span className="text-slate-400 font-medium">
-                            ตำแหน่งวิชาชีพ:
-                          </span>
-                          <span className="col-span-2 text-slate-800 font-semibold">
-                            {matchedEmployee.position}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3">
-                          <span className="text-slate-400 font-medium">
-                            ระดับพนักงาน:
-                          </span>
-                          <span className="col-span-2 text-slate-800 font-semibold">
-                            <span className="bg-white px-2 py-0.5 rounded border border-indigo-100 text-[10.5px] font-mono text-indigo-700">
-                              {matchedEmployee.level}
-                            </span>
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3">
-                          <span className="text-slate-400 font-medium">
-                            วันเริ่มงาน (Start):
-                          </span>
-                          <span className="col-span-2 text-slate-800 font-semibold font-mono">
-                            {matchedEmployee.startDate}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3">
-                          <span className="text-slate-400 font-medium">
-                            พิกัดอีเมล / โทร:
-                          </span>
-                          <span className="col-span-2 text-slate-600 font-mono text-[11px] truncate">
-                            {matchedEmployee.email} • {matchedEmployee.phone}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-150 text-emerald-800 text-[11px] leading-relaxed">
-                      💚 ระบบจะเชื่อมต่อวุฒิความรู้ (Competency Score Card)
-                      และหลักสูตรสอนงานเซฟตี้ Onboarding แผนกตรงโดยอัตโนมัติ
-                    </div>
-                    {/* บังคับอัปโหลดรูปโปรไฟล์จริงก่อนลงทะเบียน */}
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-center">
-                      <label className="text-[10px] font-extrabold text-slate-500 block uppercase tracking-wider">
-                        📷 อัปโหลดรูปโปรไฟล์จริง (จำเป็น):
-                      </label>
-                      <div className="flex flex-col items-center gap-2">
-                        {regAvatarUrl ? (
-                          <img
-                            src={regAvatarUrl}
-                            alt="Avatar Preview"
-                            className="w-16 h-16 rounded-full object-cover border-2 border-emerald-500 shadow-sm"
-                          />
-                        ) : (
-                          <div className="w-16 h-16 rounded-full border-2 border-dashed border-red-400 bg-red-50 flex items-center justify-center">
-                            <span className="text-red-400 text-[9px] font-bold">
-                              ยังไม่มีรูป
-                            </span>
-                          </div>
-                        )}
-                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer transition shadow-xs">
-                          <span>เลือกไฟล์รูปภาพ</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleRegAvatarChange}
-                            className="hidden"
-                          />
-                        </label>
-                        <p
-                          className={`text-[9.5px] font-bold ${
-                            regAvatarUrl ? "text-emerald-600" : "text-red-500"
-                          }`}
-                        >
-                          {regAvatarUrl
-                            ? "✓ อัปโหลดรูปภาพจริงแล้ว"
-                            : "⚠ กรุณาอัปโหลดรูปภาพจริง (จำเป็น)"}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Require numeric 6 digit pin password input */}
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                      <label className="text-[10px] font-extrabold text-slate-500 block uppercase tracking-wider">
-                        🔐 กำหนดรหัสผ่านเข้าระบบ (PIN 6 หลัก):
-                      </label>
-                      <input
-                        type="password"
-                        maxLength={6}
-                        pattern="\d*"
-                        value={regPassword}
-                        onChange={(e) =>
-                          setRegPassword(e.target.value.replace(/\D/g, ""))
-                        }
-                        placeholder="กรอกตัวเลข 6 หลัก เช่น 123456"
-                        className="w-full bg-white border border-slate-300 py-2 text-center text-xl font-mono font-black tracking-widest text-[#15329c] rounded-xl focus:outline-none focus:ring-1 focus:ring-[#15329c]"
-                      />
-                      <p className="text-[9.5px] text-slate-500 text-center">
-                        * รหัสนี้จะผูกกับบัญชีเพื่อความปลอดภัยระดับอุตสาหกรรม
-                      </p>
-                    </div>
-
-                    {regError && (
-                      <p className="text-[11px] text-rose-600 font-medium bg-rose-50 p-2.5 rounded-xl border border-rose-100 leading-normal">
-                        {regError}
-                      </p>
-                    )}
-
-                    <div className="flex gap-2.5">
-                      <button
-                        onClick={() => {
-                          setMatchedEmployee(null);
-                          setRegPassword("");
-                          setRegError("");
-                        }}
-                        className="flex-1 bg-slate-100 hover:bg-slate-200 py-2.5 rounded-xl font-bold text-xs text-slate-700 text-center cursor-pointer transition-colors"
-                      >
-                        แก้ไขรหัส
-                      </button>
-                      <button
-                        onClick={handleConfirmRegistration}
-                        className="flex-1 bg-[#15329c] hover:bg-[#11297e] text-white py-2.5 rounded-xl font-bold text-xs text-center cursor-pointer transition shadow"
-                      >
-                        ยืนยันและเปิดบัญชี &rarr;
-                      </button>
-                    </div>
-                  </div>
                 )}
-              </div>
-            )}
 
+                <button
+                  type="submit"
+                  className="w-full bg-[#15329c] hover:bg-[#11297e] text-white py-2 text-xs font-bold rounded-xl transition duration-150 cursor-pointer shadow-md shadow-[#15329c]/10 flex items-center justify-center gap-2"
+                >
+                  <span>เข้าระบบผู้ใช้งาน &rarr;</span>
+                </button>
+              </form>
+
+              <p className="pt-2 text-[10px] text-slate-500 text-center leading-normal">
+                ยังไม่มีบัญชี? กรุณาติดต่อผู้ดูแลระบบเพื่อขอเปิดสิทธิ์การใช้งาน
+              </p>
+              {/* 3.REGISTER BTN */}
+              <div className="p-3 bg-indigo-50/70 rounded-2xl border border-indigo-100 text-left space-y-1">
+                <span className="text-[10px] font-bold text-indigo-950 uppercase block tracking-wider">
+                  🔐 ความปลอดภัยด้วยรหัส PIN
+                </span>
+                <p className="text-[9.5px] text-slate-600 leading-normal">
+                  ตามข้อกำหนดมาตรฐานสากล ISO9001
+                  <br />
+                  พนักงานจะต้องยืนยันตัวตนด้วยรหัส PIN ตัวเลข 6 หลักทุกราย
+                </p>
+              </div>
+            </div>
             {/* Safety policy footer info */}
             <div className="text-[9px] text-slate-400 pt-2 flex items-center justify-center gap-1.5 font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-[#e51a24] animate-ping" />

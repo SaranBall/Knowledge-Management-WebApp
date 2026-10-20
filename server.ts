@@ -766,90 +766,15 @@ async function startServer() {
     }
   });
 
-  // Self-registration: สมัครเองด้วยรหัสพนักงานที่มีอยู่ใน Employee Master เท่านั้น
-  // แยกจาก /api/users (ซึ่งตอนนี้สงวนไว้ให้ Admin จัดการคนอื่นเท่านั้น)
-  app.post("/api/register", async (req, res) => {
-    try {
-      const { password, employeeId, avatarUrl } = req.body; // รับเฉพาะฟิลด์ที่จำเป็น ไม่รับ role จาก client
-      if (!employeeId || !password) {
-        return res.status(400).json({
-          error: "MISSING_FIELDS",
-          message: "ข้อมูลลงทะเบียนไม่ครบถ้วน",
-        });
-      }
-
-      const employeeRecord = db_employee_master.find(
-        (e) => e.employeeId.toLowerCase() === employeeId.toLowerCase(),
-      );
-      const alreadyRegistered = db_users.some(
-        (u) => u.employeeId.toLowerCase() === employeeId.toLowerCase(),
-      );
-
-      // รวม error ทั้ง "ไม่พบรหัส" และ "ซ้ำ" ให้เป็นข้อความ/สถานะเดียวกัน
-      // เพื่อไม่ให้ใครใช้ endpoint นี้ตรวจสอบ (enumerate) ว่ารหัสพนักงานไหนมีอยู่จริงในระบบได้
-      if (!employeeRecord || alreadyRegistered) {
-        return res.status(400).json({
-          error: "REGISTRATION_FAILED",
-          message:
-            "ไม่สามารถลงทะเบียนด้วยข้อมูลนี้ได้ กรุณาตรวจสอบรหัสพนักงานอีกครั้ง หรือติดต่อผู้ดูแลระบบ",
-        });
-      }
-
-      // N7: แผนกใน Employee Master ต้องเป็น Department ID จริงเท่านั้น
-      // ถ้ายังเป็นข้อความดิบที่ import มา (unresolved) ห้ามนำไปสร้าง user อัตโนมัติ
-      // ต้องให้ Admin อนุมัติผ่าน modal เลือกแผนกจริงก่อน
-      if (!getDepartmentById(employeeRecord.departmentId)) {
-        return res.status(400).json({
-          error: "REGISTRATION_FAILED",
-          message:
-            "ไม่สามารถลงทะเบียนด้วยข้อมูลนี้ได้ กรุณาตรวจสอบรหัสพนักงานอีกครั้ง หรือติดต่อผู้ดูแลระบบ",
-        });
-      }
-
-      // คำนวณ role เองจากข้อมูล employeeRecord เท่านั้น ห้ามรับจาก client
-      let assignedRole: "Admin" | "Editor" | "Viewer" = "Viewer";
-      if (
-        employeeRecord.level.toLowerCase().includes("senior") ||
-        employeeRecord.position.toLowerCase().includes("engineer") ||
-        employeeRecord.position.toLowerCase().includes("supervisor")
-      ) {
-        assignedRole = "Editor";
-      }
-
-      const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-      const newUser: UserType = {
-        id: `usr-${Date.now()}`,
-        name: employeeRecord.name,
-        employeeId: employeeRecord.employeeId,
-        departmentId: employeeRecord.departmentId,
-        position: employeeRecord.position,
-        role: assignedRole, // ← มาจาก server เท่านั้น
-        email: employeeRecord.email,
-        phone: employeeRecord.phone,
-        // N7: เก็บรูปที่ผู้ลงทะเบียนอัปโหลดจริง ถ้า format ไม่ผ่านใช้ default
-        avatarUrl: sanitizeAvatarUrl(avatarUrl) || DEFAULT_AVATAR_URL,
-        password: hashedPassword,
-        startDate: employeeRecord.startDate,
-      };
-      db_users.push(newUser);
-
-      // mark employee master เป็น Registered ที่ server เลย ไม่ต้องให้ client เรียก updateEmployeeMaster แยก
-      const idx = db_employee_master.findIndex(
-        (e) => e.employeeId === employeeId,
-      );
-      if (idx !== -1) db_employee_master[idx].status = "Registered";
-
-      const token = signToken({
-        id: newUser.id,
-        employeeId: newUser.employeeId,
-        role: newUser.role,
-      });
-      res.json({ user: sanitizeUser(newUser), token });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  // SEC-03A: ปิดการสมัครสมาชิกสาธารณะ — บัญชีใหม่สร้างได้เฉพาะ Admin ผ่าน POST /api/users
+  // คง route ไว้เพื่อให้ผู้เรียกเดิมได้ 403 ที่ชัดเจน แทนที่จะเป็น 404/SPA fallback
+  app.post("/api/register", (_req, res) => {
+    res.status(403).json({
+      error: "REGISTRATION_DISABLED",
+      message:
+        "ระบบปิดการลงทะเบียนด้วยตนเอง กรุณาติดต่อผู้ดูแลระบบเพื่อเปิดบัญชีใช้งาน",
+    });
   });
-
   // --- Secure File Upload API Endpoint & Store (ต้อง login ก่อนอัปโหลด) ---
   interface UploadedFileMeta {
     buffer: Buffer;
