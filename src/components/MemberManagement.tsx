@@ -501,25 +501,12 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         const base64 = await toBase64(file);
         const cleanBase64 = base64.split(",")[1] || base64;
 
-        const response = await fetch("/api/parse-document", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            base64Data: cleanBase64,
-            fileType:
-              file.type ||
-              (name.endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
-            fileName: file.name,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(
-            `เซิร์ฟเวอร์ส่งกลับข้อผิดพลาดสถานะ ${response.status}`,
-          );
-        }
-
-        const result = await response.json();
+        const result = await api.parseDocument(
+          cleanBase64,
+          file.type ||
+            (name.endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
+          file.name,
+        );
         if (result.success && result.employees && result.employees.length > 0) {
           setParsedEmployees(result.employees);
           setParserSuccessMsg(
@@ -533,8 +520,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
           );
         }
       } catch (err: any) {
+        const fallbackMsg =
+          "เกิดข้อผิดพลาดในการเรียกใช้ AI Parser บนเซิร์ฟเวอร์";
+        const rawMsg = err instanceof Error ? err.message : "";
+        // error จาก API (รูปแบบ "API Error: <status> ... - {json}") → ดึงข้อความไทยจาก server
+        // error ที่โยนเองในบล็อกนี้ (เช่น ข้อความ result.message) → ใช้ตามเดิม
         setParserError(
-          err.message || "เกิดข้อผิดพลาดในการเรียกใช้ AI Parser บนเซิร์ฟเวอร์",
+          rawMsg.startsWith("API Error:")
+            ? getApiErrorMessage(err, fallbackMsg)
+            : rawMsg || fallbackMsg,
         );
       } finally {
         setParserLoading(false);

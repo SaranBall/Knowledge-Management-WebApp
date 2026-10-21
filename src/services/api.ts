@@ -168,6 +168,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ filename, fileData }),
     }),
+  // AI parser สำหรับ PDF/รูปสแกนรายชื่อพนักงาน (Admin/Editor เท่านั้นที่ server)
+  // ใช้ request() เพื่อแนบ Authorization header และ logout อัตโนมัติเมื่อ session หมดอายุ
+  parseDocument: (
+    base64Data: string, // base64 ล้วน ไม่รวม prefix "data:...;base64,"
+    fileType: string,
+    fileName: string,
+  ) =>
+    request<{
+      success: boolean;
+      employees?: EmployeeMaster[];
+      message?: string;
+    }>("/api/parse-document", {
+      method: "POST",
+      body: JSON.stringify({ base64Data, fileType, fileName }),
+    }),
   // ขอลิงก์ชั่วคราว (มี token ต่อท้าย) สำหรับฝังใน src/href ที่แนบ Authorization header เองไม่ได้
   signFileUrl: (storedFilename: string) =>
     request<{ url: string }>("/api/files/sign", {
