@@ -3643,23 +3643,79 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       res.json(db_system_audit_logs);
     },
   );
-  app.post(
-    "/api/system_audit_logs",
-    requireAuth,
-    requireRole("Admin"),
-    (req, res) => {
-      try {
-        const log = req.body;
-        if (!log.id) {
-          log.id = `log-${Date.now()}`;
-        }
-        db_system_audit_logs.unshift(log);
-        res.json(log);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+
+  // SEC-04: id/timestamp/performedBy ถูกสร้างที่ server เสมอ ไม่เชื่อค่าจาก client
+  // action ที่ Client เขียนได้มีเฉพาะรายการนี้ (GRADE_ESSAY/RESOLVE_GAP server เขียนเองเท่านั้น)
+  const ADMIN_CLIENT_AUDIT_ACTIONS = [
+    "APPROVE_MEMBER",
+    "UPDATE_MEMBER",
+    "UPDATE_ROLE",
+    "DELETE_MEMBER",
+  ];
+  const AUDIT_DETAILS_MAX_LENGTH = 1000;
+
+  app.post("/api/system_audit_logs", requireAuth, (req, res) => {
+    try {
+      const body = req.body;
+      // express.json() รับทั้ง object และ array — ต้องเป็น object จริงเท่านั้น
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return res.status(400).json({
+          error: "INVALID_AUDIT_LOG",
+          message:
+            "รูปแบบข้อมูลไม่ถูกต้อง ต้องเป็น Object ที่มี action และ details",
+        });
       }
-    },
-  );
+
+      const me = req.authUser!;
+      const action = typeof body.action === "string" ? body.action : "";
+      let details: string;
+
+      if (action === "DOWNLOAD_CERTIFICATE") {
+        // ทุก role ที่ login แล้วบันทึกได้ แต่ details สร้างจากตัวตนที่ server ยืนยันเท่านั้น
+        // ไม่ระบุหลักสูตร/เจ้าของใบเซอร์/certId เพราะ server ยังตรวจสอบจาก request นี้ไม่ได้
+        details = `ดาวน์โหลด/พิมพ์ใบรับรองโดย ${me.name} (${me.employeeId})`;
+      } else if (ADMIN_CLIENT_AUDIT_ACTIONS.includes(action)) {
+        if (me.role !== "Admin") {
+          return res.status(403).json({
+            error: "FORBIDDEN",
+            message: "คุณไม่มีสิทธิ์บันทึกประวัติกิจกรรมประเภทนี้",
+          });
+        }
+        const rawDetails =
+          typeof body.details === "string" ? body.details.trim() : "";
+        if (!rawDetails || rawDetails.length > AUDIT_DETAILS_MAX_LENGTH) {
+          return res.status(400).json({
+            error: "INVALID_AUDIT_LOG",
+            message: `กรุณาระบุรายละเอียดกิจกรรม (ไม่ว่าง และไม่เกิน ${AUDIT_DETAILS_MAX_LENGTH} ตัวอักษร)`,
+          });
+        }
+        details = rawDetails;
+      } else {
+        return res.status(400).json({
+          error: "INVALID_AUDIT_LOG",
+          message:
+            "ประเภทกิจกรรม (action) ไม่ถูกต้อง หรือไม่อนุญาตให้บันทึกจากฝั่ง Client",
+        });
+      }
+
+      const log: SystemAuditLog = {
+        id: `log-${crypto.randomUUID()}`,
+        action,
+        details,
+        performedBy: `${me.name} (${me.employeeId})`,
+        timestamp: new Date().toISOString(),
+      };
+      db_system_audit_logs.unshift(log);
+      res.json(log);
+    } catch (err: any) {
+      // ไม่ส่ง err.message กลับ client — บันทึกรายละเอียดไว้ที่ server log เท่านั้น
+      console.error("POST /api/system_audit_logs failed:", err);
+      res.status(500).json({
+        error: "AUDIT_LOG_ERROR",
+        message: "ไม่สามารถบันทึกประวัติกิจกรรมได้ กรุณาลองใหม่อีกครั้ง",
+      });
+    }
+  });
 
   // --- Serve Frontend Application seamlessly ---
   if (process.env.NODE_ENV !== "production") {

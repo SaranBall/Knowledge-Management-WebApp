@@ -382,21 +382,18 @@ export default function App() {
 
   // Member Management Handlers with Compliance Audit Logs & Lifecycle support
   const addAuditLog = async (action: string, details: string) => {
-    const adminDetail = currentUser
-      ? `${currentUser.name} (${currentUser.employeeId})`
-      : "ระบบอัตโนมัติ RMP";
-    const newLog: SystemAuditLog = {
-      id: `log-${Date.now()}`,
-      action,
-      details,
-      performedBy: adminDetail,
-      timestamp: new Date().toISOString(),
-    };
-    setSystemAuditLogs((prev) => [newLog, ...prev]);
     try {
-      await api.createAuditLog(newLog);
+      // SEC-04: ส่งเฉพาะ action/details — id, timestamp, performedBy มาจาก server
+      const saved = await api.createAuditLog({
+        action,
+        details,
+      } as SystemAuditLog);
+      setSystemAuditLogs((prev) => [saved, ...prev]);
+      return saved;
     } catch (e) {
-      console.error(e);
+      // ไม่เพิ่ม Log ลง state เมื่อ server บันทึกไม่สำเร็จ (เดิมแสดงเหมือนบันทึกแล้ว)
+      console.error("Failed to record audit log:", e);
+      return null;
     }
   };
 
@@ -419,7 +416,9 @@ export default function App() {
 
   const handleAddUser = async (user: UserType) => {
     const newUser = { ...user, status: user.status || "Active" };
-    setUsers((prev) => [...prev, newUser]);
+    // ห้ามเก็บ PIN แบบ Plaintext ใน React state — ส่งให้ Server เท่านั้น
+    const { password: _plainPin, ...safeNewUser } = newUser;
+    setUsers((prev) => [...prev, safeNewUser]);
     addAuditLog(
       "APPROVE_MEMBER",
       `อนุมัติพนักงานใหม่และให้สิทธิ์เข้าใช้ระบบ: ${user.name} (${user.employeeId}) แผนก ${user.departmentId} สิทธิ์ ${user.role}`,
@@ -456,13 +455,21 @@ export default function App() {
         ? changes.join(", ")
         : "แก้ไขรหัสผ่าน PIN หรือเบอร์ติดต่อ";
 
-    setUsers((prev) =>
-      prev.map((u) => (u.id === updatedUsr.id ? { ...u, ...updatedUsr } : u)),
+    // ห้ามเก็บ PIN แบบ Plaintext ใน React state — ส่งให้ Server เท่านั้น
+    const { password: _plainPin, ...safeUpdatedUsr } = updatedUsr;
+    setUsers(
+      (prev) =>
+        +prev.map((u) => {
+          if (u.id !== updatedUsr.id) return u;
+
+          // ป้องกัน PIN ที่อาจค้างใน State เดิมไม่ให้กลับเข้า State
+          const { password: _existingPin, ...safeUser } = u;
+          return { ...safeUser, ...safeUpdatedUsr };
+        }),
     );
     // Sync current session details on identical ID
     if (currentUser && currentUser.id === updatedUsr.id) {
-      const { password: _plainPin, ...safeUser } = updatedUsr;
-      setCurrentUser({ ...currentUser, ...safeUser });
+      setCurrentUser({ ...currentUser, ...safeUpdatedUsr });
     }
     addAuditLog(
       "UPDATE_MEMBER",
