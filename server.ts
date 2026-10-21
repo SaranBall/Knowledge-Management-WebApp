@@ -1149,17 +1149,79 @@ async function startServer() {
     res.send(meta.buffer);
   });
 
+  // SEC-05: Guard ของ /api/chat — จำกัดความยาว query และอัตราคำขอต่อผู้ใช้
+  // (in-memory, Fixed Window, แยกตาม req.authUser.id ไม่ใช้ IP)
+  const CHAT_QUERY_MAX_LENGTH = 1000;
+  const CHAT_RATE_LIMIT_MAX = 10;
+  const CHAT_RATE_LIMIT_WINDOW_MS = 60_000;
+  const chatRateLimits = new Map<
+    string,
+    { count: number; windowStart: number }
+  >();
+
+  // ตรวจและใช้โควตา 1 คำขอ — เรียกหลัง validation ผ่านแล้วเท่านั้น
+  function consumeChatQuota(userId: string): {
+    allowed: boolean;
+    retryAfterSec: number;
+  } {
+    const now = Date.now();
+
+    // ล้างเฉพาะ window ที่หมดอายุแล้ว (ไม่แตะ window ที่ยังใช้งานอยู่)
+    for (const [id, entry] of chatRateLimits) {
+      if (now - entry.windowStart >= CHAT_RATE_LIMIT_WINDOW_MS) {
+        chatRateLimits.delete(id);
+      }
+    }
+
+    const entry = chatRateLimits.get(userId);
+    if (!entry) {
+      chatRateLimits.set(userId, { count: 1, windowStart: now });
+      return { allowed: true, retryAfterSec: 0 };
+    }
+
+    if (entry.count >= CHAT_RATE_LIMIT_MAX) {
+      // เกิน limit: ไม่เพิ่ม counter และไม่ขยับ window
+      const remainingMs = entry.windowStart + CHAT_RATE_LIMIT_WINDOW_MS - now;
+      return {
+        allowed: false,
+        retryAfterSec: Math.max(1, Math.ceil(remainingMs / 1000)),
+      };
+    }
+
+    entry.count += 1;
+    return { allowed: true, retryAfterSec: 0 };
+  }
+
   // --- Secure Server-side Semantic RAG API Endpoint (ต้อง login) ---
   // Server-authoritative context: client ห้ามเป็น authority ของ context/documents/courses/identity
   app.post("/api/chat", requireAuth, async (req, res) => {
     try {
-      const { query } = req.body;
-      if (!query || typeof query !== "string") {
-        return res.status(400).json({ error: "Query is required" });
+      const rawQuery = (req.body ?? {}).query;
+      const query = typeof rawQuery === "string" ? rawQuery.trim() : "";
+      if (!query) {
+        return res.status(400).json({
+          error: "INVALID_QUERY",
+          message: "กรุณาพิมพ์คำถามก่อนส่ง",
+        });
+      }
+      if (query.length > CHAT_QUERY_MAX_LENGTH) {
+        return res.status(400).json({
+          error: "INVALID_QUERY",
+          message: `คำถามยาวเกินกำหนด (ไม่เกิน ${CHAT_QUERY_MAX_LENGTH} ตัวอักษร)`,
+        });
       }
 
       const currentDbUser = req.authUser!;
 
+      // SEC-05: ผ่าน validation แล้วจึงนับโควตา (400 ไม่นับ) และตรวจก่อนประกอบ context/เรียก Gemini
+      const quota = consumeChatQuota(currentDbUser.id);
+      if (!quota.allowed) {
+        res.setHeader("Retry-After", String(quota.retryAfterSec));
+        return res.status(429).json({
+          error: "RATE_LIMITED",
+          message: `ส่งคำถามถี่เกินไป กรุณารออีก ${quota.retryAfterSec} วินาทีแล้วลองใหม่อีกครั้ง`,
+        });
+      }
       // Context is built purely from authorized resources on the server
       const authorizedDocs = db_documents.filter(
         (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
@@ -1283,11 +1345,10 @@ You must return your response conforming to the JSON schema specified in respons
       res.json(parsedData);
     } catch (error: any) {
       console.error("Gemini RAG Server Error:", error);
+      // SEC-05: ไม่ส่ง error.message กลับ client — รายละเอียดอยู่ใน server log เท่านั้น
       res.status(500).json({
         error: "RAG Server Error",
-        message:
-          error.message ||
-          "An unexpected error occurred during semantic retrieval.",
+        message: "ระบบค้นหาความรู้ขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้ง",
       });
     }
   });

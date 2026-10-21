@@ -192,7 +192,6 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     status: UserStatus;
     startDate: string;
     avatarUrl: string;
-    pin: string;
   } | null>(null);
 
   const startEditing = (u: User) => {
@@ -225,12 +224,6 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     if (!editForm || !editForm.name || !editForm.email) return;
     if (!editForm.avatarUrl) {
       alert("❌ กรุณาอัปโหลดรูปภาพโปรไฟล์จริงของพนักงานก่อนบันทึก");
-      return;
-    }
-
-    const cleanPin = newUser.pin.trim();
-    if (cleanPin.length !== 6 || !/^\d+$/.test(cleanPin)) {
-      alert("❌ รหัสผ่าน PIN ต้องเป็นตัวเลข 6 หลักเท่านั้นครับ");
       return;
     }
 
@@ -4156,11 +4149,11 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                         password: e.target.value.replace(/\D/g, ""),
                       })
                     }
-                    required
                     className="w-full bg-amber-50/50 border border-amber-200 p-2.5 rounded-xl text-xs font-mono font-black text-amber-800 text-center tracking-widest focus:outline-none focus:ring-1 focus:ring-[#15329c]"
                   />
                   <p className="text-[8.5px] text-amber-600">
-                    *ระบุเฉพาะตัวเลข 6 หลักจริง
+                    *เว้นว่างหากไม่ต้องการเปลี่ยน PIN (หากกรอก ต้องเป็นตัวเลข 6
+                    หลัก)
                   </p>
                 </div>
               </div>
