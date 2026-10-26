@@ -21,7 +21,10 @@ import {
   INITIAL_CONTACT_REQUESTS,
   INITIAL_EMPLOYEE_MASTER,
 } from "./src/data/initialData";
-import { DEFAULT_AVATAR_URL } from "./src/utils/assets";
+import {
+  DEFAULT_AVATAR_URL,
+  DEFAULT_LESSON_IMAGE_URL,
+} from "./src/utils/assets";
 import {
   getDepartmentById,
   getMainDepartmentOf,
@@ -782,6 +785,7 @@ async function startServer() {
     uploadedBy: string; // employeeId ของผู้อัปโหลด
     restricted: boolean; // true = เฉพาะ Admin หรือผู้อัปโหลดเองเท่านั้นที่อ่านได้ (สำหรับไฟล์ QP)
     documentId?: string; // id ของ Document ที่ไฟล์นี้ผูกอยู่ (Server-owned binding)
+    courseId?: string; // id ของ Course ที่ไฟล์สื่อนี้ผูกอยู่ (Server-owned binding) หรือ marker "deleted:<id>" / "replaced:<id>"
     uploadedAt: string;
   }
   const uploadedFiles = new Map<string, UploadedFileMeta>();
@@ -807,6 +811,7 @@ async function startServer() {
             uploadedBy: raw.uploadedBy || "",
             restricted: !!raw.restricted,
             documentId: raw.documentId || undefined,
+            courseId: raw.courseId || undefined,
             uploadedAt: raw.uploadedAt || new Date().toISOString(),
           };
           uploadedFiles.set(storedName, meta);
@@ -833,6 +838,7 @@ async function startServer() {
       uploadedBy: existing.uploadedBy,
       restricted: existing.restricted,
       documentId: existing.documentId,
+      courseId: existing.courseId,
       uploadedAt: existing.uploadedAt,
     });
 
@@ -845,6 +851,292 @@ async function startServer() {
         console.warn("Failed to write sidecar:", dir, e);
       }
     });
+  }
+  // ============================================================
+  // --- BUG-04: Course Media binding ---
+  // ============================================================
+  const COURSE_ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
+  const STORED_UPLOAD_NAME_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,10}$/i;
+
+  function sidecarJsonOf(meta: UploadedFileMeta): string {
+    return JSON.stringify({
+      mimeType: meta.mimeType,
+      uploadedBy: meta.uploadedBy,
+      restricted: meta.restricted,
+      documentId: meta.documentId,
+      courseId: meta.courseId,
+      uploadedAt: meta.uploadedAt,
+    });
+  }
+
+  // ตั้งค่า courseId ของไฟล์แบบเข้มงวด:
+  // - เขียน sidecar ลงทุก directory ที่ "มีไฟล์จริงอยู่" (public/uploads และ/หรือ dist/uploads)
+  // - คืน true เฉพาะเมื่อเขียนสำเร็จครบทุก directory เหล่านั้น
+  // - ถ้าล้มเหลวบางที่: คืนค่า memory กลับ และเขียน sidecar เดิมทับ directory ที่เขียนสำเร็จไปแล้ว (best-effort)
+  //   หากกู้คืนไม่สำเร็จ จะ log ชื่อไฟล์และ directory ที่ต้องตรวจสอบด้วยตนเอง
+  // หมายเหตุ: ไม่ใช่ atomic transaction — เป็นเพียง best-effort rollback
+  function setFileCourseBinding(
+    storedName: string,
+    courseId: string | undefined,
+  ): boolean {
+    const meta = loadSidecar(storedName);
+    if (!meta) return false;
+    if (meta.courseId === courseId) return true;
+
+    const targets = uploadsDirs.filter((dir) =>
+      fs.existsSync(path.join(dir, storedName)),
+    );
+    if (targets.length === 0) {
+      console.error(
+        `[COURSE_MEDIA] ไม่พบไฟล์ ${storedName} บนดิสก์ จึงบันทึก sidecar ไม่ได้`,
+      );
+      return false;
+    }
+
+    const previousCourseId = meta.courseId;
+    const previousJson = sidecarJsonOf(meta);
+    meta.courseId = courseId;
+    const nextJson = sidecarJsonOf(meta);
+
+    const written: string[] = [];
+    let failed = false;
+    for (const dir of targets) {
+      try {
+        fs.writeFileSync(path.join(dir, `${storedName}.meta.json`), nextJson);
+        written.push(dir);
+      } catch (e) {
+        failed = true;
+        console.error(
+          `[COURSE_MEDIA] เขียน sidecar ไม่สำเร็จ: ${storedName} ใน ${dir}`,
+          e,
+        );
+      }
+    }
+
+    if (!failed) return true;
+
+    meta.courseId = previousCourseId;
+    for (const dir of written) {
+      try {
+        fs.writeFileSync(
+          path.join(dir, `${storedName}.meta.json`),
+          previousJson,
+        );
+      } catch (e) {
+        console.error(
+          `[COURSE_MEDIA] กู้คืน sidecar ไม่สำเร็จ ต้องตรวจสอบด้วยตนเอง: ${storedName} ใน ${dir}`,
+          e,
+        );
+      }
+    }
+    return false;
+  }
+
+  // สแกน lessons[].mediaUrl: คืนชื่อไฟล์ local (/uploads/<uuid>.<ext>) ที่อ้างถึง
+  // - URL ภายนอก http(s) และ data URL ที่ตรงกับ DEFAULT_LESSON_IMAGE_URL ของระบบเท่านั้น ผ่านได้และไม่มี binding
+  // - รูปแบบอื่น (เช่น javascript:, ../ ใน path) ถูกปฏิเสธ
+  type MediaScan =
+    | { ok: true; files: Set<string> }
+    | { ok: false; message: string };
+  function scanLessonMedia(lessons: unknown): MediaScan {
+    const files = new Set<string>();
+    if (lessons === undefined || lessons === null) return { ok: true, files };
+    if (!Array.isArray(lessons)) {
+      return {
+        ok: false,
+        message: "โครงสร้างบทเรียนไม่ถูกต้อง (lessons ต้องเป็นอาร์เรย์)",
+      };
+    }
+    for (const lesson of lessons) {
+      if (!lesson || typeof lesson !== "object") {
+        return { ok: false, message: "ข้อมูลบทเรียนบางรายการไม่ถูกต้อง" };
+      }
+      const raw = (lesson as { mediaUrl?: unknown }).mediaUrl;
+      if (raw === undefined || raw === null || raw === "") continue;
+      if (typeof raw !== "string") {
+        return { ok: false, message: "ลิงก์สื่อการสอนต้องเป็นข้อความ" };
+      }
+      const url = raw.trim();
+      if (url.startsWith("/uploads/")) {
+        const name = url.slice("/uploads/".length).split("?")[0];
+        if (!STORED_UPLOAD_NAME_RE.test(name)) {
+          return { ok: false, message: "ลิงก์ไฟล์สื่อในระบบไม่ถูกต้อง" };
+        }
+        files.add(name);
+      } else if (
+        /^https?:\/\//i.test(url) ||
+        url === DEFAULT_LESSON_IMAGE_URL
+      ) {
+        continue;
+      } else {
+        return {
+          ok: false,
+          message:
+            "ลิงก์สื่อการสอนต้องเป็นไฟล์ที่อัปโหลดในระบบ หรือ URL แบบ http/https เท่านั้น",
+        };
+      }
+    }
+    return { ok: true, files };
+  }
+
+  // ไฟล์ต้องมีอยู่จริงบนดิสก์อย่างน้อยหนึ่ง directory (ตรรกะเดียวกับ targets ใน setFileCourseBinding)
+  // ใช้ตรวจก่อนสร้าง binding ใหม่ เพราะ loadSidecar() อาจคืนค่าจาก cache ใน memory แม้ไฟล์บนดิสก์หายไปแล้ว
+  function uploadedFileExistsOnDisk(storedName: string): boolean {
+    return uploadsDirs.some((dir) => fs.existsSync(path.join(dir, storedName)));
+  }
+
+  type CourseMediaFailure = {
+    ok: false;
+    status: number;
+    error: string;
+    message: string;
+  };
+
+  // ผูก/ปล่อย binding ของไฟล์สื่อตาม lifecycle ของ Course (create / update / delete)
+  // ลำดับ: ตรวจสอบทุกไฟล์ก่อน (ยังไม่เขียนอะไร) → ผูกไฟล์ใหม่ → ปล่อยไฟล์ที่เลิกใช้
+  // ถ้าขั้นใดล้มเหลว จะย้อนการเปลี่ยนแปลงที่ทำไปแล้วใน request นี้ และคืน failure (caller ต้องไม่บันทึก Course)
+  // - update: ไฟล์ที่อ้างอยู่เดิมในคอร์สนี้ (ไฟล์เก่าก่อนมี binding) ไม่ถูกผูกย้อนหลัง
+  // - ปล่อยเฉพาะไฟล์ที่ sidecar ผูกกับคอร์สนี้จริง → marker "replaced:<id>" / "deleted:<id>"
+  function applyCourseMediaChange(
+    courseId: string,
+    oldFiles: Set<string>,
+    newFiles: Set<string>,
+    user: CurrentUserAuth,
+    mode: "create" | "update" | "delete",
+  ): { ok: true } | CourseMediaFailure {
+    const refuse = (
+      status: number,
+      error: string,
+      message: string,
+    ): CourseMediaFailure => ({ ok: false, status, error, message });
+
+    const toBind: string[] = [];
+    if (mode !== "delete") {
+      for (const name of newFiles) {
+        const meta = loadSidecar(name);
+        // ต้องมี sidecar เสมอ — ไฟล์ที่ไม่มี sidecar ห้ามผ่านแม้ Course เดิมจะอ้างถึง
+        if (!meta) {
+          return refuse(
+            404,
+            "FILE_NOT_FOUND",
+            "ไม่พบไฟล์สื่อที่แนบในระบบ กรุณาอัปโหลดใหม่",
+          );
+        }
+        // ไฟล์ของเอกสาร/ไฟล์ restricted ห้ามผ่านเด็ดขาด แม้ถูกอ้างอยู่ใน Course เดิมแล้ว
+        if (meta.documentId || meta.restricted) {
+          return refuse(
+            409,
+            "FILE_NOT_BINDABLE",
+            "ไฟล์นี้ถูกใช้กับเอกสารในระบบแล้ว ไม่สามารถใช้เป็นสื่อของหลักสูตรได้",
+          );
+        }
+        if (mode === "update") {
+          if (meta.courseId === courseId) continue; // ผูกกับคอร์สนี้อยู่แล้ว
+          // อ้างอยู่เดิมและยังไม่ผูกกับหลักสูตรใด → ไม่ผูกย้อนหลัง
+          if (oldFiles.has(name) && !meta.courseId) continue;
+        }
+        if (meta.courseId) {
+          return refuse(
+            409,
+            "DUPLICATE_FILE_BINDING",
+            "ไฟล์นี้ถูกผูกกับหลักสูตรอื่นแล้ว ไม่สามารถนำมาใช้ซ้ำข้ามหลักสูตรได้",
+          );
+        }
+        if (meta.uploadedBy !== user.employeeId && user.role !== "Admin") {
+          return refuse(
+            403,
+            "FORBIDDEN",
+            "คุณไม่มีสิทธิ์นำไฟล์ที่ผู้อื่นอัปโหลดมาใช้เป็นสื่อของหลักสูตร",
+          );
+        }
+        // จะสร้าง binding ใหม่ → ไฟล์ต้องมีอยู่จริงบนดิสก์
+        if (!uploadedFileExistsOnDisk(name)) {
+          return refuse(
+            404,
+            "FILE_NOT_FOUND",
+            "ไม่พบไฟล์สื่อที่แนบในระบบ กรุณาอัปโหลดใหม่",
+          );
+        }
+        toBind.push(name);
+      }
+    }
+
+    const toRelease: string[] = [];
+    for (const name of oldFiles) {
+      if (newFiles.has(name)) continue;
+      if (loadSidecar(name)?.courseId === courseId) toRelease.push(name);
+    }
+
+    const journal: Array<{ name: string; previous: string | undefined }> = [];
+    const rollback = () => {
+      for (const entry of journal.reverse()) {
+        if (!setFileCourseBinding(entry.name, entry.previous)) {
+          console.error(
+            `[COURSE_MEDIA] ROLLBACK FAILED: ${entry.name} (ควรเป็น courseId=${entry.previous ?? "unbound"}) ต้องตรวจสอบไฟล์ .meta.json ด้วยตนเอง`,
+          );
+        }
+      }
+    };
+
+    const releaseMarker =
+      mode === "delete" ? `deleted:${courseId}` : `replaced:${courseId}`;
+    const steps: Array<{ name: string; next: string }> = [
+      ...toBind.map((name) => ({ name, next: courseId })),
+      ...toRelease.map((name) => ({ name, next: releaseMarker })),
+    ];
+    for (const step of steps) {
+      const previous = loadSidecar(step.name)?.courseId;
+      if (!setFileCourseBinding(step.name, step.next)) {
+        rollback();
+        return refuse(
+          500,
+          "COURSE_MEDIA_BINDING_FAILED",
+          "บันทึกการผูกไฟล์สื่อกับหลักสูตรไม่สำเร็จ ระบบไม่ได้บันทึกการเปลี่ยนแปลง กรุณาลองใหม่อีกครั้ง",
+        );
+      }
+      journal.push({ name: step.name, previous });
+    }
+    return { ok: true };
+  }
+
+  // สิทธิ์เข้าถึงไฟล์ที่ผูกกับ Course: คืน null = อนุญาต
+  // - marker deleted:/replaced: หรือไม่พบ Course ที่ใช้งานอยู่ = orphan → ปฏิเสธ
+  // - Course ที่ยังไม่ Approved: เฉพาะ Admin/Editor
+  // - Course ที่ Approved: ผู้ใช้ที่ login (และบัญชีใช้งานได้) เปิดได้ — ตรงกับ GET /api/courses ที่ให้ทุก role เห็นคอร์สที่อนุมัติแล้ว
+  function courseFileDenial(
+    user: CurrentUserAuth,
+    meta: UploadedFileMeta,
+  ): { status: number; body: { error: string; message: string } } | null {
+    const ref = meta.courseId || "";
+    const course =
+      ref.startsWith("deleted:") || ref.startsWith("replaced:")
+        ? undefined
+        : db_courses.find((c) => c.id === ref);
+    if (!course) {
+      return {
+        status: 403,
+        body: {
+          error: "ORPHANED_FILE",
+          message:
+            "ไม่พบหลักสูตรที่ผูกกับไฟล์นี้ หรือหลักสูตรถูกลบ/เปลี่ยนไฟล์แล้ว",
+        },
+      };
+    }
+    if (
+      course.isApproved !== true &&
+      user.role !== "Admin" &&
+      user.role !== "Editor"
+    ) {
+      return {
+        status: 403,
+        body: {
+          error: "COURSE_NOT_APPROVED",
+          message: "หลักสูตรนี้ยังไม่ได้รับการอนุมัติ",
+        },
+      };
+    }
+    return null;
   }
 
   const ALLOWED_UPLOAD_EXTENSIONS: Record<string, string> = {
@@ -899,6 +1191,7 @@ async function startServer() {
           uploadedBy: req.authUser!.employeeId,
           restricted: false,
           documentId: undefined, // First binding: ยังไม่ได้ผูกกับเอกสารใด
+          courseId: undefined,
           uploadedAt,
         };
         uploadedFiles.set(storedName, fileMeta);
@@ -908,6 +1201,7 @@ async function startServer() {
           uploadedBy: req.authUser!.employeeId,
           mimeType: resolvedMimeType,
           documentId: null,
+          courseId: null,
           uploadedAt,
         });
 
@@ -1007,6 +1301,11 @@ async function startServer() {
           message:
             "ระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์การดาวน์โหลดเฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
         });
+      }
+    } else if (meta.courseId) {
+      const denial = courseFileDenial(currentDbUser, meta);
+      if (denial) {
+        return res.status(denial.status).json(denial.body);
       }
     } else {
       // Unbound file: only uploader or Admin can sign/access
@@ -1130,6 +1429,11 @@ async function startServer() {
           message:
             "ระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
         });
+      }
+    } else if (meta.courseId) {
+      const denial = courseFileDenial(currentDbUser, meta);
+      if (denial) {
+        return res.status(denial.status).json(denial.body);
       }
     } else {
       if (
@@ -1905,7 +2209,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             });
           }
           // Invariant 5 & 7: If file already has a documentId (active or deleted) -> 409 Conflict
-          if (fileMeta.documentId) {
+          if (fileMeta.documentId || fileMeta.courseId) {
             return res.status(409).json({
               error: "DUPLICATE_FILE_BINDING",
               message:
@@ -2206,8 +2510,59 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     (req, res) => {
       try {
         const newCourse = req.body;
-        if (!newCourse.id) {
-          newCourse.id = `c-${Date.now()}`;
+        if (
+          !newCourse ||
+          typeof newCourse !== "object" ||
+          Array.isArray(newCourse)
+        ) {
+          return res.status(400).json({
+            error: "INVALID_COURSE",
+            message: "ข้อมูลหลักสูตรไม่ถูกต้อง",
+          });
+        }
+        if (
+          newCourse.id === undefined ||
+          newCourse.id === null ||
+          newCourse.id === ""
+        ) {
+          let generatedId = `c-${Date.now()}`;
+          while (db_courses.some((c) => c.id === generatedId)) {
+            generatedId = `c-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+          }
+          newCourse.id = generatedId;
+        } else if (
+          typeof newCourse.id !== "string" ||
+          !COURSE_ID_RE.test(newCourse.id)
+        ) {
+          return res.status(400).json({
+            error: "INVALID_COURSE_ID",
+            message: "รหัสหลักสูตรไม่ถูกต้อง",
+          });
+        }
+        if (db_courses.some((c) => c.id === newCourse.id)) {
+          return res.status(409).json({
+            error: "DUPLICATE_COURSE_ID",
+            message: "รหัสหลักสูตรนี้มีอยู่ในระบบแล้ว",
+          });
+        }
+        const mediaScan = scanLessonMedia(newCourse.lessons);
+        if (mediaScan.ok === false) {
+          return res.status(400).json({
+            error: "INVALID_COURSE_MEDIA",
+            message: mediaScan.message,
+          });
+        }
+        const mediaResult = applyCourseMediaChange(
+          newCourse.id,
+          new Set<string>(),
+          mediaScan.files,
+          req.authUser!,
+          "create",
+        );
+        if (mediaResult.ok === false) {
+          return res
+            .status(mediaResult.status)
+            .json({ error: mediaResult.error, message: mediaResult.message });
         }
         newCourse.isApproved = req.authUser!.role === "Admin";
         newCourse.createdByRole = req.authUser!.role;
@@ -2229,6 +2584,26 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         if (!existing) {
           return res.status(404).json({ error: "NOT_FOUND" });
         }
+        const mediaScan = scanLessonMedia(req.body?.lessons);
+        if (mediaScan.ok === false) {
+          return res.status(400).json({
+            error: "INVALID_COURSE_MEDIA",
+            message: mediaScan.message,
+          });
+        }
+        const oldScan = scanLessonMedia(existing.lessons);
+        const mediaResult = applyCourseMediaChange(
+          id,
+          oldScan.ok ? oldScan.files : new Set<string>(),
+          mediaScan.files,
+          req.authUser!,
+          "update",
+        );
+        if (mediaResult.ok === false) {
+          return res
+            .status(mediaResult.status)
+            .json({ error: mediaResult.error, message: mediaResult.message });
+        }
         const isAdmin = req.authUser!.role === "Admin";
         const updatedCourse: Course = {
           ...req.body,
@@ -2249,6 +2624,22 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     (req, res) => {
       try {
         const { id } = req.params;
+        const existing = db_courses.find((c) => c.id === id);
+        if (existing) {
+          const oldScan = scanLessonMedia(existing.lessons);
+          const mediaResult = applyCourseMediaChange(
+            id,
+            oldScan.ok ? oldScan.files : new Set<string>(),
+            new Set<string>(),
+            req.authUser!,
+            "delete",
+          );
+          if (mediaResult.ok === false) {
+            return res
+              .status(mediaResult.status)
+              .json({ error: mediaResult.error, message: mediaResult.message });
+          }
+        }
         db_courses = db_courses.filter((c) => c.id !== id);
         res.json({ success: true });
       } catch (err: any) {
