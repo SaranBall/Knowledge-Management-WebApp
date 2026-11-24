@@ -3903,7 +3903,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       <span className="font-mono text-[9px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-150 font-bold uppercase">
                         Course Code: {selectedCourse.id}
                       </span>
-                      {selectedCourse.targetPositions.map((pos) => (
+                      {(Array.isArray(selectedCourse.targetPositions) ? selectedCourse.targetPositions : []).map((pos) => (
                         <span
                           key={pos}
                           className="bg-slate-105 text-slate-600 text-[9px] font-bold px-1.5 py-0.5 rounded-full border"
@@ -4037,9 +4037,11 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                           onClick={() => {
                             setEditingCourse({
                               ...selectedCourse,
-                              targetPositionsStr: selectedCourse.targetPositions
+                              targetPositionsStr: Array.isArray(selectedCourse.targetPositions)
                                 ? selectedCourse.targetPositions.join(", ")
-                                : "",
+                                : typeof selectedCourse.targetPositions === "string"
+                                  ? selectedCourse.targetPositions
+                                  : "",
                               lessonsStr: JSON.stringify(
                                 selectedCourse.lessons,
                                 null,
