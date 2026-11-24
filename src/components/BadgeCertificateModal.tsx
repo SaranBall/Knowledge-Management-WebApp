@@ -14,6 +14,14 @@ import {
 } from "lucide-react";
 import { User, Course } from "../types";
 import { getDepartmentById } from "../utils/departmentUtils";
+import { formatScore } from "../utils/quizRules";
+
+// C4: แสดงคะแนน 2 ตำแหน่ง (P-25 / ODR-01) เฉพาะค่าที่เป็น finite number — ค่าอื่นแสดงตามเดิม (U-02)
+function displayScore<T>(score: T): string | T {
+  return typeof score === "number" && Number.isFinite(score)
+    ? formatScore(score)
+    : score;
+}
 
 interface BadgeCertificateModalProps {
   isOpen: boolean;
@@ -501,7 +509,7 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
                 </h4>
                 <div className="flex items-center justify-center gap-4 text-[10.5px] font-mono mt-1 pt-1.5 border-t border-slate-200/60 font-semibold">
                   <span className="text-emerald-700">
-                    คะแนนประเมินสัมฤทธิผล: {score}%
+                    คะแนนประเมินสัมฤทธิผล: {displayScore(score)}%
                   </span>
                   <span className="text-slate-300">|</span>
                   <span className="text-indigo-700">
@@ -548,7 +556,8 @@ export const BadgeCertificateModal: React.FC<BadgeCertificateModalProps> = ({
 
               {/* Dynamic bottom stamp for confirmation */}
               <div className="text-[8px] font-mono text-slate-400 text-center pt-2 select-none">
-                VERIFIED SECURITY CODE: RMP-MD-{user.employeeId}-{score}-
+                VERIFIED SECURITY CODE: RMP-MD-{user.employeeId}-
+                {displayScore(score)}-
                 {dateStr}
               </div>
             </div>

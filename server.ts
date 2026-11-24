@@ -38,6 +38,13 @@ import {
   calculateLeaderboard,
 } from "./src/utils/gamificationUtils";
 import {
+  buildSubmissionGrading,
+  computeQuizScore,
+  formatScore,
+  parseSubmittedAnswers,
+  resolveEssayTotal,
+} from "./src/utils/quizRules";
+import {
   User as UserType,
   DocumentItem,
   Course,
@@ -480,39 +487,32 @@ async function startServer() {
   let db_quiz_submissions: QuizSubmission[] = [];
   let db_search_resolutions: SearchResolution[] = [];
 
-  // --- Quiz grading helpers: server เป็นผู้ตัดสินคะแนนเท่านั้น ไม่เชื่อค่าที่ client ส่ง ---
-  // ตรวจข้อที่ตรวจอัตโนมัติได้ (SingleChoice / TrueFalse / Matching) — Essay ไม่ผ่านฟังก์ชันนี้
-  function isObjectiveCorrect(
-    q: Course["quiz"][number],
-    answer: string | undefined,
-  ): boolean {
-    if (typeof answer !== "string" || !answer) return false;
-    if ((q.type || "SingleChoice") === "Matching") {
-      try {
-        const userMap = JSON.parse(answer);
-        const correctMap = JSON.parse(q.correctAnswer || "{}");
-        const keys = Object.keys(correctMap);
-        return (
-          keys.length > 0 && keys.every((k) => userMap[k] === correctMap[k])
-        );
-      } catch {
-        return false;
-      }
-    }
-    return answer === q.correctAnswer;
-  }
+  // --- Quiz: server เป็นผู้ตัดสินคะแนนเท่านั้น ไม่เชื่อค่าที่ client ส่ง ---
+  // กฎตรวจ/คิดคะแนนอยู่ที่ src/utils/quizRules.ts (ใช้ร่วมกับ Reviewer preview)
 
-  // ปิดผลสอบ: สร้าง exam_result และตั้ง Completed (เมื่อผ่าน) — เรียกเมื่อไม่มี Essay
-  // หรือเมื่อผู้ตรวจให้คะแนน Essay ครบแล้ว (ก้อนที่ 2 จะต่อ XP/ใบเซอร์ในฟังก์ชันนี้)
+  // D3 / U-06: Generic 500 — ตอนนี้ใช้เฉพาะ Fail closed ของ D1 (catch จุดอื่นยังไม่เปลี่ยน — U-08)
+  const QUIZ_INTERNAL_ERROR = {
+    error: "INTERNAL_ERROR",
+    message: "เกิดข้อผิดพลาดภายในระบบ",
+  } as const;
+
+  // ปิดผลสอบ: สร้าง exam_result และตั้ง Completed (เมื่อผ่าน) — เรียกเมื่อไม่มี Essay ที่ตอบแล้ว
+  // หรือเมื่อผู้ตรวจให้คะแนน Essay ครบแล้ว
+  // `essayTotal` ต้องเป็นค่าที่ทราบแน่นอน (D1): Submit ส่งค่าที่เพิ่งนับ, Grade ส่งผลของ resolveEssayTotal
+  // ห้ามใช้ essayQuestionIds.length แทน (P-21: ไม่รวม Essay ที่ไม่ได้ตอบ)
   function finalizeSubmission(
     sub: QuizSubmission,
     course: Course,
+    essayTotal: number,
     reviewerEmployeeId?: string,
   ) {
     const essayCorrect = sub.essayGrades.filter((g) => g.correct).length;
-    const total = sub.autoTotal + sub.essayQuestionIds.length;
-    const score = Math.round(((sub.autoCorrect + essayCorrect) / total) * 100);
-    const pass = score >= course.minPassScore;
+    // P-25 / ODR-01 / XP perfect — throw RangeError ถ้า Precondition ไม่ผ่าน (ก่อนแก้ข้อมูลใด ๆ)
+    const { score, pass, perfect } = computeQuizScore({
+      correctCount: sub.autoCorrect + essayCorrect,
+      totalCount: sub.autoTotal + essayTotal,
+      minPassScore: course.minPassScore,
+    });
     const nowIso = new Date().toISOString();
 
     sub.status = "Finalized";
@@ -571,7 +571,8 @@ async function startServer() {
 
       // XP: ให้เฉพาะการสอบผ่านครั้งแรกของหลักสูตรนั้น กันเก็บ XP ซ้ำจากการสอบซ้ำ
       if (!passedBefore) {
-        const isPerfect = score === 100;
+        // XP perfect = ตอบถูกทุกข้อ (totalCount > 0 && correctCount === totalCount) ไม่ใช่ score === 100
+        const isPerfect = perfect;
         db_km_contribution_logs.unshift({
           id: `km-log-${crypto.randomUUID()}`,
           userId: sub.userId,
@@ -580,7 +581,7 @@ async function startServer() {
           activityType: isPerfect ? "COURSE_PERFECT" : "COURSE_PASS",
           description: isPerfect
             ? `อบรมผ่านหลักสูตร "${sub.courseTitle}" ด้วยคะแนนเต็ม 100%`
-            : `สอบผ่านหลักสูตร "${sub.courseTitle}" ด้วยคะแนน ${score}%`,
+            : `สอบผ่านหลักสูตร "${sub.courseTitle}" ด้วยคะแนน ${formatScore(score)}%`,
           timestamp: nowIso,
         });
       }
@@ -620,6 +621,8 @@ async function startServer() {
         });
       }
     }
+
+    return { score, pass };
   }
 
   // ตัดเฉลยออกจากคอร์สก่อนส่งให้ Viewer
@@ -2694,27 +2697,22 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         });
       }
 
-      const rawAnswers =
-        req.body.answers && typeof req.body.answers === "object"
-          ? req.body.answers
-          : {};
-      const answers: { [qId: string]: string } = {};
-      const essayQuestionIds: string[] = [];
-      let autoCorrect = 0;
-      let autoTotal = 0;
-      course.quiz.forEach((q) => {
-        const a =
-          typeof rawAnswers[q.id] === "string"
-            ? rawAnswers[q.id].slice(0, 5000)
-            : "";
-        answers[q.id] = a;
-        if ((q.type || "SingleChoice") === "Essay") {
-          essayQuestionIds.push(q.id);
-        } else {
-          autoTotal++;
-          if (isObjectiveCorrect(q, a)) autoCorrect++;
-        }
-      });
+      // P-21 + ODR-03: ตรวจรูปร่าง answers หลัง ALREADY_PENDING; absent/null = ไม่มีคำตอบ
+      const parsed = parseSubmittedAnswers(req.body.answers);
+      if (!parsed.ok) {
+        return res.status(400).json({
+          error: "INVALID_ANSWERS",
+          message: "รูปแบบคำตอบไม่ถูกต้อง",
+        });
+      }
+      // Truncate → Unanswered (ได้ 0) → ตรวจถูก/ผิด; Essay ที่ไม่ได้ตอบไม่เข้า essayQuestionIds
+      const {
+        answers,
+        essayQuestionIds,
+        autoCorrect,
+        autoTotal,
+        essayTotal,
+      } = buildSubmissionGrading(course.quiz, parsed.answers);
 
       // ข้อมูลผู้ส่งมาจาก DB ตาม token เสมอ ไม่ใช่จาก body
       const sub: QuizSubmission = {
@@ -2729,13 +2727,15 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         autoTotal,
         essayQuestionIds,
         essayGrades: [],
+        essayTotal,
         status: "PendingReview",
         submittedAt: new Date().toISOString(),
       };
       db_quiz_submissions.unshift(sub);
 
+      // ไม่มี Essay ที่ตอบแล้ว (รวมกรณีไม่ตอบ Essay เลย) → Finalize ทันที
       if (essayQuestionIds.length === 0) {
-        finalizeSubmission(sub, course);
+        finalizeSubmission(sub, course, essayTotal);
       }
 
       res.json({
@@ -2818,14 +2818,32 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           });
         }
 
+        // D1(b) + Addendum §21.21 §2.6: ไม่ทราบจำนวน Essay ทั้งหมด → Fail closed
+        // ตรวจหลัง Guard 1–5 และก่อนแก้ sub ใด ๆ; Log ไม่มี Body/answers
+        const essay = resolveEssayTotal(sub);
+        if (essay.known === false) {
+          console.error("[quiz] fail closed: essayTotal unresolved", {
+            route: "POST /api/quiz_submissions/:id/grade",
+            userId: req.authUser!.id,
+            submissionId: sub.id,
+            reason: essay.reason,
+          });
+          return res.status(500).json(QUIZ_INTERNAL_ERROR);
+        }
+
         sub.essayGrades = grades;
-        finalizeSubmission(sub, course, req.authUser!.employeeId);
+        const result = finalizeSubmission(
+          sub,
+          course,
+          essay.essayTotal,
+          req.authUser!.employeeId,
+        );
 
         const reviewer = db_users.find((u) => u.id === req.authUser!.id);
         db_system_audit_logs.unshift({
           id: `log-${crypto.randomUUID()}`,
           action: "GRADE_ESSAY",
-          details: `ตรวจข้อสอบ Essay: ${sub.userName} (${sub.employeeId}) หลักสูตร "${sub.courseTitle}" คะแนน ${sub.score}% (${sub.pass ? "ผ่าน" : "ไม่ผ่าน"})`,
+          details: `ตรวจข้อสอบ Essay: ${sub.userName} (${sub.employeeId}) หลักสูตร "${sub.courseTitle}" คะแนน ${formatScore(result.score)}% (${result.pass ? "ผ่าน" : "ไม่ผ่าน"})`,
           performedBy: reviewer
             ? `${reviewer.name} (${reviewer.employeeId})`
             : req.authUser!.employeeId,

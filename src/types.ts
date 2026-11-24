@@ -322,9 +322,12 @@ export interface QuizSubmission {
   // ผลข้อที่ server ตรวจอัตโนมัติ (ปรนัย / ถูก-ผิด / จับคู่)
   autoCorrect: number;
   autoTotal: number;
-  // ข้อ Essay ที่รอผู้ตรวจ และผลที่ตรวจแล้ว
+  // ข้อ Essay ที่ตอบแล้วและรอผู้ตรวจ (P-21: ไม่รวมข้อที่ไม่ได้ตอบ) และผลที่ตรวจแล้ว
   essayQuestionIds: string[];
   essayGrades: EssayGrade[];
+  // จำนวน Essay ทั้งหมดใน Quiz ณ เวลา Submit รวมข้อที่ไม่ได้ตอบ (D1, Addendum §21.21 §2)
+  // Writer ใหม่บันทึกทุกครั้ง; undefined/null = Legacy ไม่ทราบจำนวน (ห้ามตีความเป็น 0)
+  essayTotal?: number | null;
   status: QuizSubmissionStatus;
   // มีค่าเมื่อ status = "Finalized" เท่านั้น
   score?: number;

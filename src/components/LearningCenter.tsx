@@ -66,6 +66,20 @@ import { getDepartmentById } from "../utils/departmentUtils";
 import { formatDuration } from "../utils/courseutils";
 import { DEFAULT_LESSON_IMAGE_URL } from "../utils/assets";
 import { resolveSignedUrl } from "../utils/fileAccess";
+import {
+  ANSWER_MAX_LENGTH,
+  computeQuizScore,
+  formatScore,
+  isUnansweredText,
+  resolveEssayTotal,
+} from "../utils/quizRules";
+
+// แสดงคะแนน 2 ตำแหน่ง (P-25 / ODR-01) เฉพาะค่าที่เป็น finite number — ค่าอื่นแสดงตามเดิม ไม่แก้ข้อมูล (U-02)
+function displayScore<T>(score: T): string | T {
+  return typeof score === "number" && Number.isFinite(score)
+    ? formatScore(score)
+    : score;
+}
 
 interface LearningCenterProps {
   currentUser: User;
@@ -554,7 +568,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
   const displayScoreText = (): string => {
     const score = relevantResult?.score ?? quizScore;
     return score !== undefined && score !== null
-      ? `${score}%`
+      ? `${displayScore(score)}%`
       : "ยังไม่มีข้อมูลคะแนน";
   };
 
@@ -646,9 +660,37 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
     setQuizPassed(null);
   };
 
+  // จำนวนข้อที่ยังไม่ได้ตอบ (Client UX เท่านั้น — Server เป็นผู้ตัดสิน Unanswered ตาม P-21)
+  // ว่างหลัง trim = ไม่ได้ตอบ; Matching = ไม่มีคู่ที่เลือกเลย
+  const countUnansweredQuestions = (): number =>
+    questions.filter((q) => {
+      const a = quizAnswers[q.id];
+      if ((q.type || "SingleChoice") === "Matching") {
+        if (isUnansweredText(a)) return true;
+        try {
+          const map = JSON.parse(a);
+          return !Object.values(map ?? {}).some((v) => !isUnansweredText(v));
+        } catch {
+          return true;
+        }
+      }
+      return isUnansweredText(a);
+    }).length;
+
   const handleQuizSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCourse || isSubmittingQuiz) return;
+
+    // D4(a): ยืนยันก่อนส่งเมื่อมีข้อที่ยังไม่ได้ตอบ (ตอบครบไม่ต้องยืนยัน)
+    const unansweredCount = countUnansweredQuestions();
+    if (
+      unansweredCount > 0 &&
+      !confirm(
+        `ยังไม่ได้ตอบ ${unansweredCount} ข้อ — ข้อที่ไม่ตอบได้ 0 คะแนน\nต้องการส่งคำตอบหรือไม่?`,
+      )
+    ) {
+      return;
+    }
 
     setIsSubmittingQuiz(true);
     setQuizSubmitError("");
@@ -1424,7 +1466,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                               <span
                                 className={`text-xs font-black font-mono ${exam.pass ? "text-emerald-600" : "text-rose-600"}`}
                               >
-                                {exam.score}%
+                                {displayScore(exam.score)}%
                               </span>
                               <div className="w-14 h-1 w-full bg-slate-200 rounded-full mt-0.5 overflow-hidden">
                                 <div
@@ -2459,13 +2501,31 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                       const essayCorrect = essayIds.filter(
                         (id) => gradeDraft[id]?.correct === true,
                       ).length;
-                      const totalQuestions =
-                        reviewingSubmission.autoTotal + essayIds.length;
-                      const previewScore = Math.round(
-                        ((reviewingSubmission.autoCorrect + essayCorrect) /
-                          totalQuestions) *
-                          100,
-                      );
+                      // C1: สูตรเดียวกับ Server — จำนวน Essay ทั้งหมดจาก resolveEssayTotal เท่านั้น
+                      // ไม่ใช้ essayIds.length (P-21: ไม่รวม Essay ที่ไม่ได้ตอบ)
+                      // เกณฑ์ผ่านใช้ minPassScore ปัจจุบันของ Course (Threshold snapshot = Q3)
+                      const essay = resolveEssayTotal(reviewingSubmission);
+                      const unansweredEssayCount =
+                        essay.known === false
+                          ? null
+                          : essay.essayTotal - essayIds.length;
+                      let preview: { score: number; pass: boolean } | null =
+                        null;
+                      if (essay.known !== false && subCourse) {
+                        try {
+                          const r = computeQuizScore({
+                            correctCount:
+                              reviewingSubmission.autoCorrect + essayCorrect,
+                            totalCount:
+                              reviewingSubmission.autoTotal + essay.essayTotal,
+                            minPassScore: subCourse.minPassScore,
+                          });
+                          preview = { score: r.score, pass: r.pass };
+                        } catch {
+                          // ข้อมูลไม่ผ่าน Precondition → ไม่แสดงคะแนนตัวอย่าง
+                          preview = null;
+                        }
+                      }
 
                       return (
                         <div className="space-y-4 text-xs">
@@ -2482,6 +2542,19 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                               {reviewingSubmission.autoCorrect} /{" "}
                               {reviewingSubmission.autoTotal} ข้อ
                             </span>
+                            {/* TD-15 ข้อ 4: Essay ที่ไม่ได้ตอบ — แสดงจำนวนอย่างเดียว ไม่ต้องให้คะแนน */}
+                            {unansweredEssayCount === null ? (
+                              <span className="text-[10.5px] text-amber-700 font-semibold block mt-1">
+                                ⚠️ ไม่ทราบจำนวน Essay ทั้งหมดของรายการนี้
+                                จึงแสดงจำนวนข้อที่ไม่ได้ตอบไม่ได้
+                              </span>
+                            ) : (
+                              unansweredEssayCount > 0 && (
+                                <span className="text-[10.5px] text-slate-500 font-mono block mt-1">
+                                  {`ไม่ได้ตอบ ${unansweredEssayCount} ข้อ — 0 คะแนน`}
+                                </span>
+                              )
+                            )}
                           </div>
 
                           {isOwn && (
@@ -2580,15 +2653,22 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                             );
                           })}
 
-                          {allGraded && subCourse && (
-                            <p className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-900 font-bold">
-                              คะแนนที่จะได้: {previewScore}% (เกณฑ์ผ่าน{" "}
-                              {subCourse.minPassScore}% →{" "}
-                              {previewScore >= subCourse.minPassScore
-                                ? "ผ่าน"
-                                : "ไม่ผ่าน"}
-                              )
+                          {essay.known === false ? (
+                            <p className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 font-bold">
+                              ⚠️ ไม่สามารถคำนวณคะแนนตัวอย่างได้
+                              เพราะไม่ทราบจำนวน Essay ทั้งหมดของรายการนี้
+                              (ข้อมูลเก่า) — ระบบจะไม่ปิดผลรายการนี้
                             </p>
+                          ) : (
+                            allGraded &&
+                            subCourse &&
+                            preview && (
+                              <p className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-900 font-bold">
+                                คะแนนที่จะได้: {formatScore(preview.score)}%
+                                (เกณฑ์ผ่าน {subCourse.minPassScore}% →{" "}
+                                {preview.pass ? "ผ่าน" : "ไม่ผ่าน"})
+                              </p>
+                            )
                           )}
 
                           {gradeError && (
@@ -2646,7 +2726,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         <span
                           className={`shrink-0 font-black font-mono ${s.pass ? "text-emerald-600" : "text-rose-600"}`}
                         >
-                          {s.score}% {s.pass ? "ผ่าน" : "ไม่ผ่าน"}
+                          {displayScore(s.score)}% {s.pass ? "ผ่าน" : "ไม่ผ่าน"}
                         </span>
                       </div>
                     ))}
@@ -3561,7 +3641,6 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                         handleQuizAnswerSelect(q.id, opt)
                                       }
                                       className="accent-[#15329c] text-indigo-705 shrink-0"
-                                      required
                                     />
                                     <span>{opt}</span>
                                   </label>
@@ -3640,7 +3719,6 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                             JSON.stringify(nextAnsMap),
                                           );
                                         }}
-                                        required
                                         className="bg-white border border-slate-200 text-xs rounded-lg p-1.5 sm:w-1/2 focus:border-[#15329c] font-bold"
                                       >
                                         <option value="">
@@ -3666,7 +3744,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                 </label>
                                 <textarea
                                   rows={4}
-                                  required
+                                  maxLength={ANSWER_MAX_LENGTH}
                                   value={quizAnswers[q.id] || ""}
                                   onChange={(e) =>
                                     handleQuizAnswerSelect(q.id, e.target.value)
@@ -3674,6 +3752,11 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                                   placeholder="พิมพ์คำอธิบายรายละเอียดที่นี่ ผู้ตรวจจะเป็นผู้ให้คะแนนข้อนี้"
                                   className="w-full bg-white border border-slate-200 p-2.5 rounded-lg text-xs leading-relaxed"
                                 />
+                                {/* นับ UTF-16 code units (.length) ตรงกับ maxLength และการตัดของ Server */}
+                                <span className="block text-right text-[10px] text-slate-400 font-mono">
+                                  {(quizAnswers[q.id] || "").length} /{" "}
+                                  {ANSWER_MAX_LENGTH}
+                                </span>
                               </div>
                             )}
                           </div>
@@ -3727,7 +3810,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                               quizPassed ? "text-emerald-600" : "text-rose-600"
                             }
                           >
-                            {quizScore}%
+                            {displayScore(quizScore)}%
                           </span>
                         </div>
                         <p className="text-slate-500 max-w-sm mx-auto leading-relaxed">
@@ -3882,7 +3965,8 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                             คุณสอบผ่านและมีประวัติการเรียนวิชานี้แล้ว
                           </span>
                           <span className="text-[10px] text-slate-550 font-mono block mt-0.5">
-                            คะแนนที่ทำได้: {relevantResult.score}% | บันทึกเมื่อ{" "}
+                            คะแนนที่ทำได้: {displayScore(relevantResult.score)}%
+                            | บันทึกเมื่อ{" "}
                             {relevantResult.date}
                           </span>
                         </div>
