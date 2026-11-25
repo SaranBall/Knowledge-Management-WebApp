@@ -64,6 +64,7 @@ import {
   TrainingSession,
   QuizSubmission,
 } from "./src/types";
+import { checkDatabase } from "./src/server/db";
 
 dotenv.config();
 
@@ -457,6 +458,17 @@ interface SearchResolution {
 }
 
 async function startServer() {
+  // PERSIST-01C-0: ต้องต่อฐานข้อมูล km_rmp ได้ก่อนเปิด Server (fail closed) — ข้อความไม่มีค่าลับ
+  try {
+    await checkDatabase();
+  } catch (err) {
+    console.error(
+      "❌ FATAL: ตรวจฐานข้อมูลไม่ผ่าน Server ไม่เปิด —",
+      err instanceof Error ? err.message : String(err),
+    );
+    process.exit(1);
+  }
+
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 

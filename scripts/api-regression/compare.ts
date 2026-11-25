@@ -1,10 +1,12 @@
 /**
  * PERSIST-01C-0 — API Regression harness (ตัวเทียบ)
  *
- * ใช้: npx tsx scripts/api-regression/compare.ts <รอบ A> <รอบ B>
+ * ใช้: npx tsx scripts/api-regression/compare.ts [--ignore-date-dependent] <รอบ A> <รอบ B>
  *
  * เทียบไฟล์ผลทีละ Request (จับคู่ด้วยชื่อไฟล์ = ลำดับ + ชื่อสถานการณ์)
  * แสดงเฉพาะจุดที่ต่าง — ไม่สนลำดับ Key ใน Object แต่สนลำดับสมาชิกใน Array
+ * --ignore-date-dependent: ข้ามช่องที่ค่าขึ้นกับวันที่รัน (ดู DATE_DEPENDENT_RULES) ตอนเทียบเท่านั้น
+ *   ไม่แก้ไฟล์ผลใด ๆ และแสดงจำนวนจุดที่ข้ามแยกตามกฎ
  * Exit code: 0 = ไม่ต่าง, 1 = ต่าง, 2 = ใช้งานผิด
  */
 import fs from "node:fs";
@@ -16,11 +18,32 @@ const OUT_ROOT = path.join(HERE, "out");
 const MAX_DIFFS_PER_FILE = 20;
 const MAX_VALUE_CHARS = 200;
 
-const [nameA, nameB] = process.argv.slice(2);
-if (!nameA || !nameB) {
-  console.error("ใช้: npx tsx scripts/api-regression/compare.ts <รอบ A> <รอบ B>");
+// ช่องที่ค่าขึ้นกับวันที่รัน (ใช้เมื่อสั่ง --ignore-date-dependent เท่านั้น)
+// path ในรูป $.responseBody... ตามที่ diff() สร้าง; route ว่าง = ทุก Route
+const DATE_DEPENDENT_RULES: Array<{ label: string; route?: string; at: RegExp }> = [
+  {
+    label: "daysRemaining ของใบรับรอง (ทุก Route)",
+    at: /\.daysRemaining$/,
+  },
+  {
+    label: "GET /api/learning/stats: certificates.valid / expiringSoon / expired (นับจากวันหมดอายุเทียบวันนี้)",
+    route: "GET /api/learning/stats",
+    at: /^\$\.responseBody\.certificates\.(valid|expiringSoon|expired)$/,
+  },
+];
+
+const KNOWN_FLAGS = new Set(["--ignore-date-dependent"]);
+const argv = process.argv.slice(2);
+const flags = argv.filter((a) => a.startsWith("--"));
+const positional = argv.filter((a) => !a.startsWith("--"));
+const unknownFlags = flags.filter((f) => !KNOWN_FLAGS.has(f));
+const ignoreDateDependent = flags.includes("--ignore-date-dependent");
+const [nameA, nameB] = positional;
+if (!nameA || !nameB || positional.length !== 2 || unknownFlags.length > 0) {
+  console.error("ใช้: npx tsx scripts/api-regression/compare.ts [--ignore-date-dependent] <รอบ A> <รอบ B>");
   process.exit(2);
 }
+const skippedByRule = new Map<string, number>();
 const dirA = path.join(OUT_ROOT, nameA);
 const dirB = path.join(OUT_ROOT, nameB);
 for (const d of [dirA, dirB]) {
@@ -80,6 +103,10 @@ function diff(a: unknown, b: unknown, at: string, out: Diff[]) {
   out.push({ at, a, b });
 }
 
+// ตัด BOM ต้นไฟล์ (ไฟล์ที่ถูกแก้ด้วยเครื่องมือบน Windows)
+const readRecord = (file: string) =>
+  JSON.parse(fs.readFileSync(file, "utf-8").replace(/^﻿/, ""));
+
 let differingFiles = 0;
 let totalDiffs = 0;
 
@@ -98,10 +125,19 @@ for (const f of filesB) {
 
 for (const f of filesA) {
   if (!setB.has(f)) continue;
-  const ra = JSON.parse(fs.readFileSync(path.join(dirA, f), "utf-8"));
-  const rb = JSON.parse(fs.readFileSync(path.join(dirB, f), "utf-8"));
-  const diffs: Diff[] = [];
-  diff(ra, rb, "$", diffs);
+  const ra = readRecord(path.join(dirA, f));
+  const rb = readRecord(path.join(dirB, f));
+  const allDiffs: Diff[] = [];
+  diff(ra, rb, "$", allDiffs);
+  const diffs = allDiffs.filter((d) => {
+    if (!ignoreDateDependent) return true;
+    const rule = DATE_DEPENDENT_RULES.find(
+      (r) => (!r.route || r.route === ra.route) && r.at.test(d.at),
+    );
+    if (!rule) return true;
+    skippedByRule.set(rule.label, (skippedByRule.get(rule.label) || 0) + 1);
+    return false;
+  });
   if (diffs.length === 0) continue;
   differingFiles++;
   totalDiffs += diffs.length;
@@ -114,6 +150,12 @@ for (const f of filesA) {
   }
 }
 
+if (ignoreDateDependent) {
+  console.log("\n--ignore-date-dependent: ข้ามช่องต่อไปนี้ (จำนวนจุดที่ต่างแล้วถูกข้าม)");
+  for (const r of DATE_DEPENDENT_RULES) {
+    console.log(`  - ${r.label}: ${skippedByRule.get(r.label) || 0}`);
+  }
+}
 console.log(
   `\nเทียบ ${nameA} (${filesA.length} ไฟล์) กับ ${nameB} (${filesB.length} ไฟล์): ` +
     (differingFiles === 0 ? "ไม่ต่างกัน" : `ต่าง ${differingFiles} ไฟล์ / ${totalDiffs} จุด`),

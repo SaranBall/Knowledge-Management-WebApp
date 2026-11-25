@@ -25,6 +25,14 @@
    ```
    `compare` แสดงเฉพาะจุดที่ต่าง — Exit code 0 = ไม่ต่าง, 1 = ต่าง, 2 = ใช้งานผิด
 
+   เมื่อเทียบรอบที่รันต่างวันกัน ใช้ `--ignore-date-dependent` เพื่อข้ามช่องที่ค่าขึ้นกับวันที่รัน
+   (ข้ามตอนเทียบเท่านั้น ไม่แก้ไฟล์ผล และแสดงจำนวนจุดที่ข้ามแยกตามกฎ):
+   - `daysRemaining` ของใบรับรอง (ทุก Route)
+   - `GET /api/learning/stats` → `certificates.valid` / `expiringSoon` / `expired`
+   ```powershell
+   npx tsx scripts/api-regression/compare.ts --ignore-date-dependent baseline after-01c0
+   ```
+
 ผลอยู่ที่ `scripts/api-regression/out/<ชื่อรอบ>/` (อยู่ใน `.gitignore`) — ไฟล์ละหนึ่ง Request
 (`method`, `path`, `requestBody`, `status`, `responseBody`) และ `summary.json` (จำนวน Request ต่อ Route,
 Status ที่ไม่ตรงกับที่คาด) — ห้ามใช้ชื่อรอบซ้ำ ถ้าต้องรันใหม่ให้ลบโฟลเดอร์เดิมเอง
