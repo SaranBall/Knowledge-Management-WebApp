@@ -48,32 +48,32 @@ export const DEPARTMENTS_FLAT: Department[] = [
   {
     id: "d-pd-dl",
     parentId: "d-pd",
-    name: "Dry-Lamination (งานประกบฟิล์ม)",
+    name: "Dry-Lamination",
     code: "DL",
   },
   {
     id: "d-pd-bm",
     parentId: "d-pd",
-    name: "Bag-Making (งานขึ้นรูปถุง)",
+    name: "Bag-Making",
     code: "BM",
   },
   {
     id: "d-pd-sl",
     parentId: "d-pd",
-    name: "Slitting (งานตัดม้วน)",
+    name: "Slitting",
     code: "SL",
   },
-  { id: "d-pd-pt", parentId: "d-pd", name: "Printing (งานพิมพ์)", code: "PT" },
+  { id: "d-pd-pt", parentId: "d-pd", name: "Printing", code: "PT" },
   {
     id: "d-pd-in",
     parentId: "d-pd",
-    name: "Inspection (งานตรวจสอบ)",
+    name: "Inspection",
     code: "IN",
   },
   {
     id: "d-pd-sp",
     parentId: "d-pd",
-    name: "Powder Spray (งานพ่นฝุ่น)",
+    name: "Powder Spray",
     code: "PS",
   },
 ];
