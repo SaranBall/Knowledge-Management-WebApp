@@ -86,6 +86,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onCertificateDownloadLog,
 }) => {
   const visibleUsers = users;
+  // 01C-1 (Q5): ตัวเลขสรุป/กราฟไม่นับผู้ใช้ Terminated — คงความหมายเดิมที่ผู้ใช้ที่ถูกลบหายจากระบบ (F-01)
+  // รายชื่อพนักงาน (Transcript) ยังแสดงทุกคนจาก visibleUsers
+  const statsUsers = visibleUsers.filter((u) => u.status !== "Terminated");
   const [selectedUserTranscript, setSelectedUserTranscript] =
     useState<User | null>(() => visibleUsers[0] || null);
   const [isISOModalOpen, setIsISOModalOpen] = useState(false);
@@ -232,7 +235,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // 2. Learning Calculations — นับจาก getUserCompletedCourseIds (ไม่ซ้ำต่อ user+course)
   //    assigned = หลักสูตรบังคับทั้งหมด, requiredDone = หลักสูตรบังคับที่จบแล้ว,
   //    uniqueCompletions = จำนวนคู่ (พนักงาน, คอร์ส) ที่จบจริง
-  const completionStats = visibleUsers.reduce(
+  const completionStats = statsUsers.reduce(
     (acc, u) => {
       const doneIds = getUserCompletedCourseIds(
         u.id,
@@ -271,7 +274,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       : 0;
 
   // รวมนาทีเฉพาะคอร์สที่จบจริงและระบุ durationMinutes ไว้ (ไม่มีข้อมูล = ไม่นับ)
-  const perUserMinutes = visibleUsers.map((u) =>
+  const perUserMinutes = statsUsers.map((u) =>
     getUserTrainingMinutes(
       u.id,
       u.employeeId,
@@ -429,7 +432,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <div>
                 <span className="text-slate-800 font-bold text-sm">
-                  {visibleUsers.length}
+                  {statsUsers.length}
                 </span>
                 <span className="block text-[9px] text-slate-400">
                   ผู้เรียนเปิดใช้งาน

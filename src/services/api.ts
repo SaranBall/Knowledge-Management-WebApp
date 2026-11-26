@@ -21,6 +21,7 @@ import {
   EssayGrade,
   UserKMPoints,
 } from "../types";
+import type { Department } from "../utils/departmentUtils";
 
 // N6: การปิดช่องว่างความรู้ (ตรงกับ SearchResolution ใน server.ts)
 export interface SearchResolution {
@@ -158,6 +159,8 @@ export const api = {
       body: JSON.stringify({ employeeId, password }),
     }),
   getUsers: () => request<UserType[]>("/api/users"),
+  // §21.25: แผนกจาก DB — App เรียกก่อนแสดงหน้าที่ใช้ข้อมูลแผนก
+  getDepartments: () => request<Department[]>("/api/departments"),
   // Real file upload — ผูก Authorization header ให้อัตโนมัติผ่าน request()
   // ต่างจากการยิง fetch() ตรงๆ ที่ไม่มี token แนบไป (บั๊กเดิมใน LearningCenter.tsx)
   uploadFile: (

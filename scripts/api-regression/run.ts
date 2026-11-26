@@ -1,7 +1,9 @@
 /**
  * PERSIST-01C-0 — API Regression harness (ตัวยิง)
  *
- * ใช้: npx tsx scripts/api-regression/run.ts <ชื่อรอบ>
+ * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1] <ชื่อรอบ>
+ *   main (ค่าเริ่มต้น) = ชุดหลัก 306 Request — ห้ามแก้ เพื่อให้ยังเทียบกับ baseline ได้
+ *   01c1               = กรณีเพิ่มของ PERSIST-01C-1 (§D) — รันแยกรอบบนฐานที่ล้างแล้ว
  *
  * Environment (ตั้งใน Terminal เอง — ห้ามเขียนลงไฟล์):
  *   HARNESS_BASE_URL        ค่าเริ่มต้น http://localhost:3000
@@ -125,7 +127,7 @@ class Normalizer {
 // HTTP + บันทึกผล
 // ---------------------------------------------------------------------------
 
-type Actor = "anon" | "bogus" | "admin" | "editor" | "viewer" | "temp";
+type Actor = "anon" | "bogus" | "admin" | "editor" | "viewer" | "temp" | "c1u2";
 
 interface Res {
   status: number;
@@ -146,11 +148,29 @@ interface RecordFile {
   responseBody: unknown;
 }
 
-const runName = process.argv[2];
-if (!runName || !/^[A-Za-z0-9._-]+$/.test(runName)) {
-  console.error("ใช้: npx tsx scripts/api-regression/run.ts <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)");
-  process.exit(2);
+const SUITES = ["main", "01c1"] as const;
+type Suite = (typeof SUITES)[number];
+const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
+
+function parseArgs(argv: string[]): { suite: Suite; runName: string } {
+  let suite: string = "main";
+  const positional: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--suite") suite = argv[++i] ?? "";
+    else if (argv[i].startsWith("--")) return fail(`ไม่รู้จักตัวเลือก ${argv[i]}`);
+    else positional.push(argv[i]);
+  }
+  if (!(SUITES as readonly string[]).includes(suite)) return fail(`ไม่รู้จักชุด "${suite}"`);
+  if (positional.length !== 1 || !/^[A-Za-z0-9._-]+$/.test(positional[0])) return fail("");
+  return { suite: suite as Suite, runName: positional[0] };
+
+  function fail(msg: string): never {
+    if (msg) console.error(msg);
+    console.error(USAGE);
+    process.exit(2);
+  }
 }
+const { suite: SUITE, runName } = parseArgs(process.argv.slice(2));
 const BASE_URL = (process.env.HARNESS_BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
 const ADMIN_ID = process.env.HARNESS_ADMIN_ID || "";
 const ADMIN_PASSWORD = process.env.HARNESS_ADMIN_PASSWORD || "";
@@ -171,15 +191,23 @@ const PW = {
   viewer: randomPassword(),
   temp: randomPassword(),
   wrong: randomPassword(),
+  c1u1: randomPassword(),
+  c1u2: randomPassword(),
 };
 
 const norm = new Normalizer(
-  [ADMIN_PASSWORD, PW.editor, PW.viewer, PW.temp, PW.wrong],
+  [ADMIN_PASSWORD, ...Object.values(PW)],
   ADMIN_ID,
 );
 const tokens: Partial<Record<Actor, string>> = {};
 const routeCounts = new Map<string, number>();
 const unexpected: Array<{ seq: number; name: string; expected: number; actual: number }> = [];
+// ข้อตรวจเนื้อหา Response (ใช้ในชุด 01c1) — ข้อความต้องไม่มีค่าลับ
+const checkFailures: Array<{ seq: number; check: string }> = [];
+function check(desc: string, ok: boolean) {
+  if (!ok) checkFailures.push({ seq, check: desc });
+  console.log(`     ${ok ? "check ok" : "CHECK FAIL"}: ${desc}`);
+}
 let seq = 0;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -776,26 +804,169 @@ async function scenario() {
 }
 
 // ---------------------------------------------------------------------------
+// ชุด 01c1 — PERSIST-01C-1 §D (แผนกจาก DB, C-05, E-1.2/E-2, F-01, F-06)
+// Status/รหัส Error ที่คาด = พฤติกรรมหลัง 01C-1 (โค้ด Memory เดิมจะไม่ผ่านหลายข้อ — ตั้งใจ)
+// ---------------------------------------------------------------------------
+
+async function scenario01c1() {
+  const errOf = (r: Res) => (r.body && typeof r.body.error === "string" ? r.body.error : undefined);
+  const C1 = { viewer: "HRN-C1-VIEWER", u1: "HRN-C1-USER01", u2: "HRN-C1-USER02", other: "HRN-C1-OTHER" };
+  const mk = (emp: string, name: string, departmentId: string | undefined, password: string, extra: Record<string, unknown> = {}) => ({
+    name,
+    employeeId: emp,
+    ...(departmentId === undefined ? {} : { departmentId }),
+    position: "ช่าง",
+    role: "Viewer",
+    email: `${emp.toLowerCase()}@example.invalid`,
+    phone: "000-000-0000",
+    status: "Active",
+    startDate: "2026-01-15",
+    password,
+    ...extra,
+  });
+  const findUser = (r: Res, id: string) => (Array.isArray(r.body) ? r.body.find((u: any) => u?.id === id) : undefined);
+
+  // --- GET /api/departments ---
+  await step("c1.departments.noToken", "GET /api/departments", "anon", "/api/departments", undefined, 401);
+  const adminLogin = await login("admin", "c1.login.admin", ADMIN_ID, ADMIN_PASSWORD, 200);
+  if (adminLogin.status !== 200) throw new Error("ABORT: Admin login ไม่สำเร็จ — ตรวจ HARNESS_ADMIN_ID / HARNESS_ADMIN_PASSWORD");
+  const initialUsers = await step("c1.users.list.initial", "GET /api/users", "admin", "/api/users", undefined, 200);
+  if (!Array.isArray(initialUsers.body) || initialUsers.body.length !== 1) {
+    throw new Error("ABORT: ฐานไม่อยู่ในสถานะเริ่มต้นสะอาด (ผู้ใช้ไม่ใช่ 1 คน) — ล้างฐานแล้วเปิด Server ใหม่ แล้วรันด้วยชื่อรอบใหม่");
+  }
+  const depts = await step("c1.departments.admin", "GET /api/departments", "admin", "/api/departments", undefined, 200);
+  const list: any[] = Array.isArray(depts.body) ? depts.body : [];
+  check("departments: ได้ Array 20 รายการ", Array.isArray(depts.body) && list.length === 20);
+  check(
+    "departments: ทุกรายการมี Key ตรง {id,parentId,name,code}",
+    list.length > 0 && list.every((d) => d && Object.keys(d).sort().join(",") === "code,id,name,parentId"),
+  );
+  check(
+    "departments: id/name/code เป็นข้อความ และ parentId เป็น null หรือข้อความ",
+    list.length > 0 &&
+      list.every((d) => typeof d.id === "string" && typeof d.name === "string" && typeof d.code === "string" &&
+        (d.parentId === null || typeof d.parentId === "string")),
+  );
+  check("departments: แผนกหลัก 14 / แผนกย่อย 6", list.filter((d) => d?.parentId === null).length === 14 && list.filter((d) => typeof d?.parentId === "string").length === 6);
+  check("departments: d-pd-dl มี parentId = d-pd", list.some((d) => d?.id === "d-pd-dl" && d?.parentId === "d-pd"));
+
+  await step("c1.users.create.viewer", "POST /api/users", "admin", "/api/users", mk(C1.viewer, "C1 Viewer", "d-pd-dl", PW.viewer), 200);
+  await login("viewer", "c1.login.viewer", C1.viewer, PW.viewer, 200);
+  const deptsViewer = await step("c1.departments.viewer", "GET /api/departments", "viewer", "/api/departments", undefined, 200);
+  check("departments (Viewer): ได้ 20 รายการ", Array.isArray(deptsViewer.body) && deptsViewer.body.length === 20);
+
+  // --- POST /api/users ---
+  const badDept = await step("c1.users.create.invalidDept", "POST /api/users", "admin", "/api/users",
+    mk("HRN-C1-BADDEPT", "C1 Bad Dept", "Select Department", PW.c1u1), 400);
+  check("POST users แผนก \"Select Department\" → INVALID_DEPARTMENT", errOf(badDept) === "INVALID_DEPARTMENT");
+  const u1Res = await step("c1.users.create.u1", "POST /api/users", "admin", "/api/users", mk(C1.u1, "C1 User 1", "d-qa", PW.c1u1), 200);
+  const u1Id = idOf(u1Res);
+  const dupId = await step("c1.users.create.duplicateId", "POST /api/users", "admin", "/api/users",
+    mk(C1.other, "C1 Dup Id", "d-qa", PW.c1u2, { id: u1Id }), 409);
+  check("POST users id ซ้ำ → DUPLICATE_USER_ID", errOf(dupId) === "DUPLICATE_USER_ID");
+  const dupEmpCase = await step("c1.users.create.duplicateEmployeeIdCase", "POST /api/users", "admin", "/api/users",
+    mk(C1.u1.toLowerCase(), "C1 Dup Emp", "d-qa", PW.c1u2), 409);
+  check("POST users employeeId ซ้ำต่างตัวพิมพ์ → DUPLICATE_EMPLOYEE_ID", errOf(dupEmpCase) === "DUPLICATE_EMPLOYEE_ID");
+  const u2Res = await step("c1.users.create.u2", "POST /api/users", "admin", "/api/users", mk(C1.u2, "C1 User 2", "d-wh", PW.c1u2), 200);
+  const u2Id = idOf(u2Res);
+  await login("c1u2", "c1.login.u2", C1.u2, PW.c1u2, 200);
+
+  // --- PUT /api/users/:id ---
+  const hijack = await step("c1.users.update.bodyIdIgnored", "PUT /api/users/:id", "admin", `/api/users/${u1Id}`,
+    { id: "usr-hijack-01c1", position: "หัวหน้าทีม" }, 200);
+  check("PUT users ส่ง id อื่นใน Body → Response id ไม่เปลี่ยน", hijack.body?.id === u1Id);
+  const afterHijack = await step("c1.users.list.afterBodyId", "GET /api/users", "admin", "/api/users", undefined, 200);
+  check("PUT users ส่ง id อื่น → ผู้ใช้เดิมยังอยู่ที่ id เดิม และไม่มี id ใหม่",
+    findUser(afterHijack, u1Id)?.position === "หัวหน้าทีม" && !findUser(afterHijack, "usr-hijack-01c1"));
+  const putBadDept = await step("c1.users.update.invalidDept", "PUT /api/users/:id", "admin", `/api/users/${u1Id}`, { departmentId: "d-nope" }, 400);
+  check("PUT users แผนกผิด → INVALID_DEPARTMENT", errOf(putBadDept) === "INVALID_DEPARTMENT");
+  const putDupEmp = await step("c1.users.update.duplicateEmployeeId", "PUT /api/users/:id", "admin", `/api/users/${u1Id}`, { employeeId: C1.u2 }, 409);
+  check("PUT users employeeId ชนคนอื่น → DUPLICATE_EMPLOYEE_ID", errOf(putDupEmp) === "DUPLICATE_EMPLOYEE_ID");
+  const putDupEmpCase = await step("c1.users.update.duplicateEmployeeIdCase", "PUT /api/users/:id", "admin", `/api/users/${u1Id}`, { employeeId: C1.u2.toLowerCase() }, 409);
+  check("PUT users employeeId ชนคนอื่นต่างตัวพิมพ์ → DUPLICATE_EMPLOYEE_ID", errOf(putDupEmpCase) === "DUPLICATE_EMPLOYEE_ID");
+
+  // --- DELETE /api/users/:id (F-01: Terminated ไม่ลบแถว) ---
+  const del = await step("c1.users.delete.u2", "DELETE /api/users/:id", "admin", `/api/users/${u2Id}`, undefined, 200);
+  check("DELETE users → { success: true }", JSON.stringify(del.body) === JSON.stringify({ success: true }));
+  const loginDeleted = await step("c1.login.u2.afterDelete", "POST /api/login", "anon", "/api/login", { employeeId: C1.u2, password: PW.c1u2 }, 403);
+  check("Login ผู้ใช้ที่ถูก DELETE → TERMINATED", errOf(loginDeleted) === "TERMINATED");
+  const oldToken = await step("c1.auth.u2.oldTokenAfterDelete", "GET /api/users", "c1u2", "/api/users", undefined, 403);
+  check("Token เดิมของผู้ใช้ที่ถูก DELETE → ACCOUNT_DISABLED", errOf(oldToken) === "ACCOUNT_DISABLED");
+  const afterDelete = await step("c1.users.list.afterDelete", "GET /api/users", "admin", "/api/users", undefined, 200);
+  check("GET users หลัง DELETE ยังเห็นผู้ใช้นั้นด้วย status Terminated", findUser(afterDelete, u2Id)?.status === "Terminated");
+  const reuseEmp = await step("c1.users.create.terminatedEmployeeId", "POST /api/users", "admin", "/api/users",
+    mk(C1.u2, "C1 Reuse Terminated", "d-wh", PW.c1u1), 409);
+  check("POST users ใช้ employeeId ของคนที่ถูก DELETE → DUPLICATE_EMPLOYEE_ID", errOf(reuseEmp) === "DUPLICATE_EMPLOYEE_ID");
+  // employeeId ว่าง / มีแต่ช่องว่าง → เก็บเป็น NULL — สร้าง 2 คนที่ไม่มี employeeId ต้องสำเร็จทั้งคู่
+  const noEmpA = await step("c1.users.create.noEmployeeId.empty", "POST /api/users", "admin", "/api/users",
+    mk("", "C1 No EmpId A", "d-hr", PW.c1u1), 200);
+  check("POST users employeeId \"\" → สำเร็จ และ Response ไม่มี employeeId",
+    noEmpA.status === 200 && noEmpA.body && !("employeeId" in noEmpA.body));
+  const noEmpB = await step("c1.users.create.noEmployeeId.spaces", "POST /api/users", "admin", "/api/users",
+    mk("   ", "C1 No EmpId B", "d-hr", PW.c1u1), 200);
+  check("POST users employeeId มีแต่ช่องว่าง (คนที่สอง) → สำเร็จ และ Response ไม่มี employeeId",
+    noEmpB.status === 200 && noEmpB.body && !("employeeId" in noEmpB.body));
+  const afterNoEmp = await step("c1.users.list.afterNoEmployeeId", "GET /api/users", "admin", "/api/users", undefined, 200);
+  const a = findUser(afterNoEmp, idOf(noEmpA));
+  const b = findUser(afterNoEmp, idOf(noEmpB));
+  check("GET users เห็นทั้ง 2 คน (id ต่างกัน) และไม่มี employeeId ทั้งคู่",
+    !!a && !!b && a.id !== b.id && !("employeeId" in a) && !("employeeId" in b));
+
+  // km_contribution_logs: ผู้ใช้ Terminated = ไม่พบผู้ใช้ → 400 รหัสเดิม
+  const kmTerminated = await step("c1.kmLogs.create.terminatedUser", "POST /api/km_contribution_logs", "admin", "/api/km_contribution_logs",
+    { userId: u2Id, points: 5, activityType: "KB_CONTRIBUTION", description: "HRN-C1" }, 400);
+  check("POST km_contribution_logs ผู้ใช้ Terminated → INVALID_INPUT", errOf(kmTerminated) === "INVALID_INPUT");
+
+  const delNotFound = await step("c1.users.delete.notFound", "DELETE /api/users/:id", "admin", `/api/users/${NOPE.user}`, undefined, 200);
+  check("DELETE users ไม่พบ → { success: true }", JSON.stringify(delNotFound.body) === JSON.stringify({ success: true }));
+
+  // --- Reactivate ---
+  await step("c1.users.reactivate.u2", "PUT /api/users/:id", "admin", `/api/users/${u2Id}`, { status: "Active" }, 200);
+  const relogin = await login("c1u2", "c1.login.u2.afterReactivate", C1.u2, PW.c1u2, 200);
+  check("Reactivate แล้ว Login ได้ (ได้ Token)", relogin.status === 200 && typeof relogin.body?.token === "string");
+  await step("c1.auth.u2.newToken", "GET /api/users", "c1u2", "/api/users", undefined, 200);
+
+  // --- system_audit_logs ---
+  const viewerAudit = await step("c1.audit.create.viewer.adminAction", "POST /api/system_audit_logs", "viewer", "/api/system_audit_logs",
+    { action: "UPDATE_MEMBER", details: "x" }, 403);
+  check("Viewer บันทึก Audit action ของ Admin → FORBIDDEN", errOf(viewerAudit) === "FORBIDDEN");
+  await step("c1.audit.create.admin", "POST /api/system_audit_logs", "admin", "/api/system_audit_logs",
+    { action: "UPDATE_MEMBER", details: "HRN-C1 แก้ไขข้อมูลสมาชิก" }, 200);
+  const audits = await step("c1.audit.list.admin", "GET /api/system_audit_logs", "admin", "/api/system_audit_logs", undefined, 200);
+  check("GET audit มีรายการที่เพิ่งบันทึกเป็นรายการแรก (ใหม่สุดก่อน)",
+    Array.isArray(audits.body) && audits.body[0]?.details === "HRN-C1 แก้ไขข้อมูลสมาชิก");
+
+  // สถานะสุดท้าย
+  await step("c1.final.users", "GET /api/users", "admin", "/api/users", undefined, 200);
+}
+
+// ---------------------------------------------------------------------------
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  console.log(`Harness รอบ "${runName}" → ${BASE_URL}`);
+  console.log(`Harness ชุด "${SUITE}" รอบ "${runName}" → ${BASE_URL}`);
   let aborted: string | null = null;
   try {
-    await scenario();
+    if (SUITE === "main") await scenario();
+    else await scenario01c1();
   } catch (e: any) {
     aborted = String(e?.message || e);
     console.error(aborted);
   }
   const summary = {
     run: runName,
+    suite: SUITE,
     totalRequests: seq,
     aborted,
     unexpectedStatus: unexpected,
+    checkFailures,
     requestsByRoute: Object.fromEntries([...routeCounts.entries()].sort(([a], [b]) => a.localeCompare(b))),
   };
   fs.writeFileSync(path.join(OUT_DIR, "summary.json"), JSON.stringify(summary, null, 2) + "\n", "utf-8");
-  console.log(`\nรวม ${seq} Request, ${routeCounts.size} Route, Status ไม่ตรงที่คาด ${unexpected.length} รายการ`);
+  console.log(
+    `\nรวม ${seq} Request, ${routeCounts.size} Route, Status ไม่ตรงที่คาด ${unexpected.length} รายการ` +
+      (SUITE === "main" ? "" : `, ข้อตรวจไม่ผ่าน ${checkFailures.length} ข้อ`),
+  );
   if (aborted) process.exit(3);
 }
 

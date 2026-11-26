@@ -3,80 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// โครงสร้างนี้จำลองหน้าตาตาราง `departments` ใน DB ล่วงหน้า
-// ตอนย้ายไป Postgres จริง แค่ INSERT ตาม array นี้ตรงๆ ไม่ต้องออกแบบใหม่
+// ข้อมูลแผนกอยู่ในตาราง km.departments (§21.25) — ข้อมูลตั้งต้นอยู่ที่ db/migrations/0002 ที่เดียว
+// Server โหลดจาก DB ตอนเริ่ม และ Client ดึงจาก GET /api/departments แล้วเรียก setDepartments()
+// ก่อนใช้ฟังก์ชันในไฟล์นี้ (ก่อนตั้งค่า = ไม่มีแผนก ทุกฟังก์ชันคืนผลว่าง/undefined)
 export interface Department {
-  id: string; // จะกลายเป็น PK ตอนย้าย DB
+  id: string; // PK ของ km.departments
   parentId: string | null; // NULL = main department, มีค่า = sub-department (สังกัดใต้แผนกผลิต)
   name: string; // ชื่อแสดงผล
   code: string; // รหัสสั้นจากระบบ HR จริงของบริษัท ใช้เทียบ logic แทน string match
 }
 
-export const DEPARTMENTS_FLAT: Department[] = [
-  // ── Main Departments (14) ──
-  { id: "d-hr", parentId: null, name: "Human Resources", code: "HR" },
-  { id: "d-cs", parentId: null, name: "Customer Service", code: "CS" },
-  { id: "d-af", parentId: null, name: "Accounting & Finance", code: "AF" },
-  { id: "d-pm", parentId: null, name: "Procurement", code: "PM" },
-  { id: "d-qs", parentId: null, name: "Quality & Safety Systems", code: "QS" },
-  {
-    id: "d-fc",
-    parentId: null,
-    name: "Production Management Office",
-    code: "FC",
-  },
-  {
-    id: "d-qa",
-    parentId: null,
-    name: "Quality Assurance & Control",
-    code: "QA",
-  },
-  { id: "d-wh", parentId: null, name: "Warehouse", code: "WH" },
-  { id: "d-en", parentId: null, name: "Engineering", code: "EN" },
-  { id: "d-sm", parentId: null, name: "Sales & Marketing", code: "SM" },
-  { id: "d-tc", parentId: null, name: "Technical", code: "TC" },
-  {
-    id: "d-pc",
-    parentId: null,
-    name: "Planning & Production Control",
-    code: "PC",
-  },
-  { id: "d-pd", parentId: null, name: "Production", code: "PD" },
-  { id: "d-it", parentId: null, name: "Information Technology", code: "IT" },
+let departmentsFlat: Department[] = [];
 
-  // ── Sub-departments ใต้ PD (ฝ่ายผลิต) — สังกัดสายบังคับบัญชาเดียวกัน ──
-  {
-    id: "d-pd-dl",
-    parentId: "d-pd",
-    name: "Dry-Lamination",
-    code: "DL",
-  },
-  {
-    id: "d-pd-bm",
-    parentId: "d-pd",
-    name: "Bag-Making",
-    code: "BM",
-  },
-  {
-    id: "d-pd-sl",
-    parentId: "d-pd",
-    name: "Slitting",
-    code: "SL",
-  },
-  { id: "d-pd-pt", parentId: "d-pd", name: "Printing", code: "PT" },
-  {
-    id: "d-pd-in",
-    parentId: "d-pd",
-    name: "Inspection",
-    code: "IN",
-  },
-  {
-    id: "d-pd-sp",
-    parentId: "d-pd",
-    name: "Powder Spray",
-    code: "PS",
-  },
-];
+/** ตั้งรายการแผนกทั้งหมด (คัดลอกเก็บ — แก้ Array/Object ที่ส่งมาภายหลังไม่กระทบ) */
+export function setDepartments(list: readonly Department[]): void {
+  departmentsFlat = list.map((d) => ({
+    id: d.id,
+    parentId: d.parentId ?? null,
+    name: d.name,
+    code: d.code,
+  }));
+}
 
 // ─────────────────────────────────────────
 // Positions — เก็บแยกจาก department name ตามที่ควรเป็น (ไม่ฝัง code ในชื่อ)
@@ -174,30 +121,30 @@ export const POSITIONS_BY_DEPARTMENT: Record<string, string[]> = {
 
 /** คืนเฉพาะ main department (parentId === null) */
 export function getMainDepartments(): Department[] {
-  return DEPARTMENTS_FLAT.filter((d) => d.parentId === null).sort((a, b) =>
+  return departmentsFlat.filter((d) => d.parentId === null).sort((a, b) =>
     a.name.localeCompare(b.name, "th"),
   );
 }
 
 /** คืน sub-department ทั้งหมดของ main dept ที่ระบุ (รับได้ทั้ง id หรือ code) */
 export function getSubDepartments(mainDeptIdOrCode: string): Department[] {
-  const main = DEPARTMENTS_FLAT.find(
+  const main = departmentsFlat.find(
     (d) => d.id === mainDeptIdOrCode || d.code === mainDeptIdOrCode,
   );
   if (!main) return [];
-  return DEPARTMENTS_FLAT.filter((d) => d.parentId === main.id).sort((a, b) =>
+  return departmentsFlat.filter((d) => d.parentId === main.id).sort((a, b) =>
     a.name.localeCompare(b.name, "th"),
   );
 }
 
 /** หา department object จาก id */
 export function getDepartmentById(id: string): Department | undefined {
-  return DEPARTMENTS_FLAT.find((d) => d.id === id);
+  return departmentsFlat.find((d) => d.id === id);
 }
 
 /** หา department object จาก code (เช่น 'PD', 'DL') */
 export function getDepartmentByCode(code: string): Department | undefined {
-  return DEPARTMENTS_FLAT.find((d) => d.code === code);
+  return departmentsFlat.find((d) => d.code === code);
 }
 
 /**
@@ -233,11 +180,15 @@ export function getPositionsForDepartment(departmentId: string): string[] {
 
 /** flat list ของทุกแผนก (main + sub) เอาไว้ทำ dropdown แบบเลือกได้ทุกระดับในช่องเดียว */
 export function getAllDepartmentsFlat(): Department[] {
-  return [...DEPARTMENTS_FLAT].sort((a, b) =>
+  return [...departmentsFlat].sort((a, b) =>
     a.name.localeCompare(b.name, "th"),
   );
 }
 
-// เก็บไว้ให้ backward compatible ชั่วคราวระหว่าง migrate โค้ดจุดอื่น
-// (จะลบทิ้งหลังแก้ครบทุกจุดที่ import DEPARTMENTS แบบเดิม)
-export const DEPARTMENTS = getMainDepartments().map((d) => d.name);
+/**
+ * ชื่อแผนกหลักทั้งหมด (เรียงตามชื่อภาษาไทยเหมือน getMainDepartments)
+ * แทน `DEPARTMENTS` เดิมที่คำนวณตอนโหลด Module — ต้องเรียกตอน Render หลัง setDepartments()
+ */
+export function getMainDepartmentNames(): string[] {
+  return getMainDepartments().map((d) => d.name);
+}

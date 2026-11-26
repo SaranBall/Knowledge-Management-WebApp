@@ -4,9 +4,37 @@
 ใช้พิสูจน์ว่าการย้ายข้อมูลจาก Memory ไป PostgreSQL (PERSIST-01C) ไม่เปลี่ยนพฤติกรรม API
 อยู่นอก `src/` จึงไม่ถูก Bundle
 
+> **ห้ามคัดลอกโฟลเดอร์ `scripts\` ไปเครื่อง Prod** — มีสคริปต์ล้างฐาน (`reset-dev-db.sql`) และ Harness
+> ที่สร้างผู้ใช้/ข้อมูลทดสอบ ใช้บนเครื่อง Dev เท่านั้น
+
+## ชุดทดสอบ
+
+| ชุด | สั่ง | ใช้ทำอะไร |
+|---|---|---|
+| `main` (ค่าเริ่มต้น) | `run.ts <ชื่อรอบ>` | ชุดหลัก 306 Request — **ห้ามแก้** เพื่อให้ยังเทียบกับ `baseline` ได้ |
+| `01c1` | `run.ts --suite 01c1 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-1 (§D): `GET /api/departments`, C-05, `id`/`employeeId` ซ้ำ (E-2/E-1.2), F-01 (DELETE = Terminated), F-06, Reactivate · มีข้อตรวจเนื้อหา Response (`check`) — ผลรวมอยู่ใน `summary.json` → `checkFailures` |
+
+ชุด `01c1` คาดพฤติกรรม**หลัง** 01C-1 — ถ้ารันกับโค้ดก่อน 01C-1 จะไม่ผ่านหลายข้อโดยเจตนา
+แต่ละชุดรันแยกรอบ (ผลแยกโฟลเดอร์) และต้องเริ่มจากฐานที่ล้างแล้วทุกครั้ง
+
+## รอบทดสอบใหม่ (ตั้งแต่ 01C-1 ข้อมูลผู้ใช้อยู่ใน DB — รีสตาร์ท Server อย่างเดียวไม่สะอาด)
+
+1. หยุด Server (Ctrl+C)
+2. ล้างฐาน — Owner รันเองด้วย `postgres` (ลบทุกตารางใน Schema `km` ยกเว้น `departments`)
+   ```powershell
+   psql -U postgres -d km_rmp -v confirm_dev_reset=YES -f scripts/api-regression/reset-dev-db.sql
+   ```
+   ต้องเห็น `departments` = 20, ตารางอื่น = 0 และ `all_ok` = `t` ทุกแถว
+   (ไม่ส่ง `-v confirm_dev_reset=YES` ตรงตัว หรือไม่ได้ต่อ `km_rmp` → `ERROR: ABORT …` ไม่ล้างอะไร และ psql จบด้วย exit code 3)
+3. เปิด Server — ตาราง `users` ว่าง Server จึงสร้าง Admin เริ่มต้นจาก `.env` ใหม่
+   ```powershell
+   npm run dev
+   ```
+4. รัน Harness ตามหัวข้อถัดไป (ชื่อรอบใหม่ทุกครั้ง)
+
 ## วิธีรัน (PowerShell)
 
-1. เปิด Server ในสถานะเริ่มต้นสะอาด (เพิ่งเปิด มีผู้ใช้เพียง Admin เริ่มต้น) — ทุกรอบต้องรีสตาร์ท Server ก่อน
+1. เปิด Server ในสถานะเริ่มต้นสะอาด (มีผู้ใช้เพียง Admin เริ่มต้น) — ตั้งแต่ 01C-1 ใช้ขั้นตอน "รอบทดสอบใหม่" ด้านบน
    ```powershell
    npm run dev
    ```
@@ -18,7 +46,7 @@
    # ไม่บังคับ: $env:HARNESS_BASE_URL = 'http://localhost:3000'
    npx tsx scripts/api-regression/run.ts baseline
    ```
-3. รีสตาร์ท Server แล้วรันรอบใหม่ด้วยชื่อใหม่ จากนั้นเทียบ
+3. เริ่มสถานะสะอาดใหม่ (ก่อน 01C-1: รีสตาร์ท Server · ตั้งแต่ 01C-1: ขั้นตอน "รอบทดสอบใหม่") แล้วรันรอบใหม่ด้วยชื่อใหม่ จากนั้นเทียบ
    ```powershell
    npx tsx scripts/api-regression/run.ts baseline2
    npx tsx scripts/api-regression/compare.ts baseline baseline2
@@ -38,6 +66,7 @@
 Status ที่ไม่ตรงกับที่คาด) — ห้ามใช้ชื่อรอบซ้ำ ถ้าต้องรันใหม่ให้ลบโฟลเดอร์เดิมเอง
 
 `run.ts` หยุดเอง (Exit code 3) ถ้า Login Admin ไม่สำเร็จ หรือ Server มีผู้ใช้มากกว่า 1 คนตอนเริ่ม
+(Exit code 2 = ใช้งานผิด เช่น ชื่อรอบซ้ำ, ไม่รู้จักชุดหรือตัวเลือก)
 
 ## ผู้ใช้ที่ใช้
 

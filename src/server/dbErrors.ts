@@ -31,6 +31,26 @@ const KIND_BY_SQLSTATE: Readonly<Record<string, DbErrorKind>> = {
 
 const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
 
+// 01C-1: ทำเครื่องหมาย Error ที่มาจากการเรียกฐานข้อมูล (รวม Error การเชื่อมต่อที่ไม่มี SQLSTATE)
+// เพื่อให้ Route ตอบ 500 แบบทั่วไปโดยไม่ส่ง err.message ของ DB ให้ Client — ไม่แก้ตัว Error เดิม
+// (ใช้ Symbol แบบ non-enumerable จึงไม่กระทบ classifyDbError หรือการ Log)
+const DB_ERROR_MARK = Symbol.for("km-rmp.dbError");
+
+/** ทำเครื่องหมายว่า Error นี้มาจากการเรียกฐานข้อมูล แล้วคืน Error เดิม */
+export function markDbError<T>(err: T): T {
+  if (err && typeof err === "object" && !Object.isFrozen(err)) {
+    Object.defineProperty(err, DB_ERROR_MARK, { value: true, enumerable: false });
+  }
+  return err;
+}
+
+/** Error มาจากฐานข้อมูลหรือไม่ (ถูกทำเครื่องหมาย หรือเป็น Error ของ PostgreSQL ที่มี SQLSTATE) */
+export function isDbError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  if ((err as Record<symbol, unknown>)[DB_ERROR_MARK] === true) return true;
+  return classifyDbError(err).sqlstate !== undefined;
+}
+
 /**
  * Error จาก PostgreSQL (pg DatabaseError) มี `code` เป็น SQLSTATE และ `severity` เสมอ
  * ใช้ `severity` แยกจาก Error ของระบบที่ `code` บังเอิญยาว 5 ตัว (เช่น `EPIPE`)

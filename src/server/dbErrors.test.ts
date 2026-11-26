@@ -3,7 +3,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyDbError } from "./dbErrors";
+import { classifyDbError, isDbError, markDbError } from "./dbErrors";
 
 // รูปร่างเดียวกับ pg DatabaseError (code = SQLSTATE, severity, constraint)
 function pgError(code: string, constraint?: string) {
@@ -83,4 +83,32 @@ describe("classifyDbError — Error ที่ไม่ใช่ของ Postgre
       assert.deepEqual(classifyDbError(value), { kind: "other" });
     });
   }
+});
+
+// 01C-1: เครื่องหมาย "มาจากฐานข้อมูล" สำหรับตอบ 500 แบบทั่วไป
+describe("markDbError / isDbError", () => {
+  it("Error ของ PostgreSQL (มี SQLSTATE + severity) → isDbError true แม้ไม่ได้ทำเครื่องหมาย", () => {
+    assert.equal(isDbError(pgError("23505")), true);
+  });
+  it("Error การเชื่อมต่อ (ไม่มี SQLSTATE) ที่ทำเครื่องหมายแล้ว → true", () => {
+    const err = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    assert.equal(isDbError(err), false);
+    assert.equal(markDbError(err), err);
+    assert.equal(isDbError(err), true);
+  });
+  it("เครื่องหมายไม่เปลี่ยนผลของ classifyDbError และไม่โผล่ใน Key/JSON", () => {
+    const err = markDbError(pgError("23503", "users_department_fk"));
+    assert.deepEqual(classifyDbError(err), { kind: "foreign_key", constraint: "users_department_fk", sqlstate: "23503" });
+    assert.deepEqual(Object.keys(err).sort(), ["code", "constraint", "severity"]);
+  });
+  it("Error ธรรมดา / ค่าที่ไม่ใช่ Object → false และ markDbError ไม่พัง", () => {
+    assert.equal(isDbError(new Error("x")), false);
+    assert.equal(isDbError(undefined), false);
+    assert.equal(isDbError("23505"), false);
+    assert.equal(markDbError(undefined), undefined);
+    assert.equal(markDbError("x"), "x");
+    const frozen = Object.freeze(new Error("frozen"));
+    assert.equal(markDbError(frozen), frozen);
+    assert.equal(isDbError(frozen), false);
+  });
 });

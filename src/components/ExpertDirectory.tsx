@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { Expert, User, ContactRequest } from "../types";
 import {
-  DEPARTMENTS,
+  getMainDepartmentNames,
   getDepartmentById,
   getAllDepartmentsFlat,
 } from "../utils/departmentUtils";
@@ -111,7 +111,7 @@ export const ExpertDirectory: React.FC<ExpertDirectoryProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const departments = ["ALL", ...DEPARTMENTS];
+  const departments = ["ALL", ...getMainDepartmentNames()];
 
   const filteredExperts = experts.filter((exp) => {
     // Dept filter

@@ -154,6 +154,62 @@ describe("db.ts กับ km_rmp", { skip: SKIP }, () => {
     }
   });
 
+  // 01C-1 B1: ถอด Listener ของ withTransaction ก่อนคืน Client — Error ของผู้ใช้ Client คนถัดไป
+  // (หรือของ Client ที่ว่างอยู่ใน Pool) ต้องไม่ไปถึง Listener ของ Transaction ที่จบไปแล้ว
+  for (const mode of ["COMMIT", "ROLLBACK"] as const) {
+    it(`6. withTransaction (${mode}) ถอด Listener ของตัวเองก่อนคืน Client`, async () => {
+      let held: pg.PoolClient | undefined;
+      let duringTx: Function[] = [];
+      let atRelease: Function[] | undefined;
+      const p = withTransaction(async (c) => {
+        held = c;
+        duringTx = c.listeners("error");
+        // จับรายการ Listener ณ วินาทีที่ withTransaction เรียก release() (ลำดับเดิมของ 01C-0 จะยังเห็น Listener ของเรา)
+        const originalRelease = c.release;
+        c.release = ((err?: Error | boolean) => {
+          atRelease = c.listeners("error");
+          return originalRelease.call(c, err);
+        }) as typeof c.release;
+        if (mode === "ROLLBACK") throw new Error("boom-b1");
+      });
+      if (mode === "COMMIT") await p;
+      else await assert.rejects(p, /boom-b1/);
+
+      assert.ok(held, "ต้องได้ Client");
+      assert.ok(duringTx.length >= 1, "ระหว่าง Transaction ต้องมี Listener อย่างน้อย 1 ตัว");
+      assert.ok(atRelease, "withTransaction ต้องเรียก release()");
+      assert.equal(
+        duringTx.some((fn) => atRelease!.includes(fn)),
+        false,
+        "ณ ตอนเรียก release() Listener ของ Transaction ต้องถูกถอดไปแล้ว",
+      );
+      const afterRelease = held!.listeners("error");
+      assert.ok(afterRelease.length >= 1, "หลังคืน Client ต้องมี Listener ของ Pool (ไม่มีช่วงที่ไม่มี Listener)");
+      assert.equal(
+        duringTx.some((fn) => afterRelease.includes(fn)),
+        false,
+        "Listener ที่แนบระหว่าง Transaction ต้องถูกถอดแล้ว",
+      );
+
+      // Error ที่เกิดกับ Client หลังคืน → ไปที่ Listener ของ Pool เท่านั้น ไม่ใช่ของ Transaction ที่จบแล้ว
+      const logged: string[] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => {
+        logged.push(String(args[0]));
+      };
+      try {
+        held!.emit("error", new Error("simulated-next-user-error"));
+      } finally {
+        console.error = original;
+      }
+      assert.equal(logged.includes("[db] client error during transaction"), false, logged.join(" | "));
+      assert.ok(logged.includes("[db] idle client error"), logged.join(" | "));
+      // Pool ทิ้ง Client ที่เสียไปแล้ว — Query ถัดไปต้องทำงานได้
+      const r = await query<{ one: number }>("SELECT 1 AS one");
+      assert.equal(r.rows[0].one, 1);
+    });
+  }
+
   it("ท้ายสุด: ไม่มีแถวทดสอบ test-01c0-% ค้างใน km.search_logs", async () => {
     assert.equal(await countTestRows(), 0);
   });

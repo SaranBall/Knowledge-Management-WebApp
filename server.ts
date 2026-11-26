@@ -65,6 +65,27 @@ import {
   QuizSubmission,
 } from "./src/types";
 import { checkDatabase } from "./src/server/db";
+import { classifyDbError, isDbError } from "./src/server/dbErrors";
+import { loadDepartments } from "./src/server/repos/departments";
+import {
+  USER_FIELD_COLUMNS,
+  type UserField,
+  countUsers,
+  employeeIdTaken,
+  findUserByEmployeeIdCaseInsensitive,
+  findUserById,
+  findUserForAuth,
+  insertInitialAdminIfEmpty,
+  insertUser,
+  listUsers,
+  sanitizeUser,
+  terminateUser,
+  toTextOrNull,
+  updateUser,
+  userIdExists,
+} from "./src/server/repos/users";
+import { insertAuditLog, listAuditLogs } from "./src/server/repos/auditLogs";
+import { setDepartments, type Department } from "./src/utils/departmentUtils";
 
 dotenv.config();
 
@@ -100,11 +121,6 @@ function getAI(): GoogleGenAI {
 }
 
 const SALT_ROUNDS = 10;
-
-function sanitizeUser<T extends { password?: string }>(user: T) {
-  const { password, ...rest } = user;
-  return rest;
-}
 
 // Mask email/phone สำหรับ Viewer ที่ดูข้อมูลของคนอื่น (ไม่ใช่ตัวเอง)
 function sanitizeUserForViewer(user: UserType, viewerId: string) {
@@ -193,15 +209,33 @@ declare global {
   }
 }
 
-let db_users: UserType[] = [];
-
 function signToken(payload: AuthPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "8h" });
 }
 
+// 01C-1 B5: Error จากฐานข้อมูล → 500 แบบทั่วไป ไม่ส่ง err.message ของ DB ให้ Client
+const INTERNAL_ERROR_BODY = {
+  error: "INTERNAL_ERROR",
+  message: "เกิดข้อผิดพลาดภายในระบบ",
+} as const;
+
+function sendDbFailure(res: express.Response, err: unknown, where: string) {
+  const info = classifyDbError(err);
+  const e = err as { name?: unknown; code?: unknown };
+  console.error("[db] request failed", {
+    where,
+    kind: info.kind,
+    sqlstate: info.sqlstate,
+    constraint: info.constraint,
+    name: typeof e?.name === "string" ? e.name : undefined,
+    code: typeof e?.code === "string" ? e.code : undefined,
+  });
+  return res.status(500).json(INTERNAL_ERROR_BODY);
+}
+
 // ต้อง login (มี token ที่ถูกต้อง) ถึงจะเข้าถึง endpoint นี้ได้
 // ความปลอดภัยระดับ Single Source of Truth: resolve role, departmentId, และ status จาก DB ปัจจุบันเสมอ
-function requireAuth(
+async function requireAuth(
   req: express.Request,
   res: express.Response,
   next: express.NextFunction,
@@ -213,41 +247,43 @@ function requireAuth(
       .json({ error: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบก่อนใช้งาน" });
   }
   const token = header.slice("Bearer ".length);
+  let decoded: AuthPayload;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AuthPayload;
-    // Resolve current DB user: DB user is current authority
-    const userInDb = db_users.find(
-      (u) =>
-        (decoded.id && u.id === decoded.id) ||
-        (decoded.employeeId && u.employeeId === decoded.employeeId),
-    );
-    if (!userInDb) {
-      return res.status(401).json({
-        error: "UNAUTHORIZED",
-        message: "ไม่พบข้อมูลผู้ใช้ในระบบ หรือบัญชีถูกลบแล้ว",
-      });
-    }
-    if (userInDb.status === "Suspended" || userInDb.status === "Terminated") {
-      return res.status(403).json({
-        error: "ACCOUNT_DISABLED",
-        message: "บัญชีผู้ใช้ถูกระงับสิทธิ์การใช้งาน กรุณาติดต่อผู้ดูแลระบบ",
-      });
-    }
-    req.authUser = {
-      id: userInDb.id,
-      employeeId: userInDb.employeeId,
-      role: userInDb.role,
-      departmentId: userInDb.departmentId,
-      name: userInDb.name,
-      status: userInDb.status,
-    };
-    next();
+    decoded = jwt.verify(token, JWT_SECRET) as AuthPayload;
   } catch {
     return res.status(401).json({
       error: "INVALID_TOKEN",
       message: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่",
     });
   }
+  let userInDb: UserType | undefined;
+  try {
+    // Resolve current DB user: DB user is current authority
+    userInDb = await findUserForAuth(decoded?.id, decoded?.employeeId);
+  } catch (err) {
+    return sendDbFailure(res, err, "requireAuth");
+  }
+  if (!userInDb) {
+    return res.status(401).json({
+      error: "UNAUTHORIZED",
+      message: "ไม่พบข้อมูลผู้ใช้ในระบบ หรือบัญชีถูกลบแล้ว",
+    });
+  }
+  if (userInDb.status === "Suspended" || userInDb.status === "Terminated") {
+    return res.status(403).json({
+      error: "ACCOUNT_DISABLED",
+      message: "บัญชีผู้ใช้ถูกระงับสิทธิ์การใช้งาน กรุณาติดต่อผู้ดูแลระบบ",
+    });
+  }
+  req.authUser = {
+    id: userInDb.id,
+    employeeId: userInDb.employeeId,
+    role: userInDb.role,
+    departmentId: userInDb.departmentId,
+    name: userInDb.name,
+    status: userInDb.status,
+  };
+  next();
 }
 
 // Document Department Authorization: Single Source of Truth
@@ -377,73 +413,126 @@ function requireOwnField(field: "userId" | "employeeId") {
 }
 
 /**
- * Seed บัญชี Admin คนแรกของระบบตอน startup
- * - ถ้าตั้ง INITIAL_ADMIN_EMPLOYEE_ID + INITIAL_ADMIN_PASSWORD ใน .env → ใช้ค่านั้น
- * - ถ้าไม่ตั้งเลย → generate รหัสผ่านสุ่มปลอดภัย แล้ว log ออก console ครั้งเดียว
- *   (ต้อง copy ไปใช้ login ครั้งแรกแล้วรีบเปลี่ยนรหัสผ่านทันทีผ่านหน้า Edit User)
- * ไม่ทำถ้ามี user ใน DB อยู่แล้ว (กันไม่ให้ reset ทับบัญชีที่มีคนใช้งานจริงแล้ว)
+ * สร้างบัญชี Admin คนแรกใน km.users ตอนเริ่ม Server — เฉพาะเมื่อตาราง users ยังว่าง (มีผู้ใช้แล้ว = ไม่แตะ)
+ * P-5: ต้องตั้ง INITIAL_ADMIN_EMPLOYEE_ID และ INITIAL_ADMIN_PASSWORD ใน .env (ไม่ตั้ง = โยน Error → ไม่เปิด Server)
+ *      ไม่มีการสุ่มรหัสผ่านและไม่พิมพ์รหัสผ่านลง Console อีกต่อไป
+ * INITIAL_ADMIN_DEPARTMENT_ID: ว่าง = d-it (ค่าเริ่มต้นเดิม) · ระบุแล้วต้องเป็นแผนกที่มีจริง
+ * ต้องเรียกหลัง setDepartments()
  */
-async function seedInitialAdmin(
-  existingUsers: UserType[],
-): Promise<UserType[]> {
-  if (existingUsers.length > 0) {
-    return existingUsers;
-  }
+async function ensureInitialAdmin(): Promise<void> {
+  if ((await countUsers()) > 0) return;
 
-  const envEmployeeId = process.env.INITIAL_ADMIN_EMPLOYEE_ID;
-  const envPassword = process.env.INITIAL_ADMIN_PASSWORD;
-  const envName = process.env.INITIAL_ADMIN_NAME || "ผู้ดูแลระบบเริ่มต้น";
-  const envEmail = process.env.INITIAL_ADMIN_EMAIL || "admin@royalmeiwa.com";
-  const envPhone = process.env.INITIAL_ADMIN_PHONE || "02-000-0000";
-  const envDeptId = process.env.INITIAL_ADMIN_DEPARTMENT_ID || "d-it";
-  const envPosition = process.env.INITIAL_ADMIN_POSITION || "ผู้ดูแลระบบ";
-
-  let employeeId = envEmployeeId;
-  let plainPassword = envPassword;
-  let generated = false;
-
+  const employeeId = process.env.INITIAL_ADMIN_EMPLOYEE_ID;
+  const plainPassword = process.env.INITIAL_ADMIN_PASSWORD;
   if (!employeeId || !plainPassword) {
-    // ไม่ได้ตั้งค่าผ่าน .env — generate รหัสผ่านสุ่มปลอดภัยจริง ไม่ hardcode ในซอร์ส
-    employeeId = employeeId || "ADMIN001";
-    plainPassword = plainPassword || crypto.randomBytes(12).toString("hex");
-    generated = true;
+    throw new Error(
+      "ตาราง users ว่าง แต่ไม่ได้ตั้ง INITIAL_ADMIN_EMPLOYEE_ID และ INITIAL_ADMIN_PASSWORD ใน .env — ไม่สามารถสร้าง Admin เริ่มต้นได้",
+    );
+  }
+  const departmentId = process.env.INITIAL_ADMIN_DEPARTMENT_ID || "d-it";
+  if (!getDepartmentById(departmentId)) {
+    throw new Error(
+      `INITIAL_ADMIN_DEPARTMENT_ID "${departmentId}" ไม่ใช่แผนกที่มีในระบบ`,
+    );
   }
 
-  const hashedPassword = await bcrypt.hash(plainPassword, SALT_ROUNDS);
-  const adminUser: UserType = {
+  const passwordHash = await bcrypt.hash(plainPassword, SALT_ROUNDS);
+  const inserted = await insertInitialAdminIfEmpty({
     id: `usr-${Date.now()}`,
-    name: envName,
-    employeeId,
-    departmentId: envDeptId,
-    position: envPosition,
-    role: "Admin",
-    email: envEmail,
-    phone: envPhone,
-    avatarUrl: DEFAULT_AVATAR_URL,
-    password: hashedPassword,
-    startDate: new Date().toISOString().split("T")[0],
-  };
+    fields: {
+      name: process.env.INITIAL_ADMIN_NAME || "ผู้ดูแลระบบเริ่มต้น",
+      employeeId,
+      departmentId,
+      position: process.env.INITIAL_ADMIN_POSITION || "ผู้ดูแลระบบ",
+      role: "Admin",
+      email: process.env.INITIAL_ADMIN_EMAIL || "admin@royalmeiwa.com",
+      phone: process.env.INITIAL_ADMIN_PHONE || "02-000-0000",
+      avatarUrl: DEFAULT_AVATAR_URL,
+      startDate: new Date().toISOString().split("T")[0],
+    },
+    passwordHash,
+  });
+  if (!inserted) return; // มีผู้ใช้ถูกเพิ่มระหว่างทาง — ไม่แตะ
 
   console.log("");
   console.log("========================================================");
   console.log("🔐 ไม่พบบัญชีผู้ใช้ในระบบ — สร้างบัญชี Admin เริ่มต้นแล้ว");
   console.log(`   Employee ID: ${employeeId}`);
-  if (generated) {
-    console.log(`   Password:    ${plainPassword}`);
-    console.log(
-      "   ⚠️  รหัสผ่านนี้ generate อัตโนมัติ กรุณา login แล้วเปลี่ยนรหัสผ่านทันที",
-    );
-    console.log(
-      "   💡 ตั้งค่า INITIAL_ADMIN_EMPLOYEE_ID / INITIAL_ADMIN_PASSWORD ใน .env",
-    );
-    console.log("      เพื่อกำหนดค่าที่ต้องการเองในการ deploy ครั้งถัดไป");
-  } else {
-    console.log("   Password:    (ตามที่ตั้งไว้ใน .env)");
-  }
+  console.log("   Password:    (ตามที่ตั้งไว้ใน .env)");
   console.log("========================================================");
   console.log("");
+}
 
-  return [adminUser];
+// 01C-1 B3 / C-05: ค่า departmentId จาก Body → ค่าที่เก็บ (undefined/null/"" = NULL) หรือ invalid
+function normalizeUserDepartment(
+  raw: unknown,
+): { ok: true; value: string | null } | { ok: false } {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, value: null };
+  }
+  const id = typeof raw === "string" ? raw : String(raw);
+  return getDepartmentById(id) ? { ok: true, value: id } : { ok: false };
+}
+
+const INVALID_USER_DEPARTMENT_BODY = {
+  error: "INVALID_DEPARTMENT",
+  message: "ไม่พบแผนกที่ระบุ",
+} as const;
+const DUPLICATE_USER_ID_BODY = {
+  error: "DUPLICATE_USER_ID",
+  message: "รหัสผู้ใช้ (id) นี้มีอยู่ในระบบแล้ว",
+} as const;
+const DUPLICATE_EMPLOYEE_ID_BODY = {
+  error: "DUPLICATE_EMPLOYEE_ID",
+  message: "รหัสพนักงานนี้มีอยู่ในระบบแล้ว (รวมบัญชีที่ถูกยกเลิกการใช้งาน)",
+} as const;
+
+// 01C-1 B5: Error ของ DB ใน Route ผู้ใช้ → HTTP
+function sendUserWriteError(
+  res: express.Response,
+  err: unknown,
+  where: string,
+) {
+  const info = classifyDbError(err);
+  if (info.kind === "unique" && info.constraint === "users_pk") {
+    return res.status(409).json(DUPLICATE_USER_ID_BODY);
+  }
+  if (
+    info.kind === "unique" &&
+    info.constraint === "users_employee_id_lower_uq"
+  ) {
+    return res.status(409).json(DUPLICATE_EMPLOYEE_ID_BODY);
+  }
+  if (
+    info.kind === "foreign_key" &&
+    info.constraint === "users_department_fk"
+  ) {
+    return res.status(400).json(INVALID_USER_DEPARTMENT_BODY);
+  }
+  return sendDbFailure(res, err, where);
+}
+
+/** ช่องของผู้ใช้ที่ Body ส่งมา (เฉพาะช่องที่รู้จัก) → ค่าที่เก็บ — departmentId ต้องผ่าน normalizeUserDepartment ก่อน */
+function pickUserFields(
+  body: Record<string, unknown>,
+  departmentId: string | null | undefined,
+): Partial<Record<UserField, string | null>> {
+  const out: Partial<Record<UserField, string | null>> = {};
+  for (const [field] of USER_FIELD_COLUMNS) {
+    if (field === "departmentId") {
+      if (departmentId !== undefined) out.departmentId = departmentId;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      out[field] = toTextOrNull(body[field]);
+    }
+  }
+  // 01C-1 (Owner): employeeId ว่างหรือมีแต่ช่องว่าง = ไม่มีรหัสพนักงาน → NULL
+  // (Unique index lower(employee_id) ยอมให้ NULL ได้หลายแถว — ค่าที่มีตัวอักษรเก็บตามที่ส่งมา ไม่ trim)
+  if (typeof out.employeeId === "string" && out.employeeId.trim() === "") {
+    out.employeeId = null;
+  }
+  return out;
 }
 
 // N6: บันทึกการปิดช่องว่างความรู้ (Knowledge Gap) จาก Report D
@@ -459,11 +548,19 @@ interface SearchResolution {
 
 async function startServer() {
   // PERSIST-01C-0: ต้องต่อฐานข้อมูล km_rmp ได้ก่อนเปิด Server (fail closed) — ข้อความไม่มีค่าลับ
+  // PERSIST-01C-1: โหลดแผนกจาก DB (§21.25 — 0 แถว = ไม่เปิด) แล้วสร้าง Admin เริ่มต้นถ้าตาราง users ว่าง (P-5)
+  let departmentsForApi: Department[] = [];
   try {
     await checkDatabase();
+    departmentsForApi = await loadDepartments();
+    if (departmentsForApi.length === 0) {
+      throw new Error("ตาราง km.departments ไม่มีข้อมูล — ยังไม่ได้รัน seed แผนก");
+    }
+    setDepartments(departmentsForApi);
+    await ensureInitialAdmin();
   } catch (err) {
     console.error(
-      "❌ FATAL: ตรวจฐานข้อมูลไม่ผ่าน Server ไม่เปิด —",
+      "❌ FATAL: เตรียมฐานข้อมูลไม่ผ่าน (ตรวจการเชื่อมต่อ / แผนก / Admin เริ่มต้น) Server ไม่เปิด —",
       err instanceof Error ? err.message : String(err),
     );
     process.exit(1);
@@ -473,7 +570,7 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
-  db_users = await seedInitialAdmin(INITIAL_USERS);
+  // users และ system_audit_logs อยู่ใน DB แล้ว (01C-1) — ดู src/server/repos/
   let db_documents: DocumentItem[] = [...INITIAL_DOCUMENTS];
   let db_courses: Course[] = [...INITIAL_COURSES];
   let db_kb_articles: KBArticle[] = [...INITIAL_KB_ARTICLES];
@@ -493,7 +590,6 @@ async function startServer() {
   let db_km_contribution_logs: KMContributionLog[] =
     getInitialKMContributionLogs();
   let db_employee_master: EmployeeMaster[] = [...INITIAL_EMPLOYEE_MASTER];
-  let db_system_audit_logs: SystemAuditLog[] = [];
   let db_attendance_logs: AttendanceLog[] = [];
   let db_training_sessions: TrainingSession[] = [];
   let db_quiz_submissions: QuizSubmission[] = [];
@@ -740,8 +836,8 @@ async function startServer() {
         });
       }
 
-      const user = db_users.find(
-        (u) => u.employeeId.toLowerCase() === String(employeeId).toLowerCase(),
+      const user = await findUserByEmployeeIdCaseInsensitive(
+        String(employeeId),
       );
       if (!user) {
         recordLoginFailure(req, employeeId);
@@ -780,6 +876,7 @@ async function startServer() {
 
       res.json({ user: sanitizeUser(user), token });
     } catch (err: any) {
+      if (isDbError(err)) return sendDbFailure(res, err, "POST /api/login");
       res.status(500).json({ error: err.message });
     }
   });
@@ -1341,7 +1438,7 @@ async function startServer() {
 
   // รับได้ทั้ง Authorization header ปกติ หรือ query token จาก /api/files/sign
   // Resolve current DB user เสมอ
-  function fileRequestAuth(
+  async function fileRequestAuth(
     req: express.Request,
     res: express.Response,
     next: express.NextFunction,
@@ -1378,11 +1475,12 @@ async function startServer() {
         .json({ error: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบก่อนใช้งาน" });
     }
 
-    const userInDb = db_users.find(
-      (u) =>
-        (rawAuth?.id && u.id === rawAuth.id) ||
-        (rawAuth?.employeeId && u.employeeId === rawAuth.employeeId),
-    );
+    let userInDb: UserType | undefined;
+    try {
+      userInDb = await findUserForAuth(rawAuth?.id, rawAuth?.employeeId);
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /uploads/:filename (auth)");
+    }
     if (!userInDb) {
       return res.status(401).json({ error: "UNAUTHORIZED" });
     }
@@ -1845,7 +1943,12 @@ ${deptList}`,
   app.post("/api/personalized-path", requireAuth, async (req, res) => {
     try {
       // ดึงข้อมูลตัวจริงจาก DB โดยอิง req.authUser.id เท่านั้น ไม่เชื่อ body ที่ client ส่งมา
-      const authUserRecord = db_users.find((u) => u.id === req.authUser!.id);
+      let authUserRecord: UserType | undefined;
+      try {
+        authUserRecord = await findUserById(req.authUser!.id);
+      } catch (dbErr) {
+        return sendDbFailure(res, dbErr, "POST /api/personalized-path");
+      }
       if (!authUserRecord) {
         return res.status(401).json({
           error: "USER_NOT_FOUND",
@@ -2006,28 +2109,85 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   // ============================================================
 
   // Users APIs — จัดการได้เฉพาะ Admin เท่านั้น (สมัครเองใช้ /api/register แทน)
-  app.get("/api/users", requireAuth, (req, res) => {
+  // 01C-1: ผู้ใช้อยู่ใน km.users — Response สร้างจากแถวใน DB ผ่าน Mapper (ช่องที่ไม่มีใน Schema ไม่ถูกส่งกลับ)
+  app.get("/api/users", requireAuth, async (req, res) => {
+    let users: UserType[];
+    try {
+      users = await listUsers();
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/users");
+    }
     const role = req.authUser!.role;
     if (role === "Admin" || role === "Editor") {
-      return res.json(db_users.map(sanitizeUser));
+      return res.json(users.map(sanitizeUser));
     }
     // Viewer: mask email/phone ของคนอื่น ยกเว้นตัวเอง
-    res.json(db_users.map((u) => sanitizeUserForViewer(u, req.authUser!.id)));
+    res.json(users.map((u) => sanitizeUserForViewer(u, req.authUser!.id)));
   });
+
+  const userBodyOf = (body: unknown): Record<string, unknown> =>
+    body && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : {};
+
+  // FS-12: id ที่ Server สร้าง `usr-<Date.now()>` — ชนแล้วสร้างใหม่ (ไม่ตอบ 409)
+  async function generateUserId(): Promise<string> {
+    let id = `usr-${Date.now()}`;
+    while (await userIdExists(id)) {
+      id = `usr-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    }
+    return id;
+  }
+
   app.post(
     "/api/users",
     requireAuth,
     requireRole("Admin"),
     async (req, res) => {
       try {
-        const newUser = { ...req.body };
-        if (!newUser.id) newUser.id = `usr-${Date.now()}`;
-        if (newUser.password) {
-          newUser.password = await bcrypt.hash(newUser.password, SALT_ROUNDS);
+        const body = userBodyOf(req.body);
+        // C-05: departmentId ไม่ว่างแต่ไม่มีจริง → 400; ว่าง/ไม่ส่ง → NULL
+        const dept = normalizeUserDepartment(body.departmentId);
+        if (dept.ok === false) {
+          return res.status(400).json(INVALID_USER_DEPARTMENT_BODY);
         }
-        db_users.push(newUser);
-        res.json(sanitizeUser(newUser));
+        // E-2: id ที่ Client ส่งมาซ้ำ → 409 (เดิม `!newUser.id` = ให้ Server สร้าง)
+        const clientId = body.id ? (toTextOrNull(body.id) as string) : undefined;
+        if (clientId !== undefined && (await userIdExists(clientId))) {
+          return res.status(409).json(DUPLICATE_USER_ID_BODY);
+        }
+        const fields = pickUserFields(body, dept.value);
+        // E-1.2 / OD-UQ-01: employeeId ซ้ำ (ไม่สนตัวพิมพ์ รวม Terminated) → 409
+        if (fields.employeeId && (await employeeIdTaken(fields.employeeId))) {
+          return res.status(409).json(DUPLICATE_EMPLOYEE_ID_BODY);
+        }
+        const passwordHash = body.password
+          ? await bcrypt.hash(body.password as string, SALT_ROUNDS)
+          : null;
+
+        for (let attempt = 1; ; attempt++) {
+          const id = clientId ?? (await generateUserId());
+          try {
+            const created = await insertUser({ id, fields, passwordHash });
+            return res.json(sanitizeUser(created));
+          } catch (err) {
+            const info = classifyDbError(err);
+            // id ที่ Server สร้างชนกันพร้อมกัน (race) → สร้างใหม่
+            if (
+              clientId === undefined &&
+              info.kind === "unique" &&
+              info.constraint === "users_pk" &&
+              attempt < 5
+            ) {
+              continue;
+            }
+            throw err;
+          }
+        }
       } catch (err: any) {
+        if (isDbError(err)) {
+          return sendUserWriteError(res, err, "POST /api/users");
+        }
         res.status(500).json({ error: err.message });
       }
     },
@@ -2039,21 +2199,37 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     async (req, res) => {
       try {
         const { id } = req.params;
-        const updatedUser = { ...req.body };
-        if (updatedUser.password) {
-          updatedUser.password = await bcrypt.hash(
-            updatedUser.password,
-            SALT_ROUNDS,
-          );
-        } else {
-          delete updatedUser.password;
+        const body = userBodyOf(req.body);
+        const existing = await findUserById(id);
+        if (!existing) return res.json(null); // ไม่พบผู้ใช้ → 200 null ตามเดิม
+
+        // C-05 เมื่อส่ง departmentId มา
+        let departmentId: string | null | undefined;
+        if (Object.prototype.hasOwnProperty.call(body, "departmentId")) {
+          const dept = normalizeUserDepartment(body.departmentId);
+          if (dept.ok === false) {
+            return res.status(400).json(INVALID_USER_DEPARTMENT_BODY);
+          }
+          departmentId = dept.value;
         }
-        db_users = db_users.map((u) =>
-          u.id === id ? { ...u, ...updatedUser } : u,
-        );
-        const saved = db_users.find((u) => u.id === id);
+        // F-06: ไม่สนค่า id ใน Body — pickUserFields ไม่รวม id
+        const fields = pickUserFields(body, departmentId);
+        if (
+          fields.employeeId &&
+          (await employeeIdTaken(fields.employeeId, id))
+        ) {
+          return res.status(409).json(DUPLICATE_EMPLOYEE_ID_BODY);
+        }
+        // รหัสผ่านว่าง = ไม่เปลี่ยน
+        const passwordHash = body.password
+          ? await bcrypt.hash(body.password as string, SALT_ROUNDS)
+          : undefined;
+        const saved = await updateUser(id, fields, passwordHash);
         res.json(saved ? sanitizeUser(saved) : null);
       } catch (err: any) {
+        if (isDbError(err)) {
+          return sendUserWriteError(res, err, "PUT /api/users/:id");
+        }
         res.status(500).json({ error: err.message });
       }
     },
@@ -2062,16 +2238,32 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/users/:id",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const { id } = req.params;
-        db_users = db_users.filter((u) => u.id !== id);
+        // F-01: ไม่ลบแถว — ตั้ง status = Terminated (ไม่พบ = { success: true } ตามเดิม)
+        await terminateUser(id);
         res.json({ success: true });
       } catch (err: any) {
+        if (isDbError(err)) {
+          return sendDbFailure(res, err, "DELETE /api/users/:id");
+        }
         res.status(500).json({ error: err.message });
       }
     },
   );
+
+  // §21.25: รายการแผนกจาก DB (โหลดตอนเริ่ม Server)
+  app.get("/api/departments", requireAuth, (_req, res) => {
+    res.json(
+      departmentsForApi.map((d) => ({
+        id: d.id,
+        parentId: d.parentId,
+        name: d.name,
+        code: d.code,
+      })),
+    );
+  });
 
   // Documents APIs
   // GET /api/documents: Role & Department Authorization Enforcement
@@ -2665,7 +2857,14 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // ส่งข้อสอบ: server ตรวจเอง — ปรนัย/ถูก-ผิด/จับคู่ตัดสินทันที
   // ถ้ามีข้อ Essay จะเป็น PendingReview จนกว่าผู้ตรวจให้คะแนนครบ (ก้อนที่ 2)
-  app.post("/api/courses/:id/submit-quiz", requireAuth, (req, res) => {
+  app.post("/api/courses/:id/submit-quiz", requireAuth, async (req, res) => {
+    // 01C-1: อ่านผู้ใช้จาก DB ก่อน — การตรวจและแก้ข้อมูลใน Memory ด้านล่างยังทำต่อเนื่องแบบ Synchronous เหมือนเดิม
+    let user: UserType | undefined;
+    try {
+      user = await findUserById(req.authUser!.id);
+    } catch (err) {
+      return sendDbFailure(res, err, "POST /api/courses/:id/submit-quiz");
+    }
     try {
       const course = db_courses.find((c) => c.id === req.params.id);
       if (!course) {
@@ -2679,7 +2878,6 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           message: "หลักสูตรนี้ยังไม่ได้รับการอนุมัติ",
         });
       }
-      const user = db_users.find((u) => u.id === req.authUser!.id);
       if (
         !user ||
         user.status === "Suspended" ||
@@ -2776,7 +2974,14 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/quiz_submissions/:id/grade",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
+    async (req, res) => {
+      // 01C-1: อ่านผู้ตรวจจาก DB ก่อน (ใช้แค่ข้อความ Audit) — Guard และ finalize ใน Memory ยังต่อเนื่องแบบ Synchronous
+      let reviewer: UserType | undefined;
+      try {
+        reviewer = await findUserById(req.authUser!.id);
+      } catch (err) {
+        return sendDbFailure(res, err, "POST /api/quiz_submissions/:id/grade");
+      }
       try {
         const sub = db_quiz_submissions.find((s) => s.id === req.params.id);
         if (!sub) {
@@ -2851,16 +3056,21 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           req.authUser!.employeeId,
         );
 
-        const reviewer = db_users.find((u) => u.id === req.authUser!.id);
-        db_system_audit_logs.unshift({
-          id: `log-${crypto.randomUUID()}`,
-          action: "GRADE_ESSAY",
-          details: `ตรวจข้อสอบ Essay: ${sub.userName} (${sub.employeeId}) หลักสูตร "${sub.courseTitle}" คะแนน ${formatScore(result.score)}% (${result.pass ? "ผ่าน" : "ไม่ผ่าน"})`,
-          performedBy: reviewer
-            ? `${reviewer.name} (${reviewer.employeeId})`
-            : req.authUser!.employeeId,
-          timestamp: new Date().toISOString(),
-        });
+        // TODO(01C-6, TX-03): Audit ยังไม่อยู่ใน Transaction เดียวกับผลตรวจ — จะรวมเมื่อ quiz_submissions ย้ายขึ้น DB
+        // ระหว่างนี้ ถ้าเขียน Audit ไม่สำเร็จ ผลตรวจใน Memory ถูกบันทึกแล้วแต่ตอบ 500
+        try {
+          await insertAuditLog(undefined, {
+            id: `log-${crypto.randomUUID()}`,
+            action: "GRADE_ESSAY",
+            details: `ตรวจข้อสอบ Essay: ${sub.userName} (${sub.employeeId}) หลักสูตร "${sub.courseTitle}" คะแนน ${formatScore(result.score)}% (${result.pass ? "ผ่าน" : "ไม่ผ่าน"})`,
+            performedBy: reviewer
+              ? `${reviewer.name} (${reviewer.employeeId})`
+              : req.authUser!.employeeId,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (auditErr) {
+          return sendDbFailure(res, auditErr, "POST /api/quiz_submissions/:id/grade (audit)");
+        }
 
         res.json(sub);
       } catch (err: any) {
@@ -2879,7 +3089,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     }
     res.json(db_kb_articles);
   });
-  app.post("/api/kb_articles", requireAuth, (req, res) => {
+  app.post("/api/kb_articles", requireAuth, async (req, res) => {
     // ทุก role ที่ login แล้วเสนอความรู้/ร่างบทความได้ (workflow อนุมัติควบคุมที่ /approve)
     try {
       const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -2944,7 +3154,13 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
       // --- ฟิลด์ระบบ: มาจากผู้ใช้ที่ server ยืนยันแล้วเท่านั้น ---
       const me = req.authUser!;
-      const userRecord = db_users.find((u) => u.id === me.id);
+      let userRecord: UserType | undefined;
+      try {
+        userRecord = await findUserById(me.id);
+      } catch (dbErr) {
+        return sendDbFailure(res, dbErr, "POST /api/kb_articles");
+      }
+      // หลังจุดนี้ การสร้าง id กันชนและ unshift ทำต่อเนื่องแบบ Synchronous เหมือนเดิม
       const authorDeptId = userRecord?.departmentId || me.departmentId;
 
       // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision
@@ -3288,17 +3504,25 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   // GET /api/learning/stats — aggregate only
   // Admin/Editor: ระดับองค์กร | Viewer: ของตัวเองเท่านั้น
   // ไม่อ่าน req.query / req.body เลย → ไม่มีช่องให้ client เลือก user
-  app.get("/api/learning/stats", requireAuth, (req, res) => {
+  app.get("/api/learning/stats", requireAuth, async (req, res) => {
+    let allUsers: UserType[];
+    try {
+      allUsers = await listUsers();
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/learning/stats");
+    }
     try {
       const me = req.authUser!;
       const orgWide = canViewAllLearningData(me);
 
+      // Q5 (01C-1): ไม่นับผู้ใช้ Terminated ในสถิติ — คงความหมายเดิมที่ผู้ใช้ที่ถูกลบหายจากระบบ (F-01)
+      const countedUsers = allUsers.filter((u) => u.status !== "Terminated");
       const scopedUsers = orgWide
-        ? db_users
-        : db_users.filter((u) => u.id === me.id);
+        ? countedUsers
+        : countedUsers.filter((u) => u.id === me.id);
       const ids = new Set(scopedUsers.map((u) => u.id));
       const emps = new Set(scopedUsers.map((u) => u.employeeId));
-      const empById = new Map(db_users.map((u) => [u.id, u.employeeId]));
+      const empById = new Map(allUsers.map((u) => [u.id, u.employeeId]));
 
       const progress = db_user_progress.filter((p) => ids.has(p.userId));
       const exams = db_exam_results.filter((e) => emps.has(e.employeeId));
@@ -3554,7 +3778,14 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   );
 
   // เช็คอินด้วย token จาก QR — ข้อมูลผู้เช็คอินมาจาก DB ตาม token login ไม่ใช่จาก body
-  app.post("/api/checkin", requireAuth, (req, res) => {
+  app.post("/api/checkin", requireAuth, async (req, res) => {
+    // 01C-1: อ่านผู้ใช้จาก DB ก่อน — การตรวจซ้ำและ unshift ด้านล่างยังต่อเนื่องแบบ Synchronous เหมือนเดิม
+    let user: UserType | undefined;
+    try {
+      user = await findUserById(req.authUser!.id);
+    } catch (err) {
+      return sendDbFailure(res, err, "POST /api/checkin");
+    }
     try {
       const token = typeof req.body.token === "string" ? req.body.token : "";
       const session = token
@@ -3581,7 +3812,6 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         });
       }
 
-      const user = db_users.find((u) => u.id === req.authUser!.id);
       if (
         !user ||
         user.status === "Suspended" ||
@@ -3689,7 +3919,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/search_resolutions",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const keyword =
           typeof req.body.keyword === "string" ? req.body.keyword : "";
@@ -3739,13 +3969,19 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         };
         db_search_resolutions.unshift(resolution);
 
-        db_system_audit_logs.unshift({
-          id: `log-${crypto.randomUUID()}`,
-          action: "RESOLVE_GAP",
-          details: `ปิดช่องว่างความรู้ "${keyword.slice(0, 200)}" มาตรการ: ${resolution.action.slice(0, 200)}`,
-          performedBy: `${req.authUser!.name} (${req.authUser!.employeeId})`,
-          timestamp: resolution.resolvedAt,
-        });
+        // TODO(01C-4, TX-08): Audit ยังไม่อยู่ใน Transaction เดียวกับ search_resolutions — จะรวมเมื่อกลุ่มนี้ย้ายขึ้น DB
+        // ระหว่างนี้ ถ้าเขียน Audit ไม่สำเร็จ การปิดช่องว่างใน Memory ถูกบันทึกแล้วแต่ตอบ 500
+        try {
+          await insertAuditLog(undefined, {
+            id: `log-${crypto.randomUUID()}`,
+            action: "RESOLVE_GAP",
+            details: `ปิดช่องว่างความรู้ "${keyword.slice(0, 200)}" มาตรการ: ${resolution.action.slice(0, 200)}`,
+            performedBy: `${req.authUser!.name} (${req.authUser!.employeeId})`,
+            timestamp: resolution.resolvedAt,
+          });
+        } catch (auditErr) {
+          return sendDbFailure(res, auditErr, "POST /api/search_resolutions (audit)");
+        }
 
         res.json(resolution);
       } catch (err: any) {
@@ -3951,9 +4187,21 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/km_contribution_logs",
     requireAuth,
     requireRole("Admin"), // XP จริงสร้างจาก finalizeSubmission เท่านั้น — route นี้เหลือไว้ให้ Admin แก้ด้วยมือ
-    (req, res) => {
+    async (req, res) => {
       try {
-        const target = db_users.find((u) => u.id === req.body?.userId);
+        // เดิมเทียบ `u.id === req.body.userId` — ค่าที่ไม่ใช่ข้อความไม่มีทางตรง
+        const targetId = req.body?.userId;
+        let target: UserType | undefined;
+        try {
+          target =
+            typeof targetId === "string"
+              ? await findUserById(targetId)
+              : undefined;
+        } catch (dbErr) {
+          return sendDbFailure(res, dbErr, "POST /api/km_contribution_logs");
+        }
+        // 01C-1 (Owner): ผู้ใช้ Terminated = ไม่พบผู้ใช้ (เดิมผู้ใช้ที่ถูกลบหายจากระบบ) → 400 รหัส/ข้อความเดิม
+        if (target?.status === "Terminated") target = undefined;
         const points = Number(req.body?.points);
         if (!target || !Number.isFinite(points)) {
           return res.status(400).json({
@@ -3979,9 +4227,15 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   );
   // Leaderboard: server คำนวณจาก logs ทั้งหมด ทุก role เห็นตารางเดียวกัน
   // คืนเฉพาะ field แสดงผล (ไม่มี userId / log รายรายการ) และไม่อ่าน query/body
-  app.get("/api/leaderboard", requireAuth, (req, res) => {
+  app.get("/api/leaderboard", requireAuth, async (req, res) => {
+    let allUsers: UserType[];
     try {
-      const activeUsers = db_users.filter(
+      allUsers = await listUsers();
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/leaderboard");
+    }
+    try {
+      const activeUsers = allUsers.filter(
         (u) => u.status !== "Suspended" && u.status !== "Terminated",
       );
       const board = calculateLeaderboard(
@@ -4060,8 +4314,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/system_audit_logs",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
-      res.json(db_system_audit_logs);
+    async (req, res) => {
+      try {
+        res.json(await listAuditLogs()); // ใหม่สุดก่อน (เดิม unshift)
+      } catch (err) {
+        return sendDbFailure(res, err, "GET /api/system_audit_logs");
+      }
     },
   );
 
@@ -4075,7 +4333,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   ];
   const AUDIT_DETAILS_MAX_LENGTH = 1000;
 
-  app.post("/api/system_audit_logs", requireAuth, (req, res) => {
+  app.post("/api/system_audit_logs", requireAuth, async (req, res) => {
     try {
       const body = req.body;
       // express.json() รับทั้ง object และ array — ต้องเป็น object จริงเท่านั้น
@@ -4126,10 +4384,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         performedBy: `${me.name} (${me.employeeId})`,
         timestamp: new Date().toISOString(),
       };
-      db_system_audit_logs.unshift(log);
+      await insertAuditLog(undefined, log);
       res.json(log);
     } catch (err: any) {
       // ไม่ส่ง err.message กลับ client — บันทึกรายละเอียดไว้ที่ server log เท่านั้น
+      // (01C-1: Error ของ DB ก็ตอบ AUDIT_LOG_ERROR แบบเดิมของ Route นี้)
       console.error("POST /api/system_audit_logs failed:", err);
       res.status(500).json({
         error: "AUDIT_LOG_ERROR",

@@ -598,6 +598,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   }, [currentUser, users]);
 
   const visibleUsers = users;
+  // 01C-1 (Q5): ช่องสรุปไม่นับผู้ใช้ Terminated — ตารางรายชื่อ/CSV ยังแสดงทุกคนพร้อมสถานะ
+  const isCountedInSummary = (u: User) => u.status !== "Terminated";
 
   const filteredUsers = visibleUsers.filter((u) => {
     const deptName = getDepartmentById(u.departmentId)?.name || "";
@@ -1939,7 +1941,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       จำนวนพนักงานทั้งหมด
                     </span>
                     <strong className="text-xl text-slate-800 block mt-1">
-                      {visibleUsers.length} คน
+                      {visibleUsers.filter(isCountedInSummary).length} คน
                     </strong>
                   </div>
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
@@ -2070,7 +2072,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                           </span>
                           <p className="text-xs text-slate-600 mt-0.5">
                             พบบุคลากรสังกัดแผนกหมุนเวียนนี้ทั้งหมดจำนวน:{" "}
-                            <strong>{deptUsers.length} ท่าน</strong>
+                            <strong>
+                              {deptUsers.filter(isCountedInSummary).length} ท่าน
+                            </strong>
                           </p>
                         </div>
                         <span className="text-xs font-mono font-black text-indigo-700 bg-white border px-3 py-1.5 rounded-lg shadow-xs">

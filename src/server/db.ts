@@ -92,10 +92,12 @@ export function query<R extends QueryResultRow = QueryResultRow>(
  * รัน `fn` ใน Transaction เดียว (§21.22 §3.1 ข้อ 1)
  *
  * connect → แนบ client.on('error') ตลอดช่วงที่ถือ Client → BEGIN → fn → COMMIT
- * Error → ROLLBACK (ถ้า Client ยังใช้ได้) → release(err) ถ้า Client เสีย / release() ถ้าปกติ
- * → ถอด Listener → โยน Error เดิมต่อ
+ * Error → ROLLBACK (ถ้า Client ยังใช้ได้) → ถอด Listener → release(err) ถ้า Client เสีย / release() ถ้าปกติ
+ * → โยน Error เดิมต่อ
  *
- * หมายเหตุ: pg-pool แนบ Listener ของตัวเองคืนตอน release เสมอ จึงถอดของเราหลัง release ได้อย่างปลอดภัย
+ * 01C-1 B1: ถอด Listener ของเรา "ก่อน" release เพื่อไม่ให้ Listener นี้เห็น Error ของผู้ใช้ Client คนถัดไป
+ * ทั้งสองคำสั่งเรียกต่อกันแบบ Synchronous ในรอบ Event loop เดียวกัน จึงไม่มีช่วงที่ Client ไม่มี Listener
+ * (pg-pool แนบ Listener ของ Pool คืนใน release() ทันที — pg-pool/index.js `_release`)
  */
 export async function withTransaction<T>(
   fn: (client: PoolClient) => Promise<T>,
@@ -133,9 +135,9 @@ export async function withTransaction<T>(
   } finally {
     // Error ระหว่าง COMMIT/BEGIN ที่ทำให้ Client เสีย ก็ถูกจับผ่าน clientError เช่นกัน
     const releaseErr = brokenClient ?? clientError;
+    client.removeListener("error", onClientError);
     if (releaseErr) client.release(releaseErr);
     else client.release();
-    client.removeListener("error", onClientError);
   }
 }
 

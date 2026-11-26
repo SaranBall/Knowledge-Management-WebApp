@@ -48,7 +48,7 @@ import {
   getApiErrorMessage,
   type DocumentStats,
 } from "./services/api";
-import { getDepartmentById } from "./utils/departmentUtils";
+import { getDepartmentById, setDepartments } from "./utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "./utils/assets";
 
 // Import initial dataset
@@ -151,6 +151,13 @@ export default function App() {
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // §21.25 (01C-1): แผนกมาจาก DB ผ่าน GET /api/departments — ต้องได้ก่อนแสดงหน้าที่ใช้ข้อมูลแผนก
+  const [departmentsStatus, setDepartmentsStatus] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
+  const [departmentsError, setDepartmentsError] = useState<string>("");
+  const [dataReloadKey, setDataReloadKey] = useState<number>(0);
+
   // Load all entities from real API on mount or when logged in
   useEffect(() => {
     const token = localStorage.getItem("rm_auth_token");
@@ -166,8 +173,29 @@ export default function App() {
     }
 
     const fetchAllData = async () => {
+      // 1) แผนกก่อน — ไม่สำเร็จ = แสดงข้อความผิดพลาด (ไม่แสดงหน้าที่ข้อมูลแผนกว่าง)
+      setIsLoading(true);
+      setDepartmentsStatus("loading");
+      setDepartmentsError("");
       try {
-        setIsLoading(true);
+        const fetchedDepartments = await api.getDepartments();
+        if (!Array.isArray(fetchedDepartments) || fetchedDepartments.length === 0) {
+          throw new Error("ไม่พบข้อมูลแผนกจากเซิร์ฟเวอร์");
+        }
+        setDepartments(fetchedDepartments);
+        setDepartmentsStatus("ready");
+      } catch (err) {
+        console.error("Failed to load departments:", err);
+        setDepartmentsError(
+          getApiErrorMessage(err, "ไม่สามารถโหลดข้อมูลแผนกจากเซิร์ฟเวอร์ได้"),
+        );
+        setDepartmentsStatus("error");
+        setIsLoading(false);
+        return;
+      }
+
+      // 2) ข้อมูลอื่นตามเดิม
+      try {
         const [
           fetchedUsers,
           fetchedDocs,
@@ -234,7 +262,7 @@ export default function App() {
     };
 
     fetchAllData();
-  }, [isLogged]);
+  }, [isLogged, dataReloadKey]);
 
   // --- Manual Login States ---
   const [loginEmployeeId, setLoginEmployeeId] = useState<string>("");
@@ -260,6 +288,8 @@ export default function App() {
     setKmContributionLogs([]);
     setEmployeeMaster(INITIAL_EMPLOYEE_MASTER);
     setDocumentStats(null);
+    setDepartmentsStatus("loading");
+    setDepartmentsError("");
     setActiveMenu("Dashboard");
     setGlobalSearch("");
   };
@@ -1084,6 +1114,45 @@ export default function App() {
               <span className="w-1.5 h-1.5 rounded-full bg-[#e51a24] animate-ping" />
               <span>SECURE ACCESS // ISO9001 • GMP • HACCP STANDARD</span>
             </div>
+          </div>
+        </div>
+      ) : departmentsStatus !== "ready" ? (
+        /* §21.25: รอข้อมูลแผนกจากเซิร์ฟเวอร์ก่อนแสดงหน้าที่ใช้ข้อมูลแผนก */
+        <div
+          id="departments-gate"
+          className="flex-1 flex items-center justify-center py-12 px-4"
+        >
+          <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-[#e1ded5] text-center space-y-4">
+            {departmentsStatus === "loading" ? (
+              <p className="text-sm font-semibold text-slate-600">
+                กำลังโหลดข้อมูลระบบ…
+              </p>
+            ) : (
+              <>
+                <p className="text-sm font-bold text-rose-600">
+                  ❌ โหลดข้อมูลแผนกไม่สำเร็จ
+                </p>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {departmentsError}
+                </p>
+                <div className="flex justify-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setDataReloadKey((k) => k + 1)}
+                    className="bg-[#15329c] hover:bg-[#11297e] text-white py-2 px-4 text-xs font-bold rounded-xl cursor-pointer"
+                  >
+                    ลองใหม่
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => endSession()}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 px-4 text-xs font-bold rounded-xl cursor-pointer"
+                  >
+                    ออกจากระบบ
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : (
