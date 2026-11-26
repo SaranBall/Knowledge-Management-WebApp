@@ -10,7 +10,6 @@ import jwt from "jsonwebtoken";
 
 import {
   INITIAL_USERS,
-  INITIAL_DOCUMENTS,
   INITIAL_COURSES,
   INITIAL_KB_ARTICLES,
   INITIAL_EXPERTS,
@@ -73,6 +72,17 @@ import {
   replaceAllEmployees,
   toEmployeeFields,
 } from "./src/server/repos/employeeMaster";
+import {
+  approveDocument,
+  deleteDocument,
+  documentIdExists,
+  findDocument,
+  incrementCounter,
+  insertDocument,
+  listDocuments,
+  toDocumentFields,
+  updateDocument,
+} from "./src/server/repos/documents";
 import { classifyDbError, isDbError } from "./src/server/dbErrors";
 import { loadDepartments } from "./src/server/repos/departments";
 import {
@@ -578,8 +588,8 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
-  // users และ system_audit_logs อยู่ใน DB แล้ว (01C-1) — ดู src/server/repos/
-  let db_documents: DocumentItem[] = [...INITIAL_DOCUMENTS];
+  // users และ system_audit_logs อยู่ใน DB แล้ว (01C-1), employee_master (01C-2),
+  // documents + ACL (01C-3) — ดู src/server/repos/
   let db_courses: Course[] = [...INITIAL_COURSES];
   let db_kb_articles: KBArticle[] = [...INITIAL_KB_ARTICLES];
   let db_experts: Expert[] = [...INITIAL_EXPERTS];
@@ -1368,79 +1378,84 @@ async function startServer() {
 
   // สร้างลิงก์ชั่วคราวสำหรับฝังใน src/href ที่แนบ Authorization header เองไม่ได้
   // Security invariant 8: resolve file -> owning document -> canAccessDocument before sign
-  app.post("/api/files/sign", requireAuth, (req, res) => {
-    const { filename } = req.body;
-    if (
-      typeof filename !== "string" ||
-      !filename ||
-      filename.includes("/") ||
-      filename.includes("..")
-    ) {
-      return res.status(400).json({ error: "INVALID_FILENAME" });
-    }
-
-    const currentDbUser = req.authUser!;
-    const meta = loadSidecar(filename);
-    if (!meta) {
-      return res
-        .status(404)
-        .json({ error: "FILE_NOT_FOUND", message: "ไม่พบไฟล์ที่ระบุในระบบ" });
-    }
-
-    // Resolve owning document
-    if (meta.documentId) {
+  app.post("/api/files/sign", requireAuth, async (req, res) => {
+    try {
+      const { filename } = req.body;
       if (
-        meta.documentId.startsWith("deleted:") ||
-        meta.documentId.startsWith("replaced:")
+        typeof filename !== "string" ||
+        !filename ||
+        filename.includes("/") ||
+        filename.includes("..")
       ) {
-        return res.status(403).json({
-          error: "ORPHANED_FILE",
-          message:
-            "เอกสารที่ผูกกับไฟล์นี้ถูกลบหรือเปลี่ยนไฟล์แล้ว ไม่สามารถเข้าถึงไฟล์ได้",
-        });
+        return res.status(400).json({ error: "INVALID_FILENAME" });
       }
-      const owningDoc = db_documents.find((d) => d.id === meta.documentId);
-      if (!owningDoc) {
-        return res.status(403).json({
-          error: "ORPHANED_FILE",
-          message: "ไม่พบเอกสารต้นทางที่ผูกกับไฟล์นี้",
-        });
-      }
-      // Check Document Department Authorization
-      if (!canAccessDocument(currentDbUser, owningDoc)) {
-        return res.status(403).json({
-          error: "FORBIDDEN",
-          message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารและไฟล์ของแผนกนี้",
-        });
-      }
-      // Check QP Rule: QP files cannot be downloaded/signed by non-Admin
-      if (owningDoc.type === "QP" && currentDbUser.role !== "Admin") {
-        return res.status(403).json({
-          error: "QP_RESTRICTED",
-          message:
-            "ระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์การดาวน์โหลดเฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
-        });
-      }
-    } else if (meta.courseId) {
-      const denial = courseFileDenial(currentDbUser, meta);
-      if (denial) {
-        return res.status(denial.status).json(denial.body);
-      }
-    } else {
-      // Unbound file: only uploader or Admin can sign/access
-      if (
-        meta.uploadedBy !== currentDbUser.employeeId &&
-        currentDbUser.role !== "Admin"
-      ) {
-        return res.status(403).json({
-          error: "FORBIDDEN",
-          message: "ไฟล์นี้ยังไม่ได้ผูกกับเอกสาร และคุณไม่ใช่ผู้อัปโหลดไฟล์",
-        });
-      }
-    }
 
-    const token = signFileToken(filename, currentDbUser);
-    res.json({ url: `/uploads/${filename}?t=${token}` });
+      const currentDbUser = req.authUser!;
+      const meta = loadSidecar(filename);
+      if (!meta) {
+        return res
+          .status(404)
+          .json({ error: "FILE_NOT_FOUND", message: "ไม่พบไฟล์ที่ระบุในระบบ" });
+      }
+
+      // Resolve owning document
+      if (meta.documentId) {
+        if (
+          meta.documentId.startsWith("deleted:") ||
+          meta.documentId.startsWith("replaced:")
+        ) {
+          return res.status(403).json({
+            error: "ORPHANED_FILE",
+            message:
+              "เอกสารที่ผูกกับไฟล์นี้ถูกลบหรือเปลี่ยนไฟล์แล้ว ไม่สามารถเข้าถึงไฟล์ได้",
+          });
+        }
+        // 01C-3: เอกสารเจ้าของไฟล์อ่านจาก DB (ไม่พบ = ORPHANED_FILE เดิม)
+        const owningDoc = await findDocument(undefined, meta.documentId);
+        if (!owningDoc) {
+          return res.status(403).json({
+            error: "ORPHANED_FILE",
+            message: "ไม่พบเอกสารต้นทางที่ผูกกับไฟล์นี้",
+          });
+        }
+        // Check Document Department Authorization
+        if (!canAccessDocument(currentDbUser, owningDoc)) {
+          return res.status(403).json({
+            error: "FORBIDDEN",
+            message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารและไฟล์ของแผนกนี้",
+          });
+        }
+        // Check QP Rule: QP files cannot be downloaded/signed by non-Admin
+        if (owningDoc.type === "QP" && currentDbUser.role !== "Admin") {
+          return res.status(403).json({
+            error: "QP_RESTRICTED",
+            message:
+              "ระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์การดาวน์โหลดเฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
+          });
+        }
+      } else if (meta.courseId) {
+        const denial = courseFileDenial(currentDbUser, meta);
+        if (denial) {
+          return res.status(denial.status).json(denial.body);
+        }
+      } else {
+        // Unbound file: only uploader or Admin can sign/access
+        if (
+          meta.uploadedBy !== currentDbUser.employeeId &&
+          currentDbUser.role !== "Admin"
+        ) {
+          return res.status(403).json({
+            error: "FORBIDDEN",
+            message: "ไฟล์นี้ยังไม่ได้ผูกกับเอกสาร และคุณไม่ใช่ผู้อัปโหลดไฟล์",
+          });
+        }
+      }
+
+      const token = signFileToken(filename, currentDbUser);
+      res.json({ url: `/uploads/${filename}?t=${token}` });
+    } catch (err) {
+      return sendDbFailure(res, err, "POST /api/files/sign");
+    }
   });
 
   // รับได้ทั้ง Authorization header ปกติ หรือ query token จาก /api/files/sign
@@ -1507,7 +1522,7 @@ async function startServer() {
   }
 
   // Serve the uploaded files (Security invariant 9: defense-in-depth authorization check)
-  app.get("/uploads/:filename", fileRequestAuth, (req, res) => {
+  app.get("/uploads/:filename", fileRequestAuth, async (req, res) => {
     const filename = req.params.filename;
     if (filename.endsWith(".meta.json")) {
       return res.status(403).json({ error: "FORBIDDEN" });
@@ -1530,7 +1545,13 @@ async function startServer() {
           message: "เอกสารที่ผูกกับไฟล์นี้ถูกลบหรือเปลี่ยนไฟล์แล้ว",
         });
       }
-      const owningDoc = db_documents.find((d) => d.id === meta.documentId);
+      // 01C-3: เอกสารเจ้าของไฟล์อ่านจาก DB (ไม่พบ = ORPHANED_FILE เดิม)
+      let owningDoc: DocumentItem | undefined;
+      try {
+        owningDoc = await findDocument(undefined, meta.documentId);
+      } catch (err) {
+        return sendDbFailure(res, err, "GET /uploads/:filename");
+      }
       if (!owningDoc) {
         return res.status(403).json({
           error: "ORPHANED_FILE",
@@ -1647,7 +1668,14 @@ async function startServer() {
         });
       }
       // Context is built purely from authorized resources on the server
-      const authorizedDocs = db_documents.filter(
+      // 01C-3: เอกสารอ่านจาก DB แล้วกรอง Published + ACL แบบเดิม
+      let allDocs: DocumentItem[];
+      try {
+        allDocs = await listDocuments();
+      } catch (dbErr) {
+        return sendDbFailure(res, dbErr, "POST /api/chat");
+      }
+      const authorizedDocs = allDocs.filter(
         (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
       );
       const approvedKBs = db_kb_articles.filter((k) => k.status === "Approved");
@@ -2274,7 +2302,16 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
   // Documents APIs
   // GET /api/documents: Role & Department Authorization Enforcement
-  app.get("/api/documents", requireAuth, (req, res) => {
+  // 01C-3: เอกสาร + ACL อยู่ใน km.documents / km.document_allowed_departments (FS-02, FS-06)
+  // ทุกเส้นเป็น async — ลำดับการตรวจ Status code ข้อความ Error และ Response เหมือนเดิม
+  // Error ใด ๆ → 500 INTERNAL_ERROR (ไม่ส่งข้อความของ DB)
+  app.get("/api/documents", requireAuth, async (req, res) => {
+    let docs: DocumentItem[];
+    try {
+      docs = await listDocuments();
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/documents");
+    }
     const currentDbUser = req.authUser!;
     const role = currentDbUser.role;
 
@@ -2288,13 +2325,13 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
     if (role === "Admin") {
       return res.json(
-        db_documents.map((d) => ({ ...sanitizeQP(d), accessible: true })),
+        docs.map((d) => ({ ...sanitizeQP(d), accessible: true })),
       );
     }
 
     if (role === "Viewer") {
       // Viewer เห็นเฉพาะเอกสารที่ Published และตนเองได้รับอนุญาตตามแผนกเท่านั้น
-      const visible = db_documents.filter(
+      const visible = docs.filter(
         (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
       );
       return res.json(
@@ -2305,16 +2342,14 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     if (role === "Editor") {
       // Editor: เห็นเฉพาะเอกสารของแผนกที่ตนเองได้รับสิทธิ์เท่านั้น (ทั้ง Draft, Pending, Published)
       // เอกสารข้ามแผนกที่ไม่มีสิทธิ์ จะไม่แสดงในระบบเลยเช่นเดียวกับ Viewer
-      const visible = db_documents.filter((d) =>
-        canAccessDocument(currentDbUser, d),
-      );
+      const visible = docs.filter((d) => canAccessDocument(currentDbUser, d));
       return res.json(
         visible.map((d) => ({ ...sanitizeQP(d), accessible: true })),
       );
     }
 
     // Default fallback (role อื่นๆ)
-    const fallbackVisible = db_documents.filter(
+    const fallbackVisible = docs.filter(
       (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
     );
     res.json(
@@ -2323,19 +2358,19 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // GET /api/documents/stats: Global Stats (สำหรับ Dashboard KPI ส่วนกลาง)
-  app.get("/api/documents/stats", requireAuth, (req, res) => {
+  // คำนวณใน JS จากรายการเอกสารเดียวกับ GET (ไม่ใช้ SQL aggregate) + KB ใน Memory (ย้ายใน 01C-4)
+  app.get("/api/documents/stats", requireAuth, async (req, res) => {
     try {
+      const allDocs = await listDocuments();
       const currentMonthKey = new Date().toISOString().slice(0, 7); // "YYYY-MM"
-      const publishedDocs = db_documents.filter(
-        (d) => d.status === "Published",
-      );
-      const pendingDocs = db_documents.filter(
+      const publishedDocs = allDocs.filter((d) => d.status === "Published");
+      const pendingDocs = allDocs.filter(
         (d) => d.status === "Pending Approval",
       );
       const approvedKBs = db_kb_articles.filter((k) => k.status === "Approved");
 
-      const docViews = db_documents.reduce((sum, d) => sum + (d.views || 0), 0);
-      const docDownloads = db_documents.reduce(
+      const docViews = allDocs.reduce((sum, d) => sum + (d.views || 0), 0);
+      const docDownloads = allDocs.reduce(
         (sum, d) => sum + (d.downloads || 0),
         0,
       );
@@ -2349,7 +2384,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       ).length;
 
       res.json({
-        total: db_documents.length,
+        total: allDocs.length,
         published: publishedDocs.length,
         pending: pendingDocs.length,
         views: docViews + kbViews,
@@ -2358,26 +2393,34 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         kbApproved: approvedKBs.length,
         kbViews,
       });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/documents/stats");
     }
   });
+
+  // FS-12 แบบเดียวกับผู้ใช้: id `doc-<Date.now()>` — ชนในฐานแล้วสร้างใหม่ด้วย -hex6 (ไม่ตอบ 409)
+  async function generateDocumentId(): Promise<string> {
+    let id = `doc-${Date.now()}`;
+    while (await documentIdExists(undefined, id)) {
+      id = `doc-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    }
+    return id;
+  }
 
   // POST /api/documents: First Binding (Server-owned file ownership)
   app.post(
     "/api/documents",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
+    async (req, res) => {
+      // TX-11 (B-14): ไฟล์ที่ผูกถูก "จอง" ใน Sidecar ทันทีในรอบเดียวกับการตรวจ (ไม่มี await คั่น)
+      // แล้วจึงเขียนเอกสาร + ACL ใน Transaction · ล้มเหลว = คืน Sidecar เป็นค่าเดิม
+      let reservation: {
+        storedName: string;
+        previous: { documentId: string | undefined; restricted: boolean };
+      } | null = null;
       try {
         const newDoc: DocumentItem = { ...req.body };
-        // Server-owned identity: ห้ามใช้ req.body.id เป็น document ID
-        // คง format เดิม `doc-<timestamp>` และกัน collision ก่อน push
-        let generatedId = `doc-${Date.now()}`;
-        while (db_documents.some((d) => d.id === generatedId)) {
-          generatedId = `doc-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-        }
-        newDoc.id = generatedId;
         // `accessible` เป็นค่าที่ server คำนวณตอนตอบกลับเท่านั้น ไม่เก็บค่าจาก client
         delete (newDoc as Partial<DocumentItem> & { accessible?: boolean })
           .accessible;
@@ -2410,6 +2453,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           });
         }
 
+        // Server-owned identity: ห้ามใช้ req.body.id เป็น document ID
+        // คง format เดิม `doc-<timestamp>` และกัน collision กับฐาน (FS-12)
+        newDoc.id = await generateDocumentId();
+
+        // ----- ตั้งแต่นี้ถึงการจองไฟล์ต้องเป็น Synchronous (ไม่มี await) -----
         // Security Invariant: Server-owned file binding (First binding)
         const fileRef = newDoc.realFileUrl || newDoc.fileUrl;
         let attachedStoredName: string | null = null;
@@ -2437,7 +2485,20 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
               message: "คุณไม่มีสิทธิ์นำไฟล์ที่ผู้อื่นอัปโหลดมาผูกกับเอกสารนี้",
             });
           }
+          // จองไฟล์ทันที (คำขอถัดไปจะเห็นว่าผูกแล้ว → 409 เหมือนเดิม) และจำค่าเดิมไว้คืนเมื่อล้มเหลว
+          reservation = {
+            storedName: attachedStoredName,
+            previous: {
+              documentId: fileMeta.documentId,
+              restricted: fileMeta.restricted,
+            },
+          };
+          updateSidecar(attachedStoredName, {
+            documentId: newDoc.id,
+            restricted: newDoc.type === "QP",
+          });
         }
+        // ----- จบส่วน Synchronous -----
 
         newDoc.status = isAdmin ? "Published" : "Pending Approval";
         newDoc.approvedBy = isAdmin ? currentDbUser.employeeId : undefined;
@@ -2445,18 +2506,44 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         newDoc.views = 0;
         newDoc.downloads = 0;
 
-        // Perform server-owned file binding
-        if (attachedStoredName) {
-          updateSidecar(attachedStoredName, {
-            documentId: newDoc.id,
-            restricted: newDoc.type === "QP",
+        for (let attempt = 1; ; attempt++) {
+          try {
+            const saved = await withTransaction(async (client) => {
+              await insertDocument(
+                client,
+                newDoc.id,
+                toDocumentFields(newDoc as unknown as Record<string, unknown>),
+                newDoc.allowedDepartmentIds ?? [],
+              );
+              return findDocument(client, newDoc.id);
+            });
+            return res.json({ ...saved, accessible: true });
+          } catch (err) {
+            const info = classifyDbError(err);
+            // id ชนกันพร้อมกัน (race) → สร้าง id ใหม่ และย้ายการจองไปที่ id ใหม่ (Sync)
+            if (
+              info.kind === "unique" &&
+              info.constraint === "documents_pk" &&
+              attempt < 5
+            ) {
+              newDoc.id = `doc-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+              if (reservation) {
+                updateSidecar(reservation.storedName, { documentId: newDoc.id });
+              }
+              continue;
+            }
+            throw err;
+          }
+        }
+      } catch (err) {
+        if (reservation) {
+          // คืนการจอง: Sidecar กลับเป็นค่าเดิมก่อนคำขอนี้
+          updateSidecar(reservation.storedName, {
+            documentId: reservation.previous.documentId,
+            restricted: reservation.previous.restricted,
           });
         }
-
-        db_documents.unshift(newDoc);
-        res.json({ ...newDoc, accessible: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        return sendDbFailure(res, err, "POST /api/documents");
       }
     },
   );
@@ -2466,188 +2553,228 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/documents/:id",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
+    async (req, res) => {
+      // §21.8 E: เปลี่ยนแผนกกับ ACL อยู่ใน Transaction เดียว · SELECT … FOR UPDATE กัน PUT ชน DELETE/view
+      type Reply = { status: number; body: unknown };
       try {
         const { id } = req.params;
-        const existing = db_documents.find((d) => d.id === id);
-        if (!existing) {
-          return res.status(404).json({ error: "NOT_FOUND" });
-        }
-
         const currentDbUser = req.authUser!;
         const isAdmin = currentDbUser.role === "Admin";
-
-        // Must be authorized to access this document
-        if (!canAccessDocument(currentDbUser, existing)) {
-          return res.status(403).json({
-            error: "FORBIDDEN",
-            message: "คุณไม่มีสิทธิ์แก้ไขเอกสารของแผนกนี้",
-          });
-        }
-
-        // Allow Admin to change owner department if selected incorrectly initially
-        let targetDepartmentId = existing.departmentId;
-        if (
-          isAdmin &&
-          typeof req.body.departmentId === "string" &&
-          req.body.departmentId.trim()
-        ) {
-          const newDept = getDepartmentById(req.body.departmentId.trim());
-          if (!newDept) {
-            return res.status(400).json({
-              error: "INVALID_DEPARTMENT",
-              message: "รหัสแผนกไม่ถูกต้องหรือไม่พบในระบบ",
-            });
+        const reply = await withTransaction<Reply>(async (client) => {
+          const existing = await findDocument(client, id, { forUpdate: true });
+          if (!existing) {
+            return { status: 404, body: { error: "NOT_FOUND" } };
           }
-          targetDepartmentId = req.body.departmentId.trim();
-        }
 
-        // Whitelist editable fields and normalize departments (reject invalid IDs with 400)
-        let normalizedAllowed = existing.allowedDepartmentIds;
-        if (
-          req.body.allowedDepartmentIds !== undefined ||
-          targetDepartmentId !== existing.departmentId
-        ) {
-          try {
-            normalizedAllowed = normalizeAllowedDepartments(
-              targetDepartmentId,
-              req.body.allowedDepartmentIds !== undefined
-                ? req.body.allowedDepartmentIds
-                : existing.allowedDepartmentIds,
-            );
-          } catch (deptErr: any) {
-            return res.status(400).json({
-              error: "INVALID_DEPARTMENT_ACCESS",
-              message: deptErr.message || "รหัสแผนกไม่ถูกต้องหรือไม่พบในระบบ",
-            });
+          // Must be authorized to access this document
+          if (!canAccessDocument(currentDbUser, existing)) {
+            return {
+              status: 403,
+              body: {
+                error: "FORBIDDEN",
+                message: "คุณไม่มีสิทธิ์แก้ไขเอกสารของแผนกนี้",
+              },
+            };
           }
-        }
 
-        // Approval identity เป็น server-owned: เปลี่ยน approvedBy/approvedAt
-        // เฉพาะตอนที่ Admin เปลี่ยนสถานะเป็น Published จริงๆ ในรอบนี้
-        // นอกนั้น preserve ค่าเดิม ห้ามรับ approvedBy/approvedAt จาก req.body
-        const nextStatus = isAdmin
-          ? req.body.status || existing.status
-          : existing.status;
-        const becomingPublished =
-          nextStatus === "Published" && existing.status !== "Published";
+          // Allow Admin to change owner department if selected incorrectly initially
+          let targetDepartmentId = existing.departmentId;
+          if (
+            isAdmin &&
+            typeof req.body.departmentId === "string" &&
+            req.body.departmentId.trim()
+          ) {
+            const newDept = getDepartmentById(req.body.departmentId.trim());
+            if (!newDept) {
+              return {
+                status: 400,
+                body: {
+                  error: "INVALID_DEPARTMENT",
+                  message: "รหัสแผนกไม่ถูกต้องหรือไม่พบในระบบ",
+                },
+              };
+            }
+            targetDepartmentId = req.body.departmentId.trim();
+          }
 
-        // Security Invariant: File binding is IMMUTABLE via PUT /api/documents/:id.
-        // Client cannot control file ownership or change attached files through this endpoint.
-        const updatedDoc: DocumentItem = {
-          ...existing,
-          title:
-            typeof req.body.title === "string"
-              ? req.body.title
-              : existing.title,
-          description:
-            typeof req.body.description === "string"
-              ? req.body.description
-              : existing.description,
-          owner:
-            typeof req.body.owner === "string" && req.body.owner.trim()
-              ? req.body.owner.trim()
-              : existing.owner,
-          allowedDepartmentIds: normalizedAllowed,
-          exampleText:
-            req.body.exampleText !== undefined
-              ? req.body.exampleText
-              : existing.exampleText,
-          exampleImage:
-            req.body.exampleImage !== undefined
-              ? req.body.exampleImage
-              : existing.exampleImage,
-          exampleVideo:
-            req.body.exampleVideo !== undefined
-              ? req.body.exampleVideo
-              : existing.exampleVideo,
-          tags: Array.isArray(req.body.tags) ? req.body.tags : existing.tags,
-          // Admin-only fields:
-          status: nextStatus,
-          approvedBy: becomingPublished
-            ? currentDbUser.employeeId
-            : existing.approvedBy,
-          approvedAt: becomingPublished
-            ? new Date().toISOString()
-            : existing.approvedAt,
-          type: isAdmin ? req.body.type || existing.type : existing.type,
-          revision:
-            isAdmin && typeof req.body.revision === "number"
-              ? req.body.revision
-              : existing.revision,
-          // Immutable file fields: Preserved 100% from existing server state
-          fileUrl: existing.fileUrl,
-          realFileUrl: existing.realFileUrl,
-          fileType: existing.fileType,
-          parsedExcelSheets: existing.parsedExcelSheets,
-          // Preserved server fields (never overwritten by client PUT):
-          views: existing.views,
-          downloads: existing.downloads,
-          departmentId: targetDepartmentId,
-        };
+          // Whitelist editable fields and normalize departments (reject invalid IDs with 400)
+          let normalizedAllowed = existing.allowedDepartmentIds;
+          if (
+            req.body.allowedDepartmentIds !== undefined ||
+            targetDepartmentId !== existing.departmentId
+          ) {
+            try {
+              normalizedAllowed = normalizeAllowedDepartments(
+                targetDepartmentId,
+                req.body.allowedDepartmentIds !== undefined
+                  ? req.body.allowedDepartmentIds
+                  : existing.allowedDepartmentIds,
+              );
+            } catch (deptErr: any) {
+              return {
+                status: 400,
+                body: {
+                  error: "INVALID_DEPARTMENT_ACCESS",
+                  message: deptErr.message || "รหัสแผนกไม่ถูกต้องหรือไม่พบในระบบ",
+                },
+              };
+            }
+          }
 
-        db_documents = db_documents.map((d) => (d.id === id ? updatedDoc : d));
-        res.json({ ...updatedDoc, accessible: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+          // Approval identity เป็น server-owned: เปลี่ยน approvedBy/approvedAt
+          // เฉพาะตอนที่ Admin เปลี่ยนสถานะเป็น Published จริงๆ ในรอบนี้
+          // นอกนั้น preserve ค่าเดิม ห้ามรับ approvedBy/approvedAt จาก req.body
+          const nextStatus = isAdmin
+            ? req.body.status || existing.status
+            : existing.status;
+          const becomingPublished =
+            nextStatus === "Published" && existing.status !== "Published";
+
+          // Security Invariant: File binding is IMMUTABLE via PUT /api/documents/:id.
+          // Client cannot control file ownership or change attached files through this endpoint.
+          const updatedDoc: DocumentItem = {
+            ...existing,
+            title:
+              typeof req.body.title === "string"
+                ? req.body.title
+                : existing.title,
+            description:
+              typeof req.body.description === "string"
+                ? req.body.description
+                : existing.description,
+            owner:
+              typeof req.body.owner === "string" && req.body.owner.trim()
+                ? req.body.owner.trim()
+                : existing.owner,
+            allowedDepartmentIds: normalizedAllowed,
+            exampleText:
+              req.body.exampleText !== undefined
+                ? req.body.exampleText
+                : existing.exampleText,
+            exampleImage:
+              req.body.exampleImage !== undefined
+                ? req.body.exampleImage
+                : existing.exampleImage,
+            exampleVideo:
+              req.body.exampleVideo !== undefined
+                ? req.body.exampleVideo
+                : existing.exampleVideo,
+            tags: Array.isArray(req.body.tags) ? req.body.tags : existing.tags,
+            // Admin-only fields:
+            status: nextStatus,
+            approvedBy: becomingPublished
+              ? currentDbUser.employeeId
+              : existing.approvedBy,
+            approvedAt: becomingPublished
+              ? new Date().toISOString()
+              : existing.approvedAt,
+            type: isAdmin ? req.body.type || existing.type : existing.type,
+            revision:
+              isAdmin && typeof req.body.revision === "number"
+                ? req.body.revision
+                : existing.revision,
+            // Immutable file fields: Preserved 100% from existing server state
+            fileUrl: existing.fileUrl,
+            realFileUrl: existing.realFileUrl,
+            fileType: existing.fileType,
+            parsedExcelSheets: existing.parsedExcelSheets,
+            // Preserved server fields (never overwritten by client PUT):
+            views: existing.views,
+            downloads: existing.downloads,
+            departmentId: targetDepartmentId,
+          };
+
+          await updateDocument(
+            client,
+            id,
+            toDocumentFields(updatedDoc as unknown as Record<string, unknown>),
+            normalizedAllowed ?? [],
+          );
+          const saved = await findDocument(client, id);
+          return { status: 200, body: { ...saved, accessible: true } };
+        });
+        return res.status(reply.status).json(reply.body);
+      } catch (err) {
+        return sendDbFailure(res, err, "PUT /api/documents/:id");
       }
     },
   );
 
   // POST /api/documents/:id/view: Verify department authorization before incrementing view count
-  app.post("/api/documents/:id/view", requireAuth, (req, res) => {
+  // TX-12 (B-14): ล็อกแถว (FOR UPDATE) → ตรวจสิทธิ์กับค่าที่ล็อก → `views = views + 1` แบบ Atomic
+  app.post("/api/documents/:id/view", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
       const currentDbUser = req.authUser!;
-      const doc = db_documents.find((d) => d.id === id);
-      if (!doc) {
-        return res.status(404).json({ error: "NOT_FOUND" });
-      }
-      if (!canAccessDocument(currentDbUser, doc)) {
-        return res.status(403).json({
-          error: "FORBIDDEN",
-          message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารนี้",
-        });
-      }
-      doc.views = (doc.views || 0) + 1;
-      const role = currentDbUser.role;
-      const safe =
-        doc.type === "QP" && role !== "Admin"
-          ? (({ parsedExcelSheets, ...r }) => r)(doc)
-          : doc;
-      res.json({ ...safe, accessible: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const reply = await withTransaction<{ status: number; body: unknown }>(
+        async (client) => {
+          const doc = await findDocument(client, id, { forUpdate: true });
+          if (!doc) {
+            return { status: 404, body: { error: "NOT_FOUND" } };
+          }
+          if (!canAccessDocument(currentDbUser, doc)) {
+            return {
+              status: 403,
+              body: {
+                error: "FORBIDDEN",
+                message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารนี้",
+              },
+            };
+          }
+          doc.views = (await incrementCounter(client, id, "views")) ?? doc.views;
+          const role = currentDbUser.role;
+          const safe =
+            doc.type === "QP" && role !== "Admin"
+              ? (({ parsedExcelSheets, ...r }) => r)(doc)
+              : doc;
+          return { status: 200, body: { ...safe, accessible: true } };
+        },
+      );
+      return res.status(reply.status).json(reply.body);
+    } catch (err) {
+      return sendDbFailure(res, err, "POST /api/documents/:id/view");
     }
   });
 
-  // POST /api/documents/:id/download: Verify department authorization & QP restriction
-  app.post("/api/documents/:id/download", requireAuth, (req, res) => {
+  // POST /api/documents/:id/download: Verify department authorization & QP restriction (TX-12)
+  app.post("/api/documents/:id/download", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
       const currentDbUser = req.authUser!;
-      const doc = db_documents.find((d) => d.id === id);
-      if (!doc) {
-        return res.status(404).json({ error: "NOT_FOUND" });
-      }
-      if (!canAccessDocument(currentDbUser, doc)) {
-        return res.status(403).json({
-          error: "FORBIDDEN",
-          message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารนี้",
-        });
-      }
-      // QP Rule: Non-admin cannot download QP documents
-      if (doc.type === "QP" && currentDbUser.role !== "Admin") {
-        return res.status(403).json({
-          error: "QP_RESTRICTED",
-          message:
-            "เอกสารระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
-        });
-      }
-      doc.downloads = (doc.downloads || 0) + 1;
-      res.json({ ...doc, accessible: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const reply = await withTransaction<{ status: number; body: unknown }>(
+        async (client) => {
+          const doc = await findDocument(client, id, { forUpdate: true });
+          if (!doc) {
+            return { status: 404, body: { error: "NOT_FOUND" } };
+          }
+          if (!canAccessDocument(currentDbUser, doc)) {
+            return {
+              status: 403,
+              body: {
+                error: "FORBIDDEN",
+                message: "คุณไม่มีสิทธิ์เข้าถึงเอกสารนี้",
+              },
+            };
+          }
+          // QP Rule: Non-admin cannot download QP documents
+          if (doc.type === "QP" && currentDbUser.role !== "Admin") {
+            return {
+              status: 403,
+              body: {
+                error: "QP_RESTRICTED",
+                message:
+                  "เอกสารระเบียบปฏิบัติงาน (QP) สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น",
+              },
+            };
+          }
+          doc.downloads =
+            (await incrementCounter(client, id, "downloads")) ?? doc.downloads;
+          return { status: 200, body: { ...doc, accessible: true } };
+        },
+      );
+      return res.status(reply.status).json(reply.body);
+    } catch (err) {
+      return sendDbFailure(res, err, "POST /api/documents/:id/download");
     }
   });
 
@@ -2656,23 +2783,24 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/documents/:id",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const { id } = req.params;
-        const existing = db_documents.find((d) => d.id === id);
-        if (!existing) {
+        // DELETE … RETURNING (ACL ลบตาม CASCADE, Ratings คงไว้ OD-FK-03) — คำสั่งเดียว Commit ทันที
+        const removed = await deleteDocument(undefined, id);
+        if (!removed) {
           return res.status(404).json({ error: "NOT_FOUND" });
         }
-        // Invariant 7: If owning doc is deleted, mark file as orphaned
-        const fileRef = existing.realFileUrl || existing.fileUrl;
+        // Invariant 7: เอกสารถูกลบแล้ว (หลัง COMMIT) จึงค่อยทำไฟล์เป็น Orphan
+        // (เดิมทำ Sidecar ก่อน — ถ้า DB ลบไม่สำเร็จไฟล์จะไม่ถูกทำเป็น Orphan ผิด ๆ)
+        const fileRef = removed.realFileUrl || removed.fileUrl;
         if (fileRef && fileRef.startsWith("/uploads/")) {
           const storedName = fileRef.replace("/uploads/", "").split("?")[0];
           updateSidecar(storedName, { documentId: `deleted:${id}` });
         }
-        db_documents = db_documents.filter((d) => d.id !== id);
         res.json({ success: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+      } catch (err) {
+        return sendDbFailure(res, err, "DELETE /api/documents/:id");
       }
     },
   );
@@ -2681,27 +2809,26 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/documents/:id/approve",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const { id } = req.params;
         // approvedBy มาจาก authenticated user (ผ่าน requireAuth + requireRole("Admin"))
         // เท่านั้น — ไม่อ่าน approverName จาก req.body (client ส่งมาก็ถูก ignore)
         // ใช้ employeeId ให้สอดคล้องกับ POST /api/documents ที่ Admin สร้างแล้ว Published ทันที
         const approverId = req.authUser!.employeeId;
-        db_documents = db_documents.map((doc) =>
-          doc.id === id
-            ? {
-                ...doc,
-                status: "Published",
-                approvedBy: approverId,
-                approvedAt: new Date().toISOString(),
-              }
-            : doc,
-        );
-        const updated = db_documents.find((doc) => doc.id === id);
+        const updated = await withTransaction(async (client) => {
+          const found = await approveDocument(
+            client,
+            id,
+            approverId,
+            new Date().toISOString(),
+          );
+          return found ? findDocument(client, id) : undefined;
+        });
+        // id ไม่มีจริง → 200 null ตามเดิม
         res.json(updated ? { ...updated, accessible: true } : null);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+      } catch (err) {
+        return sendDbFailure(res, err, "POST /api/documents/:id/approve");
       }
     },
   );
@@ -3304,15 +3431,22 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   );
 
   // Ratings APIs — เขียนได้ทุก login
-  app.get("/api/ratings", requireAuth, (req, res) => {
+  app.get("/api/ratings", requireAuth, async (req, res) => {
     // กรองฝั่ง server ตามสิทธิ์ผู้ใช้ — กรองเฉพาะข้อมูลที่ส่งกลับ ไม่แก้ db_ratings
     // ลำดับค้นเหมือน POST /api/ratings: Document ก่อน แล้วค่อย KB (ไม่ใช้ prefix ของ id)
+    // 01C-3: โหลดเอกสารจาก DB ครั้งเดียวต่อ Request แล้วค้นแบบ Document-first เดิม
+    let docsById: Map<string, DocumentItem>;
+    try {
+      docsById = new Map((await listDocuments()).map((d) => [d.id, d]));
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/ratings");
+    }
     const me = req.authUser!;
     const isAdmin = me.role === "Admin";
     const isEditor = me.role === "Editor";
 
     const visible = db_ratings.filter((r) => {
-      const targetDoc = db_documents.find((d) => d.id === r.docOrKBId);
+      const targetDoc = docsById.get(r.docOrKBId);
       if (targetDoc) {
         // Admin/Editor: ตามสิทธิ์แผนก (ทุกสถานะ); role อื่น: ต้อง Published + มีสิทธิ์แผนก
         return (
@@ -3335,7 +3469,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/ratings",
     requireAuth,
     requireOwnField("userId"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const body = req.body && typeof req.body === "object" ? req.body : {};
         const bad = (message: string) =>
@@ -3365,7 +3499,13 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
         // --- ตรวจว่าเป้าหมายมีอยู่จริงและผู้ใช้มีสิทธิ์เห็น (ใช้กฎเดียวกับ GET) ---
         const me = req.authUser!;
-        const targetDoc = db_documents.find((d) => d.id === docOrKBId);
+        // 01C-3: เอกสารเป้าหมายอ่านจาก DB — หลังจุดนี้ การสร้าง id กันชนและ unshift ยังต่อเนื่องแบบ Synchronous
+        let targetDoc: DocumentItem | undefined;
+        try {
+          targetDoc = await findDocument(undefined, docOrKBId);
+        } catch (dbErr) {
+          return sendDbFailure(res, dbErr, "POST /api/ratings");
+        }
         if (targetDoc) {
           // เหมือน GET /api/documents: Admin/Editor เห็นตามสิทธิ์แผนก (ทุกสถานะ),
           // role อื่นเห็นเฉพาะ Published ที่มีสิทธิ์แผนก
@@ -3861,7 +4001,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {
     res.json(db_search_logs);
   });
-  app.post("/api/search_logs", requireAuth, (req, res) => {
+  app.post("/api/search_logs", requireAuth, async (req, res) => {
     try {
       const currentDbUser = req.authUser!;
       const rawKeyword =
@@ -3872,7 +4012,14 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       }
 
       // Server computes hasResult authoritatively from authorized documents & approved KBs
-      const hasDocMatch = db_documents.some(
+      // 01C-3: เอกสารอ่านจาก DB แล้วกรองแบบเดิม (รวม d.title.toLowerCase() เดิม) — หลังจุดนี้ยัง Synchronous
+      let allDocs: DocumentItem[];
+      try {
+        allDocs = await listDocuments();
+      } catch (dbErr) {
+        return sendDbFailure(res, dbErr, "POST /api/search_logs");
+      }
+      const hasDocMatch = allDocs.some(
         (d) =>
           d.status === "Published" &&
           canAccessDocument(currentDbUser, d) &&

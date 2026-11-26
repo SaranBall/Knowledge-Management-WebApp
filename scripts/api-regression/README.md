@@ -14,8 +14,26 @@
 | `main` (ค่าเริ่มต้น) | `run.ts <ชื่อรอบ>` | ชุดหลัก 306 Request — **ห้ามแก้** เพื่อให้ยังเทียบกับ `baseline` ได้ |
 | `01c1` | `run.ts --suite 01c1 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-1 (§D): `GET /api/departments`, C-05, `id`/`employeeId` ซ้ำ (E-2/E-1.2), F-01 (DELETE = Terminated), F-06, Reactivate · มีข้อตรวจเนื้อหา Response (`check`) — ผลรวมอยู่ใน `summary.json` → `checkFailures` |
 | `01c2` | `run.ts --suite 01c2 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-2 (§D): Employee Master บน DB — สิทธิ์, Admin Replace (ลำดับ/ไม่มี `row_id`/`sort_order`/`isDeptResolved`), Editor Merge (B-17 แถวแรก/แทนทั้งแถว/รหัสซ้ำในคำขอ/ไม่ลบแถว), Q-1 (`9001` = `"9001"`), Q-2 (แถวไม่ใช่ Object → 400), Replace `[]`, Concurrency 2 แบบ × 10 รอบ (TX-09) |
+| `01c3` | `run.ts --suite 01c3 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-3 (§D): เอกสาร + ACL บน DB — ACL Owner-first (FS-02), สิทธิ์ Viewer/Editor (หลัก→ย่อย), `parsedExcelSheets` ลำดับชีต (FS-06) + Array (Q-1), ชนิดข้อมูลผิด (Q-2), approve id ไม่มีจริง → `null`, view/download พร้อมกัน 20 คำขอ (TX-12), ไฟล์จริง: files/sign / `/uploads` / QP, ผูกไฟล์เดียวกันพร้อมกัน 5 คำขอ (TX-11), การจองไฟล์ถูกคืน, `ORPHANED_FILE`, PUT+DELETE พร้อมกัน 10 รอบ · **อัปโหลดไฟล์ทดสอบจริง** (ดู "ลบไฟล์ทดสอบของชุด 01c3") |
 
-ชุด `01c1` คาดพฤติกรรม**หลัง** 01C-1 — ถ้ารันกับโค้ดก่อน 01C-1 จะไม่ผ่านหลายข้อโดยเจตนา (ชุด `01c2` เช่นเดียวกันกับ 01C-2)
+ชุด `01c1` คาดพฤติกรรม**หลัง** 01C-1 — ถ้ารันกับโค้ดก่อน 01C-1 จะไม่ผ่านหลายข้อโดยเจตนา (ชุด `01c2` / `01c3` เช่นเดียวกันกับ 01C-2 / 01C-3)
+
+### ลบไฟล์ทดสอบของชุด 01c3
+
+ชุด `01c3` อัปโหลด PDF เล็ก (ชื่อเป็น UUID) ลง `public\uploads` และ `dist\uploads` ผ่าน `POST /api/upload`
+ชื่อไฟล์ทุกไฟล์อยู่ใน `out\<ชื่อรอบ>\summary.json` → `uploadedTestFiles` · `public\uploads` **ไม่อยู่ใน `.gitignore`**
+จึงเห็นเป็นไฟล์ Untracked — **ห้าม `git add` ไฟล์เหล่านี้** ลบหลังจบรอบ (Terminal ใดก็ได้ ที่ `C:\RMP_Project\km-rmp-portal`):
+```powershell
+$run = 'c3-run1'   # ชื่อรอบที่รัน
+$s = Get-Content "scripts\api-regression\out\$run\summary.json" -Raw -Encoding utf8 | ConvertFrom-Json
+foreach ($f in $s.uploadedTestFiles) {
+  foreach ($d in 'public\uploads', 'dist\uploads') {
+    foreach ($p in "$d\$f", "$d\$f.meta.json") { if (Test-Path $p) { Remove-Item $p -Force; "ลบ $p" } }
+  }
+}
+git status --short public dist   # ต้องไม่เหลือไฟล์ทดสอบ
+```
+Server เก็บข้อมูลไฟล์ไว้ใน Memory ด้วย — หลังลบให้รีสตาร์ท Server ก่อนใช้งานต่อ
 
 หลังรันชุด `01c2` ให้ตรวจ `sort_order` ไม่ซ้ำ (อ่านอย่างเดียว ในฐานะ `km_app`):
 ```powershell

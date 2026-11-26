@@ -1,10 +1,12 @@
 /**
  * PERSIST-01C-0 — API Regression harness (ตัวยิง)
  *
- * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2] <ชื่อรอบ>
+ * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3] <ชื่อรอบ>
  *   main (ค่าเริ่มต้น) = ชุดหลัก 306 Request — ห้ามแก้ เพื่อให้ยังเทียบกับ baseline ได้
  *   01c1               = กรณีเพิ่มของ PERSIST-01C-1 (§D) — รันแยกรอบบนฐานที่ล้างแล้ว
  *   01c2               = กรณีเพิ่มของ PERSIST-01C-2 (§D, Employee Master) — รันแยกรอบบนฐานที่ล้างแล้ว
+ *   01c3               = กรณีเพิ่มของ PERSIST-01C-3 (§D, เอกสาร + ACL + ไฟล์) — รันแยกรอบบนฐานที่ล้างแล้ว
+ *                        อัปโหลดไฟล์ทดสอบจริง (ชื่อไฟล์อยู่ใน summary.json → uploadedTestFiles) — ดูวิธีลบใน README
  *
  * Environment (ตั้งใน Terminal เอง — ห้ามเขียนลงไฟล์):
  *   HARNESS_BASE_URL        ค่าเริ่มต้น http://localhost:3000
@@ -149,9 +151,9 @@ interface RecordFile {
   responseBody: unknown;
 }
 
-const SUITES = ["main", "01c1", "01c2"] as const;
+const SUITES = ["main", "01c1", "01c2", "01c3"] as const;
 type Suite = (typeof SUITES)[number];
-const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
+const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
 
 function parseArgs(argv: string[]): { suite: Suite; runName: string } {
   let suite: string = "main";
@@ -1137,6 +1139,241 @@ async function scenario01c2() {
   await step("c2.final.employee_master", "GET /api/employee_master", "admin", EM, undefined, 200);
 }
 
+// ---------------------------------------------------------------------------
+// ชุด 01c3 — PERSIST-01C-3 §D (เอกสาร + ACL บน DB: FS-02, FS-06, TX-11, TX-12, Q-1 (ก), Q-2 (ก), Q-3 (ก))
+// Status/ผลที่คาด = พฤติกรรมหลัง 01C-3 (โค้ด Memory เดิมจะไม่ผ่าน Q-2 — ตั้งใจ)
+// อัปโหลดไฟล์ทดสอบจริง — ชื่อไฟล์ทุกไฟล์บันทึกใน summary.json → uploadedTestFiles เพื่อให้ Owner ลบเอง
+// ---------------------------------------------------------------------------
+
+const uploadedTestFiles: string[] = [];
+
+async function scenario01c3() {
+  const DOCS = "/api/documents";
+  const errOf = (r: Res) => (r.body && typeof r.body.error === "string" ? r.body.error : undefined);
+  const listOf = (r: Res): any[] => (Array.isArray(r.body) ? r.body : []);
+  const idsOf = (r: Res) => listOf(r).map((d) => d?.id);
+  const sameSet = (a: unknown[], b: unknown[]) =>
+    a.length === b.length && new Set(a).size === a.length && b.every((x) => a.includes(x));
+  const now = Date.now();
+  const doc = (title: string, departmentId: string, extra: Record<string, unknown> = {}) => ({
+    title,
+    description: `${title} — คำอธิบาย`,
+    type: "WI",
+    departmentId,
+    owner: "Harness",
+    fileType: "PDF",
+    revision: 1,
+    tags: ["harness-c3"],
+    createdAt: new Date(now).toISOString(),
+    ...extra,
+  });
+  // step ที่ยอมรับ Status ได้หลายค่า (ใช้กับคำขอพร้อมกัน) — ตัดรายการ unexpected ของขั้นนั้นออกเมื่อ Status อยู่ในชุดที่ยอมรับ
+  const stepOneOf = async (name: string, route: string, actor: Actor, urlPath: string, body: unknown, allowed: number[]) => {
+    const r = await step(name, route, actor, urlPath, body, allowed[0]);
+    if (allowed.includes(r.status)) {
+      for (let i = unexpected.length - 1; i >= 0; i--) {
+        if (unexpected[i].name === name) unexpected.splice(i, 1);
+      }
+    }
+    return r;
+  };
+
+  // --- เริ่มต้น / ผู้ใช้ ---
+  const adminLogin = await login("admin", "c3.login.admin", ADMIN_ID, ADMIN_PASSWORD, 200);
+  if (adminLogin.status !== 200) throw new Error("ABORT: Admin login ไม่สำเร็จ — ตรวจ HARNESS_ADMIN_ID / HARNESS_ADMIN_PASSWORD");
+  const initialUsers = await step("c3.users.list.initial", "GET /api/users", "admin", "/api/users", undefined, 200);
+  if (!Array.isArray(initialUsers.body) || initialUsers.body.length !== 1) {
+    throw new Error("ABORT: ฐานไม่อยู่ในสถานะเริ่มต้นสะอาด (ผู้ใช้ไม่ใช่ 1 คน) — ล้างฐานแล้วเปิด Server ใหม่ แล้วรันด้วยชื่อรอบใหม่");
+  }
+  const initialDocs = await step("c3.documents.list.initial", "GET /api/documents", "admin", DOCS, undefined, 200);
+  if (listOf(initialDocs).length !== 0) throw new Error("ABORT: มีเอกสารอยู่แล้วตอนเริ่ม — ล้างฐานแล้วเปิด Server ใหม่");
+  const mkUser = (emp: string, name: string, role: string, departmentId: string, password: string) => ({
+    name, employeeId: emp, departmentId, position: "ช่าง", role,
+    email: `${emp.toLowerCase()}@example.invalid`, phone: "000-000-0000", status: "Active", startDate: "2026-01-15", password,
+  });
+  await step("c3.users.create.editor", "POST /api/users", "admin", "/api/users", mkUser("HRN-C3-EDITOR", "C3 Editor", "Editor", "d-pd", PW.editor), 200);
+  await step("c3.users.create.viewer", "POST /api/users", "admin", "/api/users", mkUser("HRN-C3-VIEWER", "C3 Viewer", "Viewer", "d-pd-dl", PW.viewer), 200);
+  await login("editor", "c3.login.editor", "HRN-C3-EDITOR", PW.editor, 200);
+  await login("viewer", "c3.login.viewer", "HRN-C3-VIEWER", PW.viewer, 200);
+
+  // --- สิทธิ์การเห็นเอกสาร (Viewer d-pd-dl / Editor d-pd) ---
+  const dDL = idOf(await step("c3.doc.create.dl", "POST /api/documents", "admin", DOCS, doc("C3 DL published", "d-pd-dl"), 200));
+  const dPD = idOf(await step("c3.doc.create.pd", "POST /api/documents", "admin", DOCS, doc("C3 PD published", "d-pd"), 200));
+  const dSIB = idOf(await step("c3.doc.create.sibling", "POST /api/documents", "admin", DOCS, doc("C3 BM sibling", "d-pd-bm"), 200));
+  const dHR = idOf(await step("c3.doc.create.hr", "POST /api/documents", "admin", DOCS, doc("C3 HR published", "d-hr"), 200));
+  const dED = idOf(await step("c3.doc.create.editorPending", "POST /api/documents", "editor", DOCS, doc("C3 Editor pending", "d-hr"), 200));
+  const viewerList = await step("c3.doc.list.viewer", "GET /api/documents", "viewer", DOCS, undefined, 200);
+  check("Viewer (d-pd-dl) เห็นเฉพาะ Published ที่มีสิทธิ์: DL เท่านั้น (ไม่เห็น PD ย่อย→หลัก, BM พี่น้อง, HR, Pending)",
+    sameSet(idsOf(viewerList), [dDL]));
+  const editorList = await step("c3.doc.list.editor", "GET /api/documents", "editor", DOCS, undefined, 200);
+  check("Editor (d-pd) เห็น PD, DL และ BM (หลัก→ย่อย) รวม Pending ของตัวเอง แต่ไม่เห็น HR",
+    sameSet(idsOf(editorList), [dDL, dPD, dSIB, dED]));
+  check("ทุกเอกสารใน GET มี accessible: true", [...listOf(viewerList), ...listOf(editorList)].every((d) => d?.accessible === true));
+
+  // --- ACL Owner-first (FS-02) ---
+  const acl = await step("c3.acl.create.shuffledDup", "POST /api/documents", "admin", DOCS,
+    doc("C3 ACL", "d-hr", { allowedDepartmentIds: ["d-qa", "d-pd-dl", "d-qa", "d-hr", "d-it"] }), 200);
+  check("ACL: Owner ก่อน ตามด้วยลำดับที่ส่ง ไม่ซ้ำ",
+    JSON.stringify(acl.body?.allowedDepartmentIds) === JSON.stringify(["d-hr", "d-qa", "d-pd-dl", "d-it"]));
+  const dACL = idOf(acl);
+  const aclPut = await step("c3.acl.update.changeDept", "PUT /api/documents/:id", "admin", `${DOCS}/${dACL}`, { departmentId: "d-wh" }, 200);
+  check("ACL: Admin PUT เปลี่ยนแผนก → แผนกใหม่อยู่ลำดับแรก",
+    aclPut.body?.departmentId === "d-wh" &&
+      JSON.stringify(aclPut.body?.allowedDepartmentIds) === JSON.stringify(["d-wh", "d-hr", "d-qa", "d-pd-dl", "d-it"]));
+  const aclList = await step("c3.acl.list.admin", "GET /api/documents", "admin", DOCS, undefined, 200);
+  check("ACL: GET อ่านกลับได้ลำดับเดียวกับ Response ของ PUT",
+    JSON.stringify(listOf(aclList).find((d) => d?.id === dACL)?.allowedDepartmentIds) === JSON.stringify(aclPut.body?.allowedDepartmentIds));
+
+  // --- parsedExcelSheets (FS-06, Q-1 ก) ---
+  const sheets: Record<string, unknown> = {
+    "สรุป": [["รายการ", "จำนวน"], ["ฟิล์ม", 12], ["", null]],
+    "2024": [[1, 2.5, ""], [0, -3, "x"]],
+    A: [["a"]],
+    "Sheet10 ชื่อยาวกว่าชีตอื่นมาก": [[]],
+    Sheet2: [["b", 0]],
+  };
+  const sentKeys = Object.keys(sheets);
+  const qpObj = await step("c3.sheets.create.object", "POST /api/documents", "admin", DOCS,
+    doc("C3 QP sheets object", "d-pd-dl", { type: "QP", parsedExcelSheets: sheets }), 200);
+  const dQP = idOf(qpObj);
+  check("parsedExcelSheets (Object): Object.keys ของ Response = Object.keys ของค่าที่ส่ง",
+    JSON.stringify(Object.keys(qpObj.body?.parsedExcelSheets ?? {})) === JSON.stringify(sentKeys));
+  check("parsedExcelSheets (Object): ค่าทุกชีตเหมือนที่ส่ง (ตัวเลข/ว่าง/null)",
+    JSON.stringify(qpObj.body?.parsedExcelSheets) === JSON.stringify(sheets));
+  const sheetsArray = [{ name: "Sheet1", rows: [["a", "b"], ["1", "2"]] }];
+  const qpArr = await step("c3.sheets.create.array", "POST /api/documents", "admin", DOCS,
+    doc("C3 QP sheets array", "d-pd-dl", { type: "QP", parsedExcelSheets: sheetsArray }), 200);
+  const dQPArr = idOf(qpArr);
+  check("parsedExcelSheets (Array): ได้ Array เดิม", JSON.stringify(qpArr.body?.parsedExcelSheets) === JSON.stringify(sheetsArray));
+  const adminList = await step("c3.sheets.list.admin", "GET /api/documents", "admin", DOCS, undefined, 200);
+  const qpInList = listOf(adminList).find((d) => d?.id === dQP);
+  check("parsedExcelSheets: GET (Admin) อ่านกลับได้ Object.keys และค่าเดิม",
+    JSON.stringify(Object.keys(qpInList?.parsedExcelSheets ?? {})) === JSON.stringify(sentKeys) &&
+      JSON.stringify(qpInList?.parsedExcelSheets) === JSON.stringify(sheets));
+  check("parsedExcelSheets (Array): GET (Admin) ได้ Array เดิม",
+    JSON.stringify(listOf(adminList).find((d) => d?.id === dQPArr)?.parsedExcelSheets) === JSON.stringify(sheetsArray));
+  const viewerQP = await step("c3.sheets.list.viewer", "GET /api/documents", "viewer", DOCS, undefined, 200);
+  const editorQP = await step("c3.sheets.list.editor", "GET /api/documents", "editor", DOCS, undefined, 200);
+  check("QP: Viewer/Editor ไม่เห็น parsedExcelSheets ใน GET",
+    [...listOf(viewerQP), ...listOf(editorQP)].filter((d) => d?.type === "QP").length >= 2 &&
+      [...listOf(viewerQP), ...listOf(editorQP)].filter((d) => d?.type === "QP").every((d) => !("parsedExcelSheets" in d)));
+  const viewerViewQP = await step("c3.sheets.view.viewer", "POST /api/documents/:id/view", "viewer", `${DOCS}/${dQP}/view`, undefined, 200);
+  check("QP: Viewer view ไม่เห็น parsedExcelSheets", viewerViewQP.status === 200 && !("parsedExcelSheets" in (viewerViewQP.body ?? {})));
+
+  // --- Q-2 (ก): ชนิดข้อมูลผิด → แปลง/ทิ้ง ไม่ใช่ 500 ---
+  const q2 = await step("c3.q2.create.wrongTypes", "POST /api/documents", "admin", DOCS,
+    { title: 5, description: "C3 Q2", type: "WI", departmentId: "d-hr", owner: "Harness", revision: "abc", tags: "x", createdAt: new Date(now).toISOString() }, 200);
+  check("Q-2 POST: title 5 → \"5\"", q2.body?.title === "5");
+  check("Q-2 POST: revision \"abc\" → ไม่มี Key", !!q2.body && !("revision" in q2.body));
+  check("Q-2 POST: tags \"x\" → ไม่มี Key", !!q2.body && !("tags" in q2.body));
+  const dQ2 = idOf(q2);
+  const q2Put = await step("c3.q2.update.wrongTypes", "PUT /api/documents/:id", "admin", `${DOCS}/${dQ2}`, { title: 7, revision: "abc", tags: "y" }, 200);
+  check("Q-2 PUT: ชนิดผิดถูกข้ามแบบเดิม (title ยังเป็น \"5\") และไม่ใช่ 500", q2Put.status === 200 && q2Put.body?.title === "5");
+
+  // --- approve id ไม่มีจริง → 200 null ---
+  const apNone = await step("c3.approve.notFound", "POST /api/documents/:id/approve", "admin", `${DOCS}/doc-0000000000000/approve`, undefined, 200);
+  check("approve id ไม่มีจริง → 200 null", apNone.status === 200 && apNone.kind === "json" && apNone.body === null);
+
+  // --- TX-12: view / download พร้อมกัน 20 คำขอ → +20 พอดี ---
+  const dCNT = idOf(await step("c3.tx12.create", "POST /api/documents", "admin", DOCS, doc("C3 counter", "d-pd-dl"), 200));
+  const views = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+    step(`c3.tx12.view.${String(i + 1).padStart(2, "0")}`, "POST /api/documents/:id/view", "viewer", `${DOCS}/${dCNT}/view`, undefined, 200)));
+  const viewValues = views.map((r) => r.body?.views).sort((a, b) => a - b);
+  check("TX-12 view: ทุกคำขอ 200 และค่า views ที่ตอบกลับเป็น 1..20 ไม่ซ้ำ",
+    views.every((r) => r.status === 200) && JSON.stringify(viewValues) === JSON.stringify(Array.from({ length: 20 }, (_, i) => i + 1)));
+  const downloads = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+    step(`c3.tx12.download.${String(i + 1).padStart(2, "0")}`, "POST /api/documents/:id/download", "admin", `${DOCS}/${dCNT}/download`, undefined, 200)));
+  check("TX-12 download: ทุกคำขอ 200", downloads.every((r) => r.status === 200));
+  const cnt = await step("c3.tx12.list.admin", "GET /api/documents", "admin", DOCS, undefined, 200);
+  const cntDoc = listOf(cnt).find((d) => d?.id === dCNT);
+  check("TX-12: views = 20 และ downloads = 20 พอดี", cntDoc?.views === 20 && cntDoc?.downloads === 20);
+
+  // --- ไฟล์ (Q-3 ก): อัปโหลด PDF เล็ก แล้วทดสอบ files/sign, /uploads, การผูกพร้อมกัน, การจองถูกคืน, ORPHANED_FILE ---
+  const pdfBase64 = Buffer.from("%PDF-1.4\n% HRN-C3 test file\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n", "utf-8").toString("base64");
+  const upload = async (label: string) => {
+    const r = await step(`c3.file.upload.${label}`, "POST /api/upload", "admin", "/api/upload", { filename: `hrn-c3-${label}.pdf`, fileData: pdfBase64 }, 200);
+    const name = typeof r.body?.filename === "string" ? r.body.filename : "missing-file";
+    if (name !== "missing-file") uploadedTestFiles.push(name);
+    return name;
+  };
+  const withFile = (name: string) => ({ fileUrl: `/uploads/${name}`, realFileUrl: `/uploads/${name}` });
+  const sign = (label: string, actor: Actor, filename: string, expect: number) =>
+    step(`c3.file.sign.${label}`, "POST /api/files/sign", actor, "/api/files/sign", { filename }, expect);
+
+  const fDL = await upload("dl");
+  const dFileDL = idOf(await step("c3.file.bind.dl", "POST /api/documents", "admin", DOCS, doc("C3 file DL", "d-pd-dl", withFile(fDL)), 200));
+  const signDL = await sign("viewer.dl", "viewer", fDL, 200);
+  check("files/sign: Viewer ได้ URL ของไฟล์เอกสาร d-pd-dl", typeof signDL.body?.url === "string" && signDL.body.url.startsWith(`/uploads/${fDL}?t=`));
+  const getDL = await step("c3.file.get.viewerToken", "GET /uploads/:filename", "anon",
+    typeof signDL.body?.url === "string" ? signDL.body.url : `/uploads/${fDL}`, undefined, 200);
+  check("GET /uploads/<ไฟล์>?t=<token> → 200", getDL.status === 200);
+
+  const fHR = await upload("hr");
+  await step("c3.file.bind.hr", "POST /api/documents", "admin", DOCS, doc("C3 file HR", "d-hr", withFile(fHR)), 200);
+  const signHR = await sign("viewer.hr", "viewer", fHR, 403);
+  check("files/sign: ไฟล์ของเอกสาร d-hr → Viewer 403 FORBIDDEN", errOf(signHR) === "FORBIDDEN");
+
+  const fQP = await upload("qp");
+  await step("c3.file.bind.qp", "POST /api/documents", "admin", DOCS, doc("C3 file QP", "d-pd-dl", { type: "QP", ...withFile(fQP) }), 200);
+  const signQPv = await sign("viewer.qp", "viewer", fQP, 403);
+  check("files/sign: เอกสาร QP → Viewer 403 QP_RESTRICTED", errOf(signQPv) === "QP_RESTRICTED");
+  const signQPa = await sign("admin.qp", "admin", fQP, 200);
+  check("files/sign: เอกสาร QP → Admin ได้ URL", typeof signQPa.body?.url === "string");
+  const getQP = await step("c3.file.get.adminToken.qp", "GET /uploads/:filename", "anon",
+    typeof signQPa.body?.url === "string" ? signQPa.body.url : `/uploads/${fQP}`, undefined, 200);
+  check("GET /uploads (QP, Token ของ Admin) → 200", getQP.status === 200);
+
+  // TX-11: ผูกไฟล์เดียวกันพร้อมกัน 5 คำขอ → 200 หนึ่งเดียว ที่เหลือ 409
+  const fRace = await upload("race");
+  const race = await Promise.all(Array.from({ length: 5 }, (_, i) =>
+    stepOneOf(`c3.file.race.${i + 1}`, "POST /api/documents", "admin", DOCS, doc(`C3 race ${i + 1}`, "d-pd-dl", withFile(fRace)), [200, 409])));
+  check("TX-11: ผูกไฟล์เดียวกันพร้อมกัน 5 คำขอ → 200 หนึ่งเดียว ที่เหลือ 409 DUPLICATE_FILE_BINDING",
+    race.filter((r) => r.status === 200).length === 1 &&
+      race.filter((r) => r.status === 409 && errOf(r) === "DUPLICATE_FILE_BINDING").length === 4);
+  const raceList = await step("c3.file.race.list", "GET /api/documents", "admin", DOCS, undefined, 200);
+  check("TX-11: GET มีเอกสารที่ผูกไฟล์นี้ 1 ฉบับ",
+    listOf(raceList).filter((d) => d?.realFileUrl === `/uploads/${fRace}`).length === 1);
+
+  // ผูกล้มเพราะ ACL ผิด (400) → ไฟล์ไม่ถูกจองค้าง ผูกกับเอกสารอื่นได้
+  const fFree = await upload("free");
+  const badAcl = await step("c3.file.bind.badAcl", "POST /api/documents", "admin", DOCS,
+    doc("C3 bad ACL", "d-pd-dl", { allowedDepartmentIds: ["d-nope"], ...withFile(fFree) }), 400);
+  check("ผูกไฟล์แต่ ACL ผิด → 400 INVALID_DEPARTMENT_ACCESS", errOf(badAcl) === "INVALID_DEPARTMENT_ACCESS");
+  const reBind = await step("c3.file.bind.afterBadAcl", "POST /api/documents", "admin", DOCS, doc("C3 rebind", "d-pd-dl", withFile(fFree)), 200);
+  check("ไฟล์เดิมผูกกับเอกสารอื่นได้ (ไม่ถูกจองค้าง)", reBind.status === 200 && reBind.body?.realFileUrl === `/uploads/${fFree}`);
+
+  // จองไฟล์แล้ว DB ล้มเหลว (title มี \u0000 ซึ่ง PostgreSQL ไม่รับ) → 500 INTERNAL_ERROR เท่านั้น → การจองถูกคืน ผูกไฟล์เดิมได้
+  const fNul = await upload("nul");
+  const nul = await step("c3.file.bind.nulTitle", "POST /api/documents", "admin", DOCS,
+    doc("C3 NUL \u0000 title", "d-pd-dl", withFile(fNul)), 500);
+  check("DB ล้มหลังจองไฟล์ → 500 และ Body = { error: INTERNAL_ERROR, message: เกิดข้อผิดพลาดภายในระบบ } เท่านั้น",
+    nul.status === 500 &&
+      JSON.stringify(nul.body) === JSON.stringify({ error: "INTERNAL_ERROR", message: "เกิดข้อผิดพลาดภายในระบบ" }));
+  const nulRebind = await step("c3.file.bind.afterNul", "POST /api/documents", "admin", DOCS, doc("C3 rebind after NUL", "d-pd-dl", withFile(fNul)), 200);
+  check("หลัง DB ล้ม การจองถูกคืน → ผูกไฟล์เดิมกับเอกสารใหม่ได้ 200",
+    nulRebind.status === 200 && nulRebind.body?.realFileUrl === `/uploads/${fNul}`);
+
+  // DELETE เอกสาร → files/sign 403 ORPHANED_FILE
+  await step("c3.file.delete.dl", "DELETE /api/documents/:id", "admin", `${DOCS}/${dFileDL}`, undefined, 200);
+  const signOrphan = await sign("admin.afterDelete", "admin", fDL, 403);
+  check("DELETE เอกสาร → files/sign 403 ORPHANED_FILE", errOf(signOrphan) === "ORPHANED_FILE");
+
+  // --- PUT + DELETE เอกสารเดียวกันพร้อมกัน 10 รอบ → ไม่มี 500 · ผลสุดท้ายไม่มีเอกสารนั้น ---
+  for (let round = 1; round <= 10; round++) {
+    const dR = idOf(await step(`c3.race.r${round}.create`, "POST /api/documents", "admin", DOCS, doc(`C3 put-delete r${round}`, "d-pd-dl"), 200));
+    const [rp, rd] = await Promise.all([
+      stepOneOf(`c3.race.r${round}.put`, "PUT /api/documents/:id", "admin", `${DOCS}/${dR}`, { title: `C3 put-delete r${round} (แก้)` }, [200, 404]),
+      stepOneOf(`c3.race.r${round}.delete`, "DELETE /api/documents/:id", "admin", `${DOCS}/${dR}`, undefined, [200]),
+    ]);
+    const after = await step(`c3.race.r${round}.list`, "GET /api/documents", "admin", DOCS, undefined, 200);
+    check(`PUT+DELETE พร้อมกัน รอบ ${round}: ไม่มี 500 (PUT ${rp.status}, DELETE ${rd.status}) และไม่เหลือเอกสารนั้น`,
+      rp.status !== 500 && rd.status !== 500 && [200, 404].includes(rp.status) && rd.status === 200 && !idsOf(after).includes(dR));
+  }
+
+  await step("c3.final.documents", "GET /api/documents", "admin", DOCS, undefined, 200);
+  await step("c3.final.documents_stats", "GET /api/documents/stats", "admin", `${DOCS}/stats`, undefined, 200);
+}
+
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   console.log(`Harness ชุด "${SUITE}" รอบ "${runName}" → ${BASE_URL}`);
@@ -1144,7 +1381,8 @@ async function main() {
   try {
     if (SUITE === "main") await scenario();
     else if (SUITE === "01c1") await scenario01c1();
-    else await scenario01c2();
+    else if (SUITE === "01c2") await scenario01c2();
+    else await scenario01c3();
   } catch (e: any) {
     aborted = String(e?.message || e);
     console.error(aborted);
@@ -1156,6 +1394,8 @@ async function main() {
     aborted,
     unexpectedStatus: unexpected,
     checkFailures,
+    // ชุด 01c3 อัปโหลดไฟล์จริงลง public/uploads และ dist/uploads — Owner ลบตามรายการนี้หลังจบรอบ (README)
+    ...(SUITE === "01c3" ? { uploadedTestFiles } : {}),
     requestsByRoute: Object.fromEntries([...routeCounts.entries()].sort(([a], [b]) => a.localeCompare(b))),
   };
   fs.writeFileSync(path.join(OUT_DIR, "summary.json"), JSON.stringify(summary, null, 2) + "\n", "utf-8");
