@@ -303,6 +303,13 @@ export default function App() {
     }
   };
 
+  // 01C-2 (R2-02/OD-15): บันทึกทะเบียนพนักงานกลางที่ Server แล้วใช้ Response ตั้ง State
+  // ล้มเหลว = ไม่เปลี่ยน State แล้วโยน Error ต่อให้ผู้เรียกแจ้งผู้ใช้ (ไม่ทำ Optimistic)
+  const handleUpdateEmployeeMaster = async (list: EmployeeMaster[]) => {
+    const saved = await api.updateEmployeeMaster(list);
+    setEmployeeMaster(saved);
+  };
+
   const endSession = (message?: string) => {
     resetSessionData();
     setIsLogged(false);
@@ -489,7 +496,7 @@ export default function App() {
     const { password: _plainPin, ...safeUpdatedUsr } = updatedUsr;
     setUsers(
       (prev) =>
-        +prev.map((u) => {
+        prev.map((u) => {
           if (u.id !== updatedUsr.id) return u;
 
           // ป้องกัน PIN ที่อาจค้างใน State เดิมไม่ให้กลับเข้า State
@@ -1464,7 +1471,7 @@ export default function App() {
                   onUpdateUserRole={handleUpdateUserRole}
                   onDeleteUser={handleDeleteUser}
                   employeeMaster={employeeMaster}
-                  onUpdateEmployeeMaster={setEmployeeMaster}
+                  onUpdateEmployeeMaster={handleUpdateEmployeeMaster}
                   kbArticles={kbArticles}
                   searchLogs={searchLogs}
                   systemAuditLogs={systemAuditLogs}

@@ -116,7 +116,8 @@ interface MemberManagementProps {
   onUpdateUserRole: (id: string, role: Role) => void;
   onDeleteUser: (id: string) => void;
   employeeMaster: EmployeeMaster[];
-  onUpdateEmployeeMaster: (data: EmployeeMaster[]) => void;
+  // 01C-2: บันทึกที่ Server — ล้มเหลวจะ throw (State ไม่เปลี่ยน)
+  onUpdateEmployeeMaster: (data: EmployeeMaster[]) => Promise<void>;
   kbArticles?: KBArticle[];
   searchLogs?: SearchLog[];
   systemAuditLogs?: SystemAuditLog[];
@@ -177,6 +178,25 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
   const [approvePin, setApprovePin] = useState<string>("");
   const [approveError, setApproveError] = useState<string>("");
 
+  // 01C-2 (R2-02/OD-15): บันทึกทะเบียนพนักงานกลางที่ Server — ทุกจุดเรียกผ่าน helper นี้
+  // คืน true เมื่อบันทึกสำเร็จ · ล้มเหลว = แจ้งเตือนและคืน false (ผู้เรียกต้องไม่แสดงข้อความสำเร็จ)
+  // ระหว่างรอ ปุ่มที่บันทึกถูกปิด (disabled) และกันการกดซ้ำ
+  const [isSavingEmployeeMaster, setIsSavingEmployeeMaster] = useState(false);
+  const saveEmployeeMaster = async (data: EmployeeMaster[]): Promise<boolean> => {
+    if (isSavingEmployeeMaster) return false;
+    setIsSavingEmployeeMaster(true);
+    try {
+      await onUpdateEmployeeMaster(data);
+      return true;
+    } catch (err) {
+      console.error("Failed to save employee master:", err);
+      alert("บันทึกทะเบียนพนักงานไม่สำเร็จ กรุณาลองใหม่");
+      return false;
+    } finally {
+      setIsSavingEmployeeMaster(false);
+    }
+  };
+
   // Edit User Form State
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -215,7 +235,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       password: "",
       status: u.status || "Active",
       startDate: u.startDate || new Date().toISOString().split("T")[0],
-      avatarUrl: u.avatarUrl || "",
+      // รูปตั้งต้นของระบบ (DEFAULT_AVATAR_URL ที่ใส่ให้ตอนอนุมัติ/สร้าง Admin) ไม่นับเป็นรูปจริง
+      // → ฟอร์มแสดงสถานะ "กรุณาอัปโหลดรูปภาพจริง" และบังคับอัปโหลดก่อนบันทึกเหมือนผู้ใช้ที่ไม่มีรูป
+      avatarUrl:
+        u.avatarUrl && u.avatarUrl !== DEFAULT_AVATAR_URL ? u.avatarUrl : "",
     });
   };
 
@@ -231,6 +254,9 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     const duplicate = users.some(
       (u) =>
         u.id !== editForm.id &&
+        // 01C-2 (Q-A1): ฝั่งใดไม่มีรหัสพนักงาน = ไม่ซ้ำ (ตั้งแต่ 01C-1 employeeId ว่างเก็บเป็น NULL)
+        !!u.employeeId &&
+        !!editForm.employeeId &&
         u.employeeId.toLowerCase() === editForm.employeeId.toLowerCase(),
     );
     if (duplicate) {
@@ -731,7 +757,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
     onUpdateUserRole(userId, newRole);
   };
 
-  const handleApproveEmployeeSubmit = (e: React.FormEvent) => {
+  const handleApproveEmployeeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setApproveError("");
 
@@ -752,9 +778,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
     let assignedRole: Role = "Viewer";
     if (
-      emp.level.toLowerCase().includes("senior") ||
-      emp.position.toLowerCase().includes("engineer") ||
-      emp.position.toLowerCase().includes("supervisor")
+      // 01C-2 (Q-A1): ช่องที่เป็น NULL ในฐานไม่มี Key → ถือเป็นข้อความว่าง
+      (emp.level ?? "").toLowerCase().includes("senior") ||
+      (emp.position ?? "").toLowerCase().includes("engineer") ||
+      (emp.position ?? "").toLowerCase().includes("supervisor")
     ) {
       assignedRole = "Editor";
     }
@@ -779,7 +806,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         ? { ...item, status: "Registered" as const }
         : item,
     );
-    onUpdateEmployeeMaster(updatedMaster);
+    // 01C-2: บันทึกสถานะ Registered ที่ Server — ล้มเหลว = แจ้งเตือนแล้ว ไม่แสดงข้อความสำเร็จ (Modal ยังเปิดอยู่)
+    if (!(await saveEmployeeMaster(updatedMaster))) return;
 
     alert(
       `🎉 อนุมัติสิทธิ์และเปิดบัญชีให้คุณ "${emp.name}" (ID: ${emp.employeeId}) สำเร็จ!\nแผนก: ${getDepartmentById(approveDeptId)?.name || approveDeptId} | PIN: ${cleanPin}`,
@@ -2967,7 +2995,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                     />
                     <button
                       type="button"
-                      onClick={() => {
+                      disabled={isSavingEmployeeMaster}
+                      onClick={async () => {
                         const el = document.getElementById(
                           "tabular-paste-textarea",
                         ) as HTMLTextAreaElement;
@@ -3025,10 +3054,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                               ),
                           );
                           if (duplicatesMerged.length > 0) {
-                            onUpdateEmployeeMaster([
-                              ...employeeMaster,
-                              ...duplicatesMerged,
-                            ]);
+                            // 01C-2: ข้อความสำเร็จแสดงหลังบันทึกที่ Server สำเร็จเท่านั้น (ล้มเหลว = คงข้อความในช่องไว้ให้ลองใหม่)
+                            if (
+                              !(await saveEmployeeMaster([
+                                ...employeeMaster,
+                                ...duplicatesMerged,
+                              ]))
+                            ) {
+                              return;
+                            }
                             alert(
                               `📊 แยกองค์ประกอบสำเร็จ!\nนำเข้าข้อมูลพนักงานจาก Google Sheet เรียบร้อยรวม ${duplicatesMerged.length} คน (ตรวจพบทั้งหมด ${parsedCount} คน ซ้ำซ้อนและกรองทิ้ง ${parsedCount - duplicatesMerged.length} คน)`,
                             );
@@ -3214,7 +3248,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
+                        disabled={isSavingEmployeeMaster}
+                        onClick={async () => {
                           // Merge and exclude duplicate IDs
                           const duplicatesMerged = parsedEmployees.filter(
                             (emp) =>
@@ -3223,10 +3258,15 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                               ),
                           );
                           if (duplicatesMerged.length > 0) {
-                            onUpdateEmployeeMaster([
-                              ...employeeMaster,
-                              ...duplicatesMerged,
-                            ]);
+                            // 01C-2: ข้อความสำเร็จแสดงหลังบันทึกที่ Server สำเร็จเท่านั้น (ล้มเหลว = คงรายการค้างนำเข้าไว้ให้ลองใหม่)
+                            if (
+                              !(await saveEmployeeMaster([
+                                ...employeeMaster,
+                                ...duplicatesMerged,
+                              ]))
+                            ) {
+                              return;
+                            }
                             alert(
                               `🎉 สำเร็จ! บันทึกนำเข้าข้อมูลพนักงานจำนวน ${duplicatesMerged.length} รายการเข้าสู่ระบบเรียบร้อยแล้วค่ะ`,
                             );
@@ -3266,21 +3306,25 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
 
                 {/* Quick controls */}
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          "คุณแน่ใจหรือไม่ว่าต้องการเพิกถอนข้อมูลพนักงานที่ลงทะเบียนรอสมัครออกทั้งหมด?",
-                        )
-                      ) {
-                        onUpdateEmployeeMaster([]);
-                      }
-                    }}
-                    className="bg-rose-50 border border-rose-100 hover:bg-rose-100 text-rose-700 text-[10.5px] font-bold px-3 py-1.5 rounded-lg cursor-pointer transition"
-                  >
-                    🗑️ เคลียร์ทั้งหมด
-                  </button>
+                  {/* F-09: ลบได้เฉพาะ Admin (Server ของ Editor เป็นการ Merge จึงลบไม่ได้จริง) */}
+                  {currentUser.role === "Admin" && (
+                    <button
+                      type="button"
+                      disabled={isSavingEmployeeMaster}
+                      onClick={async () => {
+                        if (
+                          window.confirm(
+                            "คุณแน่ใจหรือไม่ว่าต้องการเพิกถอนข้อมูลพนักงานที่ลงทะเบียนรอสมัครออกทั้งหมด?",
+                          )
+                        ) {
+                          await saveEmployeeMaster([]);
+                        }
+                      }}
+                      className="bg-rose-50 border border-rose-100 hover:bg-rose-100 text-rose-700 text-[10.5px] font-bold px-3 py-1.5 rounded-lg cursor-pointer transition"
+                    >
+                      🗑️ เคลียร์ทั้งหมด
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3312,11 +3356,16 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                       </tr>
                     ) : (
                       employeeMaster.map((emp, idx) => {
-                        const isLinkedUser = users.some(
-                          (u) =>
-                            u.employeeId.toLowerCase() ===
-                            emp.employeeId.toLowerCase(),
-                        );
+                        // 01C-2 (Q-A1): ฝั่งใดไม่มีรหัสพนักงาน (undefined/null/"") = ไม่เชื่อมกัน
+                        // มีค่าทั้งคู่ = เทียบแบบไม่สนตัวพิมพ์เหมือนเดิม
+                        const isLinkedUser =
+                          !!emp.employeeId &&
+                          users.some(
+                            (u) =>
+                              !!u.employeeId &&
+                              u.employeeId.toLowerCase() ===
+                                emp.employeeId.toLowerCase(),
+                          );
 
                         return (
                           <tr
@@ -3387,25 +3436,29 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                                     อนุมัติพนักงาน
                                   </button>
                                 )}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const confirmed = window.confirm(
-                                    `คุณแน่ใจหรือไม่ว่าต้องการเพิกถอนข้อมูลพนักงาน "${emp.name}" ออกจากฐานข้อมูลกลาง?`,
-                                  );
-                                  if (confirmed) {
-                                    onUpdateEmployeeMaster(
-                                      employeeMaster.filter(
-                                        (_, i) => i !== idx,
-                                      ),
+                              {/* F-09: ลบรายแถวได้เฉพาะ Admin */}
+                              {currentUser.role === "Admin" && (
+                                <button
+                                  type="button"
+                                  disabled={isSavingEmployeeMaster}
+                                  onClick={async () => {
+                                    const confirmed = window.confirm(
+                                      `คุณแน่ใจหรือไม่ว่าต้องการเพิกถอนข้อมูลพนักงาน "${emp.name}" ออกจากฐานข้อมูลกลาง?`,
                                     );
-                                  }
-                                }}
-                                className="text-slate-400 hover:text-red-700 hover:bg-rose-50 p-1.5 rounded transition cursor-pointer shrink-0"
-                                title="ลบระเบียนเตรียมเข้าออกระบบ"
-                              >
-                                <Trash2 className="w-4 h-4 inline" />
-                              </button>
+                                    if (confirmed) {
+                                      await saveEmployeeMaster(
+                                        employeeMaster.filter(
+                                          (_, i) => i !== idx,
+                                        ),
+                                      );
+                                    }
+                                  }}
+                                  className="text-slate-400 hover:text-red-700 hover:bg-rose-50 p-1.5 rounded transition cursor-pointer shrink-0"
+                                  title="ลบระเบียนเตรียมเข้าออกระบบ"
+                                >
+                                  <Trash2 className="w-4 h-4 inline" />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         );
@@ -3547,6 +3600,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   </button>
                   <button
                     type="submit"
+                    disabled={isSavingEmployeeMaster}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2 rounded-lg text-xs cursor-pointer transition shadow"
                   >
                     ยืนยันอนุมัติและเปิดบัญชี

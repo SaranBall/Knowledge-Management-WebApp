@@ -1,9 +1,10 @@
 /**
  * PERSIST-01C-0 — API Regression harness (ตัวยิง)
  *
- * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1] <ชื่อรอบ>
+ * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2] <ชื่อรอบ>
  *   main (ค่าเริ่มต้น) = ชุดหลัก 306 Request — ห้ามแก้ เพื่อให้ยังเทียบกับ baseline ได้
  *   01c1               = กรณีเพิ่มของ PERSIST-01C-1 (§D) — รันแยกรอบบนฐานที่ล้างแล้ว
+ *   01c2               = กรณีเพิ่มของ PERSIST-01C-2 (§D, Employee Master) — รันแยกรอบบนฐานที่ล้างแล้ว
  *
  * Environment (ตั้งใน Terminal เอง — ห้ามเขียนลงไฟล์):
  *   HARNESS_BASE_URL        ค่าเริ่มต้น http://localhost:3000
@@ -148,9 +149,9 @@ interface RecordFile {
   responseBody: unknown;
 }
 
-const SUITES = ["main", "01c1"] as const;
+const SUITES = ["main", "01c1", "01c2"] as const;
 type Suite = (typeof SUITES)[number];
-const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
+const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
 
 function parseArgs(argv: string[]): { suite: Suite; runName: string } {
   let suite: string = "main";
@@ -942,13 +943,208 @@ async function scenario01c1() {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ชุด 01c2 — PERSIST-01C-2 §D (Employee Master บน DB: TX-09, B-17, Q-1 (ก), Q-2 (ข), FS-05, R9)
+// Status/ผลที่คาด = พฤติกรรมหลัง 01C-2 (โค้ด Memory เดิมจะไม่ผ่าน Q-2 — ตั้งใจ)
+// ---------------------------------------------------------------------------
+
+async function scenario01c2() {
+  const EM = "/api/employee_master";
+  const errOf = (r: Res) => (r.body && typeof r.body.error === "string" ? r.body.error : undefined);
+  const listOf = (r: Res): any[] => (Array.isArray(r.body) ? r.body : []);
+  // แถว Employee Master 9 ช่องเป็นข้อความทั้งหมด (แบบที่ UI ส่ง)
+  const em = (employeeId: string, name: string, departmentId: string, extra: Record<string, unknown> = {}) => ({
+    employeeId,
+    name,
+    departmentId,
+    position: "ช่าง",
+    startDate: "2020-05-01",
+    level: "O1",
+    email: `${employeeId.toLowerCase()}@example.invalid`,
+    phone: "000-000-0000",
+    status: "Imported",
+    ...extra,
+  });
+  const sortKeys = (o: any) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
+  const canon = (list: any[]) => JSON.stringify(list.map(sortKeys));
+  const noInternalKeys = (list: any[]) =>
+    list.every((r) => r && !("row_id" in r) && !("rowId" in r) && !("sort_order" in r) && !("sortOrder" in r));
+
+  // --- สิทธิ์ ---
+  await step("c2.em.get.noToken", "GET /api/employee_master", "anon", EM, undefined, 401);
+  const adminLogin = await login("admin", "c2.login.admin", ADMIN_ID, ADMIN_PASSWORD, 200);
+  if (adminLogin.status !== 200) throw new Error("ABORT: Admin login ไม่สำเร็จ — ตรวจ HARNESS_ADMIN_ID / HARNESS_ADMIN_PASSWORD");
+  const initialUsers = await step("c2.users.list.initial", "GET /api/users", "admin", "/api/users", undefined, 200);
+  if (!Array.isArray(initialUsers.body) || initialUsers.body.length !== 1) {
+    throw new Error("ABORT: ฐานไม่อยู่ในสถานะเริ่มต้นสะอาด (ผู้ใช้ไม่ใช่ 1 คน) — ล้างฐานแล้วเปิด Server ใหม่ แล้วรันด้วยชื่อรอบใหม่");
+  }
+  const initialEm = await step("c2.em.get.initial", "GET /api/employee_master", "admin", EM, undefined, 200);
+  if (listOf(initialEm).length !== 0) {
+    throw new Error("ABORT: Employee Master ไม่ว่างตอนเริ่ม — ล้างฐานแล้วเปิด Server ใหม่");
+  }
+  const depts = await step("c2.departments.admin", "GET /api/departments", "admin", "/api/departments", undefined, 200);
+  const realDeptIds = new Set(listOf(depts).map((d: any) => d?.id));
+  const isReal = (id: unknown) => realDeptIds.has(String(id ?? ""));
+  // Reference: อัลกอริทึมเดิมของ Editor (findIndex แถวแรก + แทนทั้งแถว + push) บนค่าระดับ API
+  const refMerge = (base: any[], incoming: any[]) => {
+    const merged = base.map((r) => ({ ...r }));
+    for (const inc of incoming) {
+      const row = { ...inc, isDeptResolved: isReal(inc.departmentId) };
+      const idx = merged.findIndex((e) => e.employeeId === row.employeeId);
+      if (idx !== -1) merged[idx] = row;
+      else merged.push(row);
+    }
+    return merged;
+  };
+  const withResolved = (rows: any[]) => rows.map((r) => ({ ...r, isDeptResolved: isReal(r.departmentId) }));
+
+  const mkUser = (emp: string, name: string, role: string, departmentId: string, password: string) => ({
+    name, employeeId: emp, departmentId, position: "ช่าง", role,
+    email: `${emp.toLowerCase()}@example.invalid`, phone: "000-000-0000", status: "Active", startDate: "2026-01-15", password,
+  });
+  await step("c2.users.create.editor", "POST /api/users", "admin", "/api/users", mkUser("HRN-C2-EDITOR", "C2 Editor", "Editor", "d-pd", PW.editor), 200);
+  await step("c2.users.create.viewer", "POST /api/users", "admin", "/api/users", mkUser("HRN-C2-VIEWER", "C2 Viewer", "Viewer", "d-pd-dl", PW.viewer), 200);
+  await login("editor", "c2.login.editor", "HRN-C2-EDITOR", PW.editor, 200);
+  await login("viewer", "c2.login.viewer", "HRN-C2-VIEWER", PW.viewer, 200);
+  await step("c2.em.get.viewer", "GET /api/employee_master", "viewer", EM, undefined, 403);
+  await step("c2.em.post.viewer", "POST /api/employee_master", "viewer", EM, { employeeMaster: [] }, 403);
+
+  // --- Admin Replace 3 แถว (รหัสซ้ำ 2 แถว) — isDeptResolved ที่ Client ส่งกลับด้าน Server ต้องไม่เชื่อ ---
+  const replace3 = [
+    em("E-DUP", "Dup A", "d-pd-dl", { isDeptResolved: false }),
+    em("E-ONE", "One", "d-nope", { isDeptResolved: true }),
+    em("E-DUP", "Dup B", "d-qa", { isDeptResolved: false }),
+  ];
+  const r3 = await step("c2.em.admin.replace3", "POST /api/employee_master", "admin", EM, { employeeMaster: replace3 }, 200);
+  const r3List = listOf(r3);
+  check("Admin Replace 3 แถว → ลำดับตาม Payload (Dup A, One, Dup B)",
+    r3List.map((r) => r?.name).join("|") === "Dup A|One|Dup B");
+  check("Admin Replace → Response ไม่มี row_id / sort_order", r3List.length === 3 && noInternalKeys(r3List));
+  check("Admin Replace → isDeptResolved ตามแผนกจริง (true, false, true) ไม่เชื่อค่าที่ Client ส่ง",
+    r3List.map((r) => r?.isDeptResolved).join(",") === "true,false,true");
+  const afterReplace = await step("c2.em.get.afterReplace3", "GET /api/employee_master", "admin", EM, undefined, 200);
+  check("GET หลัง Admin Replace = Response ของ Replace", canon(listOf(afterReplace)) === canon(r3List));
+
+  // --- Editor ส่งรหัสที่ซ้ำในฐาน → แก้เฉพาะแถวแรก, แทนทั้งแถว, ตำแหน่งเดิม ---
+  const e1 = await step("c2.em.editor.updateFirstDuplicate", "POST /api/employee_master", "editor", EM,
+    { employeeMaster: [{ employeeId: "E-DUP", name: "Dup A (แก้)", departmentId: "d-wh" }] }, 200);
+  const e1List = listOf(e1);
+  check("Editor แก้รหัสซ้ำ → แถวแรก (ตำแหน่ง 0) ถูกแทน", e1List[0]?.name === "Dup A (แก้)" && e1List[0]?.departmentId === "d-wh");
+  check("Editor แก้รหัสซ้ำ → แทนทั้งแถว (ช่องที่ไม่ส่งหายไป)",
+    !!e1List[0] && Object.keys(e1List[0]).sort().join(",") === "departmentId,employeeId,isDeptResolved,name");
+  check("Editor แก้รหัสซ้ำ → แถวที่สอง (Dup B) ไม่เปลี่ยน และจำนวนแถวเท่าเดิม",
+    e1List.length === 3 && canon([e1List[2]]) === canon([r3List[2]]) && canon([e1List[1]]) === canon([r3List[1]]));
+  check("Editor แก้รหัสซ้ำ → ตรงกับอัลกอริทึมเดิม", canon(e1List) === canon(refMerge(r3List, [{ employeeId: "E-DUP", name: "Dup A (แก้)", departmentId: "d-wh" }])));
+
+  // --- Editor ส่งรหัสใหม่ซ้ำ 2 ครั้งในคำขอเดียว → เพิ่มแถวเดียว ค่าเป็นของรายการหลัง ---
+  const newTwice = [em("E-NEW", "New first", "d-hr"), em("E-NEW", "New second", "d-hr")];
+  const e2 = await step("c2.em.editor.newCodeTwice", "POST /api/employee_master", "editor", EM, { employeeMaster: newTwice }, 200);
+  const e2List = listOf(e2);
+  check("Editor รหัสใหม่ซ้ำ 2 ครั้ง → เพิ่มแถวเดียวต่อท้าย ค่าเป็นของรายการหลัง",
+    e2List.length === 4 && e2List.filter((r) => r?.employeeId === "E-NEW").length === 1 && e2List[3]?.name === "New second");
+  check("Editor รหัสใหม่ซ้ำ → ตรงกับอัลกอริทึมเดิม", canon(e2List) === canon(refMerge(e1List, newTwice)));
+
+  // --- Editor ส่ง Array ว่าง / ส่งไม่ครบ → ไม่มีแถวหาย ---
+  const e3 = await step("c2.em.editor.emptyArray", "POST /api/employee_master", "editor", EM, { employeeMaster: [] }, 200);
+  check("Editor ส่ง [] → ไม่มีแถวหาย (เหมือนก่อนยิง)", canon(listOf(e3)) === canon(e2List));
+  const subset = [em("E-ONE", "One (แก้)", "d-nope")];
+  const e4 = await step("c2.em.editor.subset", "POST /api/employee_master", "editor", EM, { employeeMaster: subset }, 200);
+  const e4List = listOf(e4);
+  check("Editor ส่งบางแถว → แถวอื่นไม่หาย (4 แถว) และแก้เฉพาะแถวที่ส่ง",
+    e4List.length === 4 && e4List[1]?.name === "One (แก้)" && canon(e4List) === canon(refMerge(e2List, subset)));
+
+  // --- Q-1 (ก): มีแถว "9001" แล้ว Editor ส่ง employeeId: 9001 (ตัวเลข) → แก้แถวเดิม ไม่เพิ่มใหม่ ---
+  const e5 = await step("c2.em.editor.append9001", "POST /api/employee_master", "editor", EM,
+    { employeeMaster: [em("9001", "Num as text", "d-it")] }, 200);
+  const e5List = listOf(e5);
+  check("Editor เพิ่มแถว \"9001\"", e5List.length === 5 && e5List[4]?.employeeId === "9001");
+  const e6 = await step("c2.em.editor.number9001", "POST /api/employee_master", "editor", EM,
+    { employeeMaster: [{ ...em("9001", "Num as number", "d-it"), employeeId: 9001 }] }, 200);
+  const e6List = listOf(e6);
+  check("Q-1: employeeId 9001 (ตัวเลข) ตรงกับ \"9001\" → แก้แถวเดิม ไม่เพิ่มใหม่",
+    e6List.length === 5 && e6List[4]?.employeeId === "9001" && e6List[4]?.name === "Num as number");
+
+  // --- Q-2 (ข): แถวที่ไม่ใช่ Plain object → 400 INVALID_PAYLOAD ทั้งคำขอ ไม่เขียนอะไร ---
+  const beforeQ2 = await step("c2.em.get.beforeQ2", "GET /api/employee_master", "admin", EM, undefined, 200);
+  const q2Cases: Array<[string, Actor, unknown[]]> = [
+    ["objectThenNull", "admin", [em("Q2-A", "Q2 A", "d-hr"), null]],
+    ["number", "admin", [1]],
+    ["string", "admin", ["x"]],
+    ["array", "admin", [[]]],
+    ["editor.objectThenNull", "editor", [em("Q2-B", "Q2 B", "d-hr"), null]],
+  ];
+  for (const [label, actor, payload] of q2Cases) {
+    const r = await step(`c2.em.q2.${label}`, "POST /api/employee_master", actor, EM, { employeeMaster: payload }, 400);
+    check(`Q-2 ${label} → 400 { error: "INVALID_PAYLOAD" }`,
+      JSON.stringify(r.body) === JSON.stringify({ error: "INVALID_PAYLOAD" }));
+  }
+  const notArray = await step("c2.em.notArray", "POST /api/employee_master", "admin", EM, { employeeMaster: "x" }, 400);
+  check("employeeMaster ไม่ใช่ Array → 400 INVALID_PAYLOAD (เดิม)", errOf(notArray) === "INVALID_PAYLOAD");
+  const afterQ2 = await step("c2.em.get.afterQ2", "GET /api/employee_master", "admin", EM, undefined, 200);
+  check("Q-2: GET หลังยิงคำขอผิดรูปแบบ = เหมือนก่อนยิง", canon(listOf(afterQ2)) === canon(listOf(beforeQ2)));
+
+  // --- Admin Replace [] → GET [] ---
+  await step("c2.em.admin.replaceEmpty", "POST /api/employee_master", "admin", EM, { employeeMaster: [] }, 200);
+  const afterEmpty = await step("c2.em.get.afterReplaceEmpty", "GET /api/employee_master", "admin", EM, undefined, 200);
+  check("Admin Replace [] → GET ได้ []", Array.isArray(afterEmpty.body) && afterEmpty.body.length === 0);
+
+  // --- Concurrency (1): Admin Replace + Editor Merge พร้อมกัน 10 รอบ ---
+  const orders = { adminFirst: 0, editorFirst: 0 };
+  for (let round = 1; round <= 10; round++) {
+    const s0 = [em("E1", `s0-1 r${round}`, "d-hr"), em("E2", `s0-2 r${round}`, "d-qa")];
+    const x = [em("E1", `x-1 r${round}`, "d-hr"), em("E3", `x-3 r${round}`, "d-wh")];
+    const y = [em("E1", `y-1 r${round}`, "d-en"), em("E4", `y-4 r${round}`, "d-it")];
+    await step(`c2.cc1.r${round}.setup`, "POST /api/employee_master", "admin", EM, { employeeMaster: s0 }, 200);
+    const [ra, re] = await Promise.all([
+      step(`c2.cc1.r${round}.adminReplace`, "POST /api/employee_master", "admin", EM, { employeeMaster: x }, 200),
+      step(`c2.cc1.r${round}.editorMerge`, "POST /api/employee_master", "editor", EM, { employeeMaster: y }, 200),
+    ]);
+    const fin = await step(`c2.cc1.r${round}.final`, "GET /api/employee_master", "admin", EM, undefined, 200);
+    const adminFirst = canon(refMerge(withResolved(x), y)); // Admin ก่อน แล้ว Editor Merge
+    const editorFirst = canon(withResolved(x)); // Editor ก่อน แล้ว Admin แทนทั้งก้อน
+    const finCanon = canon(listOf(fin));
+    if (finCanon === adminFirst) orders.adminFirst++;
+    if (finCanon === editorFirst) orders.editorFirst++;
+    check(`Concurrency(1) รอบ ${round}: ผลสุดท้ายตรงกับ Admin→Editor หรือ Editor→Admin`,
+      finCanon === adminFirst || finCanon === editorFirst);
+    check(`Concurrency(1) รอบ ${round}: Response ของ Admin = ชุดของ Admin เสมอ`, canon(listOf(ra)) === canon(withResolved(x)));
+    check(`Concurrency(1) รอบ ${round}: Response ของ Editor = Merge บนสถานะก่อนหน้าที่ถูกต้อง`,
+      canon(listOf(re)) === canon(refMerge(withResolved(s0), y)) || canon(listOf(re)) === adminFirst);
+  }
+  console.log(`     ลำดับที่เกิดจริงใน Concurrency(1): Admin ก่อน ${orders.adminFirst} รอบ, Editor ก่อน ${orders.editorFirst} รอบ`);
+
+  // --- Concurrency (2): Editor Append รหัสต่างกัน 2 คำขอพร้อมกัน 10 รอบ → ได้ครบทั้งคู่ ไม่มีแถวหาย ---
+  await step("c2.cc2.setup", "POST /api/employee_master", "admin", EM, { employeeMaster: [em("BASE-1", "Base 1", "d-hr")] }, 200);
+  let expectedIds: string[] = ["BASE-1"];
+  for (let round = 1; round <= 10; round++) {
+    const a = em(`APP-A-${round}`, `Append A r${round}`, "d-hr");
+    const b = em(`APP-B-${round}`, `Append B r${round}`, "d-qa");
+    await Promise.all([
+      step(`c2.cc2.r${round}.editorA`, "POST /api/employee_master", "editor", EM, { employeeMaster: [a] }, 200),
+      step(`c2.cc2.r${round}.editorB`, "POST /api/employee_master", "editor", EM, { employeeMaster: [b] }, 200),
+    ]);
+    const fin = await step(`c2.cc2.r${round}.final`, "GET /api/employee_master", "admin", EM, undefined, 200);
+    const ids = listOf(fin).map((r) => r?.employeeId);
+    expectedIds = [...expectedIds, a.employeeId, b.employeeId];
+    check(`Concurrency(2) รอบ ${round}: ได้ครบทุกแถว (${expectedIds.length}) ไม่มีแถวหายหรือซ้ำ`,
+      ids.length === expectedIds.length && new Set(ids).size === ids.length && expectedIds.every((id) => ids.includes(id)));
+    check(`Concurrency(2) รอบ ${round}: แถวเดิมยังอยู่ตามลำดับเดิม (2 แถวใหม่อยู่ท้าย)`,
+      ids.slice(0, expectedIds.length - 2).join("|") === expectedIds.slice(0, -2).join("|"));
+    // ลำดับของ 2 แถวที่ยิงพร้อมกันขึ้นกับว่าใครได้ล็อกก่อน — ปรับ expectedIds ให้ตรงกับลำดับจริงเพื่อตรวจรอบถัดไป
+    expectedIds = ids.length === expectedIds.length ? ids : expectedIds;
+  }
+
+  await step("c2.final.employee_master", "GET /api/employee_master", "admin", EM, undefined, 200);
+}
+
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   console.log(`Harness ชุด "${SUITE}" รอบ "${runName}" → ${BASE_URL}`);
   let aborted: string | null = null;
   try {
     if (SUITE === "main") await scenario();
-    else await scenario01c1();
+    else if (SUITE === "01c1") await scenario01c1();
+    else await scenario01c2();
   } catch (e: any) {
     aborted = String(e?.message || e);
     console.error(aborted);

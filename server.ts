@@ -19,7 +19,6 @@ import {
   INITIAL_EXAM_RESULTS,
   INITIAL_SEARCH_LOGS,
   INITIAL_CONTACT_REQUESTS,
-  INITIAL_EMPLOYEE_MASTER,
 } from "./src/data/initialData";
 import {
   DEFAULT_AVATAR_URL,
@@ -64,7 +63,16 @@ import {
   TrainingSession,
   QuizSubmission,
 } from "./src/types";
-import { checkDatabase } from "./src/server/db";
+import { checkDatabase, withTransaction } from "./src/server/db";
+import {
+  applyEditorMerge,
+  listEmployeeMaster,
+  listExistingForMerge,
+  lockEmployeeMaster,
+  planEditorMerge,
+  replaceAllEmployees,
+  toEmployeeFields,
+} from "./src/server/repos/employeeMaster";
 import { classifyDbError, isDbError } from "./src/server/dbErrors";
 import { loadDepartments } from "./src/server/repos/departments";
 import {
@@ -589,7 +597,6 @@ async function startServer() {
   );
   let db_km_contribution_logs: KMContributionLog[] =
     getInitialKMContributionLogs();
-  let db_employee_master: EmployeeMaster[] = [...INITIAL_EMPLOYEE_MASTER];
   let db_attendance_logs: AttendanceLog[] = [];
   let db_training_sessions: TrainingSession[] = [];
   let db_quiz_submissions: QuizSubmission[] = [];
@@ -4255,56 +4262,61 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // Employee Master APIs — เฉพาะ Admin/Editor เห็นและจัดการได้ (ตรงกับ UI)
+  // 01C-2: ข้อมูลอยู่ใน km.employee_master — Response ไม่มี row_id/sort_order (FS-05)
+  // และ isDeptResolved ตัดสินที่ Server ตอนอ่าน (R9) ไม่เชื่อค่าจาก Client (N7)
   app.get(
     "/api/employee_master",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
-      res.json(db_employee_master);
+    async (req, res) => {
+      try {
+        res.json(await listEmployeeMaster());
+      } catch (err) {
+        return sendDbFailure(res, err, "GET /api/employee_master");
+      }
     },
   );
   app.post(
     "/api/employee_master",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
-      try {
-        const { employeeMaster: incomingMaster } = req.body;
-        if (!Array.isArray(incomingMaster)) {
-          return res.status(400).json({ error: "INVALID_PAYLOAD" });
-        }
+    async (req, res) => {
+      const { employeeMaster: incomingMaster } = req.body;
+      if (!Array.isArray(incomingMaster)) {
+        return res.status(400).json({ error: "INVALID_PAYLOAD" });
+      }
+      // Q-2 (ข): ทุกแถวต้องเป็น Plain object — มีแถวใดไม่ใช่ (null, Array, ตัวเลข, String, Boolean)
+      // = ปฏิเสธทั้งคำขอ ไม่เขียนอะไร
+      const rows = incomingMaster as unknown[];
+      if (
+        !rows.every(
+          (e) => e !== null && typeof e === "object" && !Array.isArray(e),
+        )
+      ) {
+        return res.status(400).json({ error: "INVALID_PAYLOAD" });
+      }
+      const incoming = rows as Record<string, unknown>[];
+      const isAdmin = req.authUser!.role === "Admin";
 
-        // N7: server เป็นผู้ตัดสิน isDeptResolved เอง (ไม่เชื่อค่าจาก client)
-        // resolved = departmentId ตรงกับ Department จริงในระบบ, ไม่ตรง = unresolved (ไม่สร้างแผนกใหม่)
-        const employeeMaster: EmployeeMaster[] = incomingMaster.map(
-          (e: EmployeeMaster) => ({
-            ...e,
-            isDeptResolved: !!getDepartmentById(String(e?.departmentId ?? "")),
-          }),
-        );
-        if (req.authUser!.role === "Admin") {
-          // Admin เท่านั้นที่ full-replace ได้ (รองรับ "เคลียร์ทั้งหมด" และ
-          // import ที่ตั้งใจแทนที่ฐานทั้งก้อน)
-          db_employee_master = employeeMaster;
-        } else {
-          // Editor: merge/upsert ตาม employeeId เท่านั้น ห้ามลบ record ที่มีอยู่เดิม
-          // ป้องกัน Editor ล้างฐานพนักงานทั้งหมดโดยไม่ได้ตั้งใจหรือมีเจตนาร้าย
-          const merged = [...db_employee_master];
-          employeeMaster.forEach((incoming) => {
-            const idx = merged.findIndex(
-              (e) => e.employeeId === incoming.employeeId,
-            );
-            if (idx !== -1) {
-              merged[idx] = incoming;
-            } else {
-              merged.push(incoming);
-            }
-          });
-          db_employee_master = merged;
-        }
-        res.json(db_employee_master);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+      // TX-09 (Master V6 §21.9 C): ทั้ง Admin และ Editor เขียนใน Transaction เดียว + LOCK TABLE
+      // (SHARE ROW EXCLUSIVE — ผู้เขียนชนกันเอง แต่ SELECT ยังอ่านได้และเห็นข้อมูลชุดก่อน Commit)
+      // แล้วอ่านทั้ง Collection ใน Transaction เดียวกันเป็น Response · Error ใด ๆ = ROLLBACK ข้อมูลเดิมอยู่ครบ
+      try {
+        const saved = await withTransaction(async (client) => {
+          await lockEmployeeMaster(client);
+          if (isAdmin) {
+            // Admin เท่านั้นที่แทนทั้งก้อนได้ (รองรับ "เคลียร์ทั้งหมด" และ import ที่ตั้งใจแทนที่ฐานทั้งก้อน)
+            await replaceAllEmployees(client, incoming.map(toEmployeeFields));
+          } else {
+            // Editor: merge ตาม employeeId เท่านั้น (B-17) ห้ามลบแถวที่มีอยู่เดิม
+            const existing = await listExistingForMerge(client);
+            await applyEditorMerge(client, planEditorMerge(existing, incoming));
+          }
+          return listEmployeeMaster(client);
+        });
+        res.json(saved);
+      } catch (err) {
+        return sendDbFailure(res, err, "POST /api/employee_master");
       }
     },
   );

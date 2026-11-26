@@ -13,8 +13,16 @@
 |---|---|---|
 | `main` (ค่าเริ่มต้น) | `run.ts <ชื่อรอบ>` | ชุดหลัก 306 Request — **ห้ามแก้** เพื่อให้ยังเทียบกับ `baseline` ได้ |
 | `01c1` | `run.ts --suite 01c1 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-1 (§D): `GET /api/departments`, C-05, `id`/`employeeId` ซ้ำ (E-2/E-1.2), F-01 (DELETE = Terminated), F-06, Reactivate · มีข้อตรวจเนื้อหา Response (`check`) — ผลรวมอยู่ใน `summary.json` → `checkFailures` |
+| `01c2` | `run.ts --suite 01c2 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-2 (§D): Employee Master บน DB — สิทธิ์, Admin Replace (ลำดับ/ไม่มี `row_id`/`sort_order`/`isDeptResolved`), Editor Merge (B-17 แถวแรก/แทนทั้งแถว/รหัสซ้ำในคำขอ/ไม่ลบแถว), Q-1 (`9001` = `"9001"`), Q-2 (แถวไม่ใช่ Object → 400), Replace `[]`, Concurrency 2 แบบ × 10 รอบ (TX-09) |
 
-ชุด `01c1` คาดพฤติกรรม**หลัง** 01C-1 — ถ้ารันกับโค้ดก่อน 01C-1 จะไม่ผ่านหลายข้อโดยเจตนา
+ชุด `01c1` คาดพฤติกรรม**หลัง** 01C-1 — ถ้ารันกับโค้ดก่อน 01C-1 จะไม่ผ่านหลายข้อโดยเจตนา (ชุด `01c2` เช่นเดียวกันกับ 01C-2)
+
+หลังรันชุด `01c2` ให้ตรวจ `sort_order` ไม่ซ้ำ (อ่านอย่างเดียว ในฐานะ `km_app`):
+```powershell
+psql -U km_app -d km_rmp -c "SELECT count(*) AS total_rows, count(DISTINCT sort_order) AS distinct_sort_order, count(*) - count(DISTINCT sort_order) AS duplicate_sort_order FROM km.employee_master;"
+psql -U km_app -d km_rmp -c "SELECT sort_order, count(*) FROM km.employee_master GROUP BY sort_order HAVING count(*) > 1;"
+```
+ผลที่ต้องได้: `duplicate_sort_order = 0` และคำสั่งที่สองไม่มีแถว (`total_rows` หลังจบชุด = 21)
 แต่ละชุดรันแยกรอบ (ผลแยกโฟลเดอร์) และต้องเริ่มจากฐานที่ล้างแล้วทุกครั้ง
 
 ## รอบทดสอบใหม่ (ตั้งแต่ 01C-1 ข้อมูลผู้ใช้อยู่ใน DB — รีสตาร์ท Server อย่างเดียวไม่สะอาด)
