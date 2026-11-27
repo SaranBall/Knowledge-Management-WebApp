@@ -83,7 +83,12 @@ export interface Course {
   title: string;
   description: string;
   type: "Onboarding" | "General";
-  targetPositions: string[]; // Positions matching Competency Matrix (e.g. ["QC", "Warehouse Staff"])
+  // §21.24 §3.1 / G-12: แผนกเป้าหมาย (แทน targetPositions ที่ยกเลิก) — [] = ทุกแผนก (Q-3)
+  // นับรวมแผนกย่อยของแผนกที่เลือก (หลัก → ย่อย)
+  targetDepartmentIds: string[];
+  isMandatory: boolean; // หลักสูตรบังคับ (G-8.1)
+  issuesCertificate: boolean; // ออกใบรับรองเมื่อสอบผ่าน (§3.2)
+  certificateValidityMonths?: number | null; // อายุใบรับรอง (เดือน) — ไม่มี/null = ไม่หมดอายุ
   lessons: Lesson[];
   quiz: QuizQuestion[];
   minPassScore: number; // e.g. 80 (%)

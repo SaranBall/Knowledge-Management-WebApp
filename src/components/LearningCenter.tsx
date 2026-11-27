@@ -64,6 +64,14 @@ import { BadgeCertificateModal } from "./BadgeCertificateModal";
 import { calculateRemainingDays } from "../utils/gamificationUtils";
 import { getDepartmentById } from "../utils/departmentUtils";
 import { formatDuration } from "../utils/courseutils";
+import {
+  CourseTargetFields,
+  type CourseTargetValue,
+  EMPTY_COURSE_TARGET,
+  courseTargetValueOf,
+  describeTargetDepartments,
+  toCourseTargetPayload,
+} from "./CourseTargetFields";
 import { DEFAULT_LESSON_IMAGE_URL } from "../utils/assets";
 import { resolveSignedUrl } from "../utils/fileAccess";
 import {
@@ -73,6 +81,10 @@ import {
   isUnansweredText,
   resolveEssayTotal,
 } from "../utils/quizRules";
+
+// §21.24 G-8.2 (01C-5 A-Q3): ซ่อนแท็บ Competency Matrix / Skills Map จนกว่าจะทำ COMP-01 (หลัง Go-live)
+// ไม่ลบโค้ดและไม่แตะ API — เปลี่ยนเป็น true เพื่อแสดงกลับ
+const SHOW_COMPETENCY_MATRIX = false;
 
 // แสดงคะแนน 2 ตำแหน่ง (P-25 / ODR-01) เฉพาะค่าที่เป็น finite number — ค่าอื่นแสดงตามเดิม ไม่แก้ข้อมูล (U-02)
 function displayScore<T>(score: T): string | T {
@@ -353,7 +365,6 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
     type: "Onboarding" as "Onboarding" | "General",
     durationMinutes: "" as number | "",
     minPassScore: 80,
-    targetPositions: [] as string[],
     lessonTitle: "บทเรียนย่อยที่ 1: ขั้นตอนสากลและการจัดสรรงานเบื้องต้น",
     lessonContent:
       "รายละเอียดวาระเนื้อหาประกอบการศึกษา พนักงานต้องเข้าใจเกณฑ์คุณภาพ คู่มือ ISO9001 และระเบียบขั้นตอนการทำงาน...",
@@ -370,6 +381,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
     simulatedFileName: "",
     isSimulatedUploading: false,
   });
+
+  // 01C-5 (Q2-S): แผนกเป้าหมาย / หลักสูตรบังคับ / ใบรับรอง ของฟอร์มสร้างและแก้ไข
+  const [newCourseTarget, setNewCourseTarget] =
+    useState<CourseTargetValue>(EMPTY_COURSE_TARGET);
+  const [editCourseTarget, setEditCourseTarget] =
+    useState<CourseTargetValue>(EMPTY_COURSE_TARGET);
 
   const [addedQuizQuestions, setAddedQuizQuestions] = useState<any[]>([]);
 
@@ -843,8 +860,10 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
   const handleAddCourseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCourseState.title || !newCourseState.description) return;
-    if (newCourseState.targetPositions.length === 0) {
-      alert("⚠️ กรุณาเลือกกลุ่มพนักงานเป้าหมายอย่างน้อย 1 กลุ่ม");
+    // 01C-5 (Q2-S): แผนกเป้าหมาย / บังคับ / ใบรับรอง — ไม่เลือกแผนก = ทุกแผนก (ไม่บังคับเลือก)
+    const targetPayload = toCourseTargetPayload(newCourseTarget);
+    if (targetPayload.ok === false) {
+      alert(targetPayload.message);
       return;
     }
 
@@ -950,7 +969,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       minPassScore: Number(newCourseState.minPassScore),
       durationMinutes: Number(newCourseState.durationMinutes),
       durationHours: formatDuration(Number(newCourseState.durationMinutes)),
-      targetPositions: newCourseState.targetPositions,
+      ...targetPayload.value,
       lessons: [firstLesson],
       quiz: finalQuizQuestions,
       isApproved,
@@ -985,7 +1004,6 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       type: "Onboarding",
       durationHours: "",
       minPassScore: 80,
-      targetPositions: [""],
       lessonTitle: "บทเรียนย่อยที่ 1: ขั้นตอนสากลและการจัดสรรงานเบื้องต้น",
       lessonContent:
         "รายละเอียดวาระเนื้อหาประกอบการศึกษา พนักงานต้องเข้าใจเกณฑ์คุณภาพ คู่มือ ISO9001 และระเบียบขั้นตอนการทำงาน...",
@@ -998,6 +1016,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       simulatedFileName: "",
       isSimulatedUploading: false,
     });
+    setNewCourseTarget(EMPTY_COURSE_TARGET);
   };
 
   const handleEditCourseSubmit = (e: React.FormEvent) => {
@@ -1021,10 +1040,21 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
       );
       return;
     }
+    const editTargetPayload = toCourseTargetPayload(editCourseTarget);
+    if (editTargetPayload.ok === false) {
+      alert(editTargetPayload.message);
+      return;
+    }
     // คงฟิลด์เดิมทั้งหมด (isApproved, createdByRole, badgeKey, tags ฯลฯ)
     // เขียนทับเฉพาะที่ฟอร์มนี้แก้ได้ — เดิมสร้างอ็อบเจ็กต์ใหม่ทำให้ฟิลด์เหล่านี้หายทุกครั้งที่บันทึก
-    const { lessonsStr, quizStr, targetPositionsStr, ...preserved } =
-      editingCourse;
+    // 01C-5: targetPositions ยกเลิก (G-12) — ตัดค่าเก่าออกถ้ายังติดอยู่ใน State
+    const {
+      lessonsStr,
+      quizStr,
+      targetPositionsStr: _legacyTargetPositionsStr,
+      targetPositions: _legacyTargetPositions,
+      ...preserved
+    } = editingCourse;
     const updated: Course = {
       ...preserved,
       id: editingCourse.id,
@@ -1040,7 +1070,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
         : editingCourse.durationHours,
       lessons: parsedLessons,
       quiz: parsedQuiz,
-      targetPositions: editingCourse.targetPositions ?? [],
+      ...editTargetPayload.value,
     };
 
     onUpdateCourse(updated);
@@ -1201,23 +1231,26 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
           🎯 พัฒนาทักษะและสมรรถนะเทคนิค (Competency)
         </button>
 
-        <button
-          onClick={() => {
-            setActiveSubTab("competency");
-            setActiveLessonIndex(null);
-            setIsTakingQuiz(false);
-            setShowCertificate(false);
-            setCertificateCourseOverride(null);
-          }}
-          className={`px-4 py-2.5 text-xs font-extrabold whitespace-nowrap border-b-2 transition flex items-center gap-2 cursor-pointer ${
-            activeSubTab === "competency"
-              ? "border-[#15329c] text-[#15329c]"
-              : "border-transparent text-slate-500 hover:text-slate-705"
-          }`}
-        >
-          <ListTodo className="w-4 h-4 text-emerald-600" />
-          📊 แผนผังประเมินทักษะ & Skill Gap (Skills Map)
-        </button>
+        {/* G-8.2: ซ่อนแท็บ Skills Map จนกว่าจะทำ COMP-01 (ไม่ลบโค้ด/ไม่แตะ API) */}
+        {SHOW_COMPETENCY_MATRIX && (
+          <button
+            onClick={() => {
+              setActiveSubTab("competency");
+              setActiveLessonIndex(null);
+              setIsTakingQuiz(false);
+              setShowCertificate(false);
+              setCertificateCourseOverride(null);
+            }}
+            className={`px-4 py-2.5 text-xs font-extrabold whitespace-nowrap border-b-2 transition flex items-center gap-2 cursor-pointer ${
+              activeSubTab === "competency"
+                ? "border-[#15329c] text-[#15329c]"
+                : "border-transparent text-slate-500 hover:text-slate-705"
+            }`}
+          >
+            <ListTodo className="w-4 h-4 text-emerald-600" />
+            📊 แผนผังประเมินทักษะ & Skill Gap (Skills Map)
+          </button>
+        )}
 
         <button
           onClick={() => {
@@ -1904,7 +1937,7 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
             </div>
           </div>
         </div>
-      ) : activeSubTab === "competency" ? (
+      ) : SHOW_COMPETENCY_MATRIX && activeSubTab === "competency" ? (
         /* COMPETENCY MATRIX & SKILL GAP TRACKING */
         <div className="bg-white p-6 rounded-2xl border border-slate-205 shadow-xs space-y-6 animate-fade-in text-slate-800">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -3897,20 +3930,28 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                 id="active-course-explorer"
               >
                 <div className="space-y-4">
-                  {/* Title & Position Tags */}
+                  {/* Title & Target Departments (01C-5 Q2-S: แทน targetPositions) */}
                   <div className="pb-3 border-b border-slate-150">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-[9px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-150 font-bold uppercase">
                         Course Code: {selectedCourse.id}
                       </span>
-                      {(Array.isArray(selectedCourse.targetPositions) ? selectedCourse.targetPositions : []).map((pos) => (
-                        <span
-                          key={pos}
-                          className="bg-slate-105 text-slate-600 text-[9px] font-bold px-1.5 py-0.5 rounded-full border"
-                        >
-                          🎯 กลุ่มเป้าหมาย: {pos}
+                      <span className="bg-slate-105 text-slate-600 text-[9px] font-bold px-1.5 py-0.5 rounded-full border">
+                        🎯 แผนกเป้าหมาย:{" "}
+                        {describeTargetDepartments(selectedCourse.targetDepartmentIds)}
+                      </span>
+                      {selectedCourse.isMandatory === true && (
+                        <span className="bg-rose-50 text-rose-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-rose-200">
+                          📌 หลักสูตรบังคับ
                         </span>
-                      ))}
+                      )}
+                      <span className="bg-emerald-50 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-emerald-200">
+                        {selectedCourse.issuesCertificate === false
+                          ? "📄 ไม่ออกใบรับรอง"
+                          : typeof selectedCourse.certificateValidityMonths === "number"
+                            ? `📄 ใบรับรองอายุ ${selectedCourse.certificateValidityMonths} เดือน`
+                            : "📄 ใบรับรองไม่หมดอายุ"}
+                      </span>
                     </div>
 
                     <h3 className="font-black text-slate-900 text-base sm:text-lg mt-2 leading-tight">
@@ -4035,13 +4076,9 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                         currentUser.role === "Editor") && (
                         <button
                           onClick={() => {
+                            setEditCourseTarget(courseTargetValueOf(selectedCourse));
                             setEditingCourse({
                               ...selectedCourse,
-                              targetPositionsStr: Array.isArray(selectedCourse.targetPositions)
-                                ? selectedCourse.targetPositions.join(", ")
-                                : typeof selectedCourse.targetPositions === "string"
-                                  ? selectedCourse.targetPositions
-                                  : "",
                               lessonsStr: JSON.stringify(
                                 selectedCourse.lessons,
                                 null,
@@ -4262,77 +4299,12 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                   </div>
                 </div>
 
-                {/* Checklist checkbox selector for Target Positions */}
-                <div className="space-y-1.5">
-                  <label className="font-bold text-slate-700 block">
-                    กลุ่มพนักงานเป้าหมาย (ระดับประเมินความสามารถ):*
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-150">
-                    {[
-                      {
-                        id: "pos-qc",
-                        val: "QC",
-                        label: "🔬 พนักงานประกันคุณภาพ (QC/QA)",
-                      },
-                      {
-                        id: "pos-wh",
-                        val: "Warehouse Staff",
-                        label: "📦 พนักงานคลังสินค้า (Warehouse)",
-                      },
-                      {
-                        id: "pos-op",
-                        val: "Operator",
-                        label: "⚙️ พนักงานเดินสายการผลิต (Operator)",
-                      },
-                      {
-                        id: "pos-tc",
-                        val: "Technician",
-                        label: "🛠️ แผนกช่างซ่อมบำรุง (Technician)",
-                      },
-                      {
-                        id: "pos-all",
-                        val: "All Staff",
-                        label: "👥 พนักงานทั่วไป (All Staff)",
-                      },
-                    ].map((item) => {
-                      const isChecked = newCourseState.targetPositions.includes(
-                        item.val,
-                      );
-                      return (
-                        <label
-                          key={item.id}
-                          className="flex items-center gap-2 cursor-pointer hover:text-indigo-700 select-none text-[11px]"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {
-                              if (isChecked) {
-                                setNewCourseState({
-                                  ...newCourseState,
-                                  targetPositions:
-                                    newCourseState.targetPositions.filter(
-                                      (p) => p !== item.val,
-                                    ),
-                                });
-                              } else {
-                                setNewCourseState({
-                                  ...newCourseState,
-                                  targetPositions: [
-                                    ...newCourseState.targetPositions,
-                                    item.val,
-                                  ],
-                                });
-                              }
-                            }}
-                            className="rounded text-indigo-650 focus:ring-indigo-500 w-3.5 h-3.5"
-                          />
-                          {item.label}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
+                {/* 01C-5 (Q2-S): แผนกเป้าหมายจากแผนกจริง + หลักสูตรบังคับ + ใบรับรอง (แทนตัวเลือกตำแหน่ง Mockup — G-12) */}
+                <CourseTargetFields
+                  idPrefix="new-course"
+                  value={newCourseTarget}
+                  onChange={setNewCourseTarget}
+                />
               </div>
 
               {/* Section 2: สื่อและไฟล์ในการเรียนรู้ (PDF, Images, Slides, Video) */}
@@ -4988,32 +4960,14 @@ export const LearningCenter: React.FC<LearningCenterProps> = ({
                     className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs"
                   />
                 </div>
-
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-600 block">
-                    กลุ่มเป้าหมาย (คั่นด้วยจุลภาค):
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editingCourse.targetPositionsStr || ""}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      const arr = val
-                        .split(",")
-                        .map((v) => v.trim())
-                        .filter(Boolean);
-                      setEditingCourse({
-                        ...editingCourse,
-                        targetPositionsStr: val,
-                        targetPositions: arr,
-                      });
-                    }}
-                    placeholder="เช่น Warehouse Staff, QC, Operator"
-                    className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs"
-                  />
-                </div>
               </div>
+
+              {/* 01C-5 (Q2-S): แผนกเป้าหมาย / หลักสูตรบังคับ / ใบรับรอง (แทนช่องพิมพ์ตำแหน่ง — G-12) */}
+              <CourseTargetFields
+                idPrefix="edit-course"
+                value={editCourseTarget}
+                onChange={setEditCourseTarget}
+              />
 
               {/* JSON formatting lessons editing */}
               <div className="space-y-1">

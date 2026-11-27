@@ -1,4 +1,5 @@
 import { Course, UserCourseProgress } from "../types";
+import { getDepartmentById } from "./departmentUtils";
 
 /**
  * @license
@@ -6,20 +7,36 @@ import { Course, UserCourseProgress } from "../types";
  */
 
 /**
- * Competency Matrix mapping: ตำแหน่งงาน -> รหัสคอร์สบังคับ
- * ใช้ร่วมกันระหว่าง Dashboard.tsx และ MemberManagement.tsx
- * เพื่อไม่ให้ logic ซ้ำและไม่ sync กันเวลาแก้ไข
- *
- * TODO: เมื่อมีระบบ Course Catalog ที่ยืดหยุ่นกว่านี้ (เช่น field
- * requiredForPositions ในตัว Course object เอง) ควรย้าย mapping นี้ไปผูกกับ
- * ตัวคอร์สโดยตรงแทนการ hardcode รหัส c-1/c-2/c-3 ไว้ตรงนี้
+ * ผู้ใช้อยู่ในแผนกเป้าหมายหรือไม่ — แผนกตรงกัน หรือผู้ใช้อยู่แผนกย่อยของแผนกเป้าหมาย (หลัก → ย่อย)
+ * แผนกเป้าหมายที่เป็นแผนกย่อยไม่นับผู้ใช้ในแผนกหลัก (ย่อย → หลัก ไม่นับ) และไม่นับแผนกพี่น้อง
  */
+const isUserInTargetDepartment = (
+  userDepartmentId: string | undefined,
+  targetDepartmentId: string,
+): boolean => {
+  if (!userDepartmentId) return false;
+  if (userDepartmentId === targetDepartmentId) return true;
+  const userDept = getDepartmentById(userDepartmentId);
+  return !!userDept && userDept.parentId === targetDepartmentId;
+};
 
-// TODO: ยังไม่มี mapping ตำแหน่ง → คอร์สบังคับจริง (คอร์ส c-1/c-2/c-3 เดิมไม่มีอยู่แล้ว)
-// คืน [] ไปก่อนเพื่อไม่ให้รายงานแสดงหลักสูตรบังคับปลอม
-// ทางออกระยะยาว: เพิ่ม field requiredForPositions ใน Course แล้วกรองจากคอร์สจริง
-export const getRequiredCoursesForPosition = (_position?: string): string[] => {
-  return [];
+/**
+ * §21.24 G-8.1 / Q-3 (ก): หลักสูตรบังคับของผู้ใช้ (แทน getRequiredCoursesForPosition ที่ผูกตำแหน่ง)
+ * = หลักสูตรที่ isMandatory และ Approved (isApproved === true) และ
+ *   (ไม่ได้เลือกแผนกเป้าหมาย = ทุกแผนก หรือ ผู้ใช้อยู่ในแผนกเป้าหมาย/แผนกย่อยของแผนกเป้าหมาย)
+ * คงลำดับตามรายการหลักสูตรที่ส่งเข้ามา
+ */
+export const getRequiredCoursesForUser = (
+  user: { departmentId?: string } | null | undefined,
+  courses: readonly Course[],
+): Course[] => {
+  if (!user || !Array.isArray(courses)) return [];
+  return courses.filter((c) => {
+    if (!c || c.isMandatory !== true || c.isApproved !== true) return false;
+    const targets = Array.isArray(c.targetDepartmentIds) ? c.targetDepartmentIds : [];
+    if (targets.length === 0) return true;
+    return targets.some((t) => isUserInTargetDepartment(user.departmentId, t));
+  });
 };
 
 export const formatDuration = (minutes?: number): string => {

@@ -1,13 +1,15 @@
 /**
  * PERSIST-01C-0 — API Regression harness (ตัวยิง)
  *
- * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3|01c4] <ชื่อรอบ>
+ * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3|01c4|01c5] <ชื่อรอบ>
  *   main (ค่าเริ่มต้น) = ชุดหลัก 306 Request — ห้ามแก้ เพื่อให้ยังเทียบกับ baseline ได้
  *   01c1               = กรณีเพิ่มของ PERSIST-01C-1 (§D) — รันแยกรอบบนฐานที่ล้างแล้ว
  *   01c2               = กรณีเพิ่มของ PERSIST-01C-2 (§D, Employee Master) — รันแยกรอบบนฐานที่ล้างแล้ว
  *   01c3               = กรณีเพิ่มของ PERSIST-01C-3 (§D, เอกสาร + ACL + ไฟล์) — รันแยกรอบบนฐานที่ล้างแล้ว
  *                        อัปโหลดไฟล์ทดสอบจริง (ชื่อไฟล์อยู่ใน summary.json → uploadedTestFiles) — ดูวิธีลบใน README
  *   01c4               = กรณีเพิ่มของ PERSIST-01C-4 (§D, ความรู้และการโต้ตอบ 7 ตาราง) — รันแยกรอบบนฐานที่ล้างแล้ว (ไม่อัปโหลดไฟล์)
+ *   01c5               = กรณีเพิ่มของ PERSIST-01C-5 (§D, หลักสูตร 4 ตาราง + Q2-S) — รันแยกรอบบนฐานที่ล้างแล้ว
+ *                        อัปโหลดไฟล์ทดสอบจริง (ชื่อไฟล์อยู่ใน summary.json → uploadedTestFiles) — ดูวิธีลบใน README
  *
  * Environment (ตั้งใน Terminal เอง — ห้ามเขียนลงไฟล์):
  *   HARNESS_BASE_URL        ค่าเริ่มต้น http://localhost:3000
@@ -152,9 +154,9 @@ interface RecordFile {
   responseBody: unknown;
 }
 
-const SUITES = ["main", "01c1", "01c2", "01c3", "01c4"] as const;
+const SUITES = ["main", "01c1", "01c2", "01c3", "01c4", "01c5"] as const;
 type Suite = (typeof SUITES)[number];
-const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3|01c4] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
+const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3|01c4|01c5] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
 
 function parseArgs(argv: string[]): { suite: Suite; runName: string } {
   let suite: string = "main";
@@ -1611,6 +1613,370 @@ async function scenario01c4() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// ชุด 01c5 — PERSIST-01C-5 §D (courses + course_target_departments + course_lessons + course_quiz_questions บน DB,
+// Q2-S: targetDepartmentIds / isMandatory / issuesCertificate / certificateValidityMonths, Q-4 (ก) INVALID_COURSE)
+// Status/ผลที่คาด = พฤติกรรมหลัง 01C-5 (โค้ด Memory เดิมจะไม่ผ่าน Q-4 / DEFAULT ช่องใหม่ / \u0000 → 500 — ตั้งใจ)
+// อัปโหลดไฟล์ทดสอบจริง (PDF เล็ก) — ชื่อไฟล์ทุกไฟล์บันทึกใน summary.json → uploadedTestFiles เพื่อให้ Owner ลบเอง
+// ---------------------------------------------------------------------------
+
+async function scenario01c5() {
+  const CO = "/api/courses";
+  const errOf = (r: Res) => (r.body && typeof r.body.error === "string" ? r.body.error : undefined);
+  const listOf = (r: Res): any[] => (Array.isArray(r.body) ? r.body : []);
+  const idsOf = (r: Res) => listOf(r).map((x) => x?.id);
+  const findIn = (r: Res, id: string) => listOf(r).find((x) => x?.id === id);
+  // เทียบแบบไม่สนลำดับ Key (Mapper อาจเรียง Key ต่างจากที่ส่ง) แต่สนลำดับสมาชิกใน Array
+  const canon = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(canon)
+      : v && typeof v === "object"
+        ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, canon((v as Record<string, unknown>)[k])]))
+        : v;
+  const same = (a: unknown, b: unknown) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+  const has = (o: unknown, k: string) => !!o && typeof o === "object" && k in (o as object);
+  const INTERNAL = { error: "INTERNAL_ERROR", message: "เกิดข้อผิดพลาดภายในระบบ" };
+  const stepOneOf = async (name: string, route: string, actor: Actor, urlPath: string, body: unknown, allowed: number[]) => {
+    const r = await step(name, route, actor, urlPath, body, allowed[0]);
+    if (allowed.includes(r.status)) {
+      for (let i = unexpected.length - 1; i >= 0; i--) {
+        if (unexpected[i].name === name) unexpected.splice(i, 1);
+      }
+    }
+    return r;
+  };
+
+  // --- เริ่มต้น / ผู้ใช้ ---
+  const adminLogin = await login("admin", "c5.login.admin", ADMIN_ID, ADMIN_PASSWORD, 200);
+  if (adminLogin.status !== 200) throw new Error("ABORT: Admin login ไม่สำเร็จ — ตรวจ HARNESS_ADMIN_ID / HARNESS_ADMIN_PASSWORD");
+  const initialUsers = await step("c5.users.list.initial", "GET /api/users", "admin", "/api/users", undefined, 200);
+  if (!Array.isArray(initialUsers.body) || initialUsers.body.length !== 1) {
+    throw new Error("ABORT: ฐานไม่อยู่ในสถานะเริ่มต้นสะอาด (ผู้ใช้ไม่ใช่ 1 คน) — ล้างฐานแล้วเปิด Server ใหม่ แล้วรันด้วยชื่อรอบใหม่");
+  }
+  const initialCourses = await step("c5.courses.list.initial", "GET /api/courses", "admin", CO, undefined, 200);
+  if (listOf(initialCourses).length !== 0) throw new Error("ABORT: มีหลักสูตรอยู่แล้วตอนเริ่ม — ล้างฐานแล้วเปิด Server ใหม่");
+  const mkUser = (emp: string, name: string, role: string, departmentId: string, password: string) => ({
+    name, employeeId: emp, departmentId, position: "ช่าง", role,
+    email: `${emp.toLowerCase()}@example.invalid`, phone: "000-000-0000", status: "Active", startDate: "2026-01-15", password,
+  });
+  await step("c5.users.create.editor", "POST /api/users", "admin", "/api/users", mkUser("HRN-C5-EDITOR", "C5 Editor", "Editor", "d-pd", PW.editor), 200);
+  await step("c5.users.create.viewer", "POST /api/users", "admin", "/api/users", mkUser("HRN-C5-VIEWER", "C5 Viewer", "Viewer", "d-pd-dl", PW.viewer), 200);
+  await login("editor", "c5.login.editor", "HRN-C5-EDITOR", PW.editor, 200);
+  await login("viewer", "c5.login.viewer", "HRN-C5-VIEWER", PW.viewer, 200);
+
+  // --- ข้อมูลหลักสูตร: บท 3 บท / ข้อสอบ 4 ข้อ (id ไม่เรียงตามตัวอักษร เพื่อพิสูจน์ว่าลำดับมาจาก ordinal) ---
+  const lessons3 = [
+    { id: "l-b", title: "บท B (แรก)", content: "เนื้อหา B", durationMinutes: 5, mediaType: "Text" },
+    { id: "l-a", title: "บท A (สอง)", content: "เนื้อหา A", durationMinutes: 7.5, mediaType: "Text" },
+    { id: "l-c", title: "บท C (สาม)", content: "เนื้อหา C", durationMinutes: 10, mediaType: "Video", mediaUrl: "https://example.com/c5.mp4" },
+  ];
+  const pairs = [{ left: "ซ้าย 3", right: "ขวา C" }, { left: "ซ้าย 1", right: "ขวา A" }, { left: "ซ้าย 2", right: "ขวา B" }];
+  const quiz4 = [
+    { id: "q-z", question: "ข้อเลือกตอบ", type: "SingleChoice", options: ["ตัวเลือก 2", "ตัวเลือก 1", "ตัวเลือก 3"], correctAnswer: "ตัวเลือก 1" },
+    { id: "q-a", question: "ข้อถูกผิด", type: "TrueFalse", options: ["True", "False"], correctAnswer: "False" },
+    { id: "q-m", question: "ข้อจับคู่", type: "Matching", pairs, correctAnswer: JSON.stringify({ "ซ้าย 3": "ขวา C", "ซ้าย 1": "ขวา A", "ซ้าย 2": "ขวา B" }) },
+    { id: "q-e", question: "ข้อเขียน", type: "Essay", correctAnswer: "" },
+  ];
+  const course = (id: string, title: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    title,
+    description: `${title} — คำอธิบาย`,
+    type: "General",
+    lessons: lessons3,
+    quiz: quiz4,
+    minPassScore: 60,
+    durationHours: "1 ชั่วโมง",
+    durationMinutes: 60,
+    tags: ["harness-c5", "ลำดับ-2"],
+    badgeKey: "safety",
+    ...extra,
+  });
+
+  // --- 1. ช่องใหม่: บันทึกแล้วอ่านกลับ (POST / GET / PUT) · ลำดับแผนกตามที่ส่ง · ตัดซ้ำ ---
+  const full = await step("c5.fields.create.full", "POST /api/courses", "admin", CO,
+    course("HRN_C5_FULL", "C5 ช่องใหม่ครบ", {
+      targetDepartmentIds: ["d-qa", "d-pd", "d-hr", "d-pd", "d-qa"],
+      isMandatory: true,
+      issuesCertificate: true,
+      certificateValidityMonths: 12,
+    }), 200);
+  check("ช่องใหม่ POST: targetDepartmentIds ตัดซ้ำ คงลำดับที่ส่ง = [d-qa, d-pd, d-hr]",
+    same(full.body?.targetDepartmentIds, ["d-qa", "d-pd", "d-hr"]));
+  check("ช่องใหม่ POST: isMandatory true / issuesCertificate true / certificateValidityMonths 12",
+    full.body?.isMandatory === true && full.body?.issuesCertificate === true && full.body?.certificateValidityMonths === 12);
+  check("POST: ไม่มี Key targetPositions / collection_order / collectionOrder",
+    !!full.body && !has(full.body, "targetPositions") && !has(full.body, "collection_order") && !has(full.body, "collectionOrder"));
+  check("POST: lessons ลำดับและค่าเหมือนที่ส่ง (บทที่ไม่มี mediaUrl → ไม่มี Key)", same(full.body?.lessons, lessons3));
+  check("POST (Admin): quiz ลำดับและค่าเหมือนที่ส่ง รวม pairs และเฉลย", same(full.body?.quiz, quiz4));
+  check("POST: tags / badgeKey / durationMinutes / minPassScore เหมือนที่ส่ง",
+    same(full.body?.tags, ["harness-c5", "ลำดับ-2"]) && full.body?.badgeKey === "safety" &&
+      full.body?.durationMinutes === 60 && full.body?.minPassScore === 60);
+  check("POST (Admin): isApproved true / createdByRole Admin", full.body?.isApproved === true && full.body?.createdByRole === "Admin");
+  const fullGet = await step("c5.fields.list.afterCreate", "GET /api/courses", "admin", CO, undefined, 200);
+  check("GET (Admin): หลักสูตรอ่านกลับได้เหมือน Response ของ POST ทุกช่อง", same(findIn(fullGet, "HRN_C5_FULL"), full.body));
+
+  const defaults = await step("c5.fields.create.defaults", "POST /api/courses", "admin", CO,
+    course("HRN_C5_DEFAULTS", "C5 ไม่ส่งช่องใหม่", { targetPositions: ["ช่าง"] }), 200);
+  check("ไม่ส่งช่องใหม่ → isMandatory false / issuesCertificate true / targetDepartmentIds []",
+    defaults.body?.isMandatory === false && defaults.body?.issuesCertificate === true && same(defaults.body?.targetDepartmentIds, []));
+  check("ไม่ส่งช่องใหม่ → ไม่มี Key certificateValidityMonths", !!defaults.body && !has(defaults.body, "certificateValidityMonths"));
+  check("ส่ง targetPositions → ไม่ถูกเก็บ (ไม่มี Key)", !!defaults.body && !has(defaults.body, "targetPositions"));
+
+  const fullPut = await step("c5.fields.update.full", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_FULL`,
+    course("HRN_C5_FULL", "C5 ช่องใหม่ครบ (แก้)", {
+      isApproved: true,
+      targetDepartmentIds: ["d-wh", "d-it", "d-wh"],
+      isMandatory: false,
+      issuesCertificate: false,
+      certificateValidityMonths: 24,
+    }), 200);
+  check("PUT: ช่องใหม่ถูกแทนตามที่ส่ง (แผนก [d-wh, d-it] / false / false / 24)",
+    same(fullPut.body?.targetDepartmentIds, ["d-wh", "d-it"]) && fullPut.body?.isMandatory === false &&
+      fullPut.body?.issuesCertificate === false && fullPut.body?.certificateValidityMonths === 24);
+  const fullPutGet = await step("c5.fields.list.afterUpdate", "GET /api/courses", "admin", CO, undefined, 200);
+  check("GET (Admin) หลัง PUT: อ่านกลับเหมือน Response ของ PUT", same(findIn(fullPutGet, "HRN_C5_FULL"), fullPut.body));
+
+  const nullValidity = await step("c5.fields.create.validityNull", "POST /api/courses", "admin", CO,
+    course("HRN_C5_VALIDITY_NULL", "C5 อายุใบรับรอง null", { certificateValidityMonths: null }), 200);
+  check("certificateValidityMonths: null → 200 และไม่มี Key (= ไม่หมดอายุ)",
+    nullValidity.status === 200 && !has(nullValidity.body, "certificateValidityMonths"));
+
+  const auto = await step("c5.fields.create.autoId", "POST /api/courses", "admin", CO,
+    { ...course("", "C5 id อัตโนมัติ"), id: undefined }, 200);
+  check("id ว่าง → Server สร้าง c-<ts> (FS-12)", typeof auto.body?.id === "string" && /^c-\d{13}(-[0-9a-f]{6})?$/.test(auto.body.id));
+
+  // --- 2. Q-4 (ก): ช่องใหม่ผิดรูปแบบ → 400 INVALID_COURSE พร้อมข้อความระบุช่อง ---
+  const q4ok = (r: Res, field: string) =>
+    r.status === 400 && errOf(r) === "INVALID_COURSE" && typeof r.body?.message === "string" && r.body.message.includes(field);
+  const q4Cases: Array<[string, string, Record<string, unknown>]> = [
+    ["deptNotArray", "targetDepartmentIds", { targetDepartmentIds: "d-pd" }],
+    ["deptUnknown", "targetDepartmentIds", { targetDepartmentIds: ["d-pd", "d-nope"] }],
+    ["deptNotString", "targetDepartmentIds", { targetDepartmentIds: ["d-pd", 5] }],
+    ["mandatoryYes", "isMandatory", { isMandatory: "yes" }],
+    ["certificateOne", "issuesCertificate", { issuesCertificate: 1 }],
+    ["validity0", "certificateValidityMonths", { certificateValidityMonths: 0 }],
+    ["validity1_5", "certificateValidityMonths", { certificateValidityMonths: 1.5 }],
+    ["validityNeg1", "certificateValidityMonths", { certificateValidityMonths: -1 }],
+    ["validityStr12", "certificateValidityMonths", { certificateValidityMonths: "12" }],
+  ];
+  for (const [label, field, extra] of q4Cases) {
+    const r = await step(`c5.q4.create.${label}`, "POST /api/courses", "admin", CO, course(`HRN_C5_Q4_${label}`, `C5 Q4 ${label}`, extra), 400);
+    check(`Q-4 POST ${label} → 400 INVALID_COURSE (ข้อความระบุ ${field})`, q4ok(r, field));
+  }
+  const q4Put1 = await step("c5.q4.update.deptUnknown", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_FULL`,
+    course("HRN_C5_FULL", "C5 Q4 PUT", { targetDepartmentIds: ["d-nope"] }), 400);
+  check("Q-4 PUT targetDepartmentIds ไม่มีจริง → 400 INVALID_COURSE", q4ok(q4Put1, "targetDepartmentIds"));
+  const q4Put2 = await step("c5.q4.update.validityStr", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_FULL`,
+    course("HRN_C5_FULL", "C5 Q4 PUT", { certificateValidityMonths: "12" }), 400);
+  check("Q-4 PUT certificateValidityMonths \"12\" → 400 INVALID_COURSE", q4ok(q4Put2, "certificateValidityMonths"));
+  // ลำดับการตรวจ: Body/id/ซ้ำ (เดิม) → Q-4 → สแกนสื่อ · PUT: 404 ก่อน Q-4
+  const q4Dup = await step("c5.q4.order.duplicateFirst", "POST /api/courses", "admin", CO,
+    course("HRN_C5_FULL", "C5 Q4 + id ซ้ำ", { isMandatory: "yes" }), 409);
+  check("ลำดับ: id ซ้ำ + Q-4 ผิด → 409 DUPLICATE_COURSE_ID (ตรวจเดิมก่อน)", errOf(q4Dup) === "DUPLICATE_COURSE_ID");
+  const q4BadId = await step("c5.q4.order.invalidIdFirst", "POST /api/courses", "admin", CO,
+    course("bad id!", "C5 Q4 + id ผิด", { isMandatory: "yes" }), 400);
+  check("ลำดับ: id ผิดรูปแบบ + Q-4 ผิด → 400 INVALID_COURSE_ID (ตรวจเดิมก่อน)", errOf(q4BadId) === "INVALID_COURSE_ID");
+  const q4Media = await step("c5.q4.order.beforeMedia", "POST /api/courses", "admin", CO,
+    course("HRN_C5_Q4_MEDIA", "C5 Q4 + สื่อผิด", { isMandatory: "yes", lessons: [{ id: "l1", title: "x", content: "x", durationMinutes: 1, mediaUrl: "javascript:alert(1)" }] }), 400);
+  check("ลำดับ: Q-4 ผิด + สื่อผิด → 400 INVALID_COURSE (Q-4 ก่อนสแกนสื่อ)", q4ok(q4Media, "isMandatory"));
+  const q4PutMedia = await step("c5.q4.order.update.beforeMedia", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_FULL`,
+    course("HRN_C5_FULL", "C5 Q4 + สื่อผิด", { issuesCertificate: 1, lessons: [{ id: "l1", title: "x", content: "x", durationMinutes: 1, mediaUrl: "ftp://x" }] }), 400);
+  check("ลำดับ PUT: Q-4 ผิด + สื่อผิด → 400 INVALID_COURSE", q4ok(q4PutMedia, "issuesCertificate"));
+  const q4NotFound = await step("c5.q4.order.update.notFoundFirst", "PUT /api/courses/:id", "admin", `${CO}/${NOPE.course}`,
+    course(NOPE.course, "C5 Q4 ไม่พบ", { isMandatory: "yes" }), 404);
+  check("ลำดับ PUT: ไม่พบหลักสูตร + Q-4 ผิด → 404 NOT_FOUND", errOf(q4NotFound) === "NOT_FOUND");
+  const afterQ4 = await step("c5.q4.list.after", "GET /api/courses", "admin", CO, undefined, 200);
+  check("Q-4: ไม่มีหลักสูตรที่ถูกปฏิเสธถูกบันทึก", !idsOf(afterQ4).some((id) => typeof id === "string" && id.startsWith("HRN_C5_Q4_")));
+  check("Q-4 PUT ที่ถูกปฏิเสธไม่เปลี่ยนข้อมูล (HRN_C5_FULL = ผลของ PUT ที่สำเร็จล่าสุด)", same(findIn(afterQ4, "HRN_C5_FULL"), fullPut.body));
+
+  // --- 3. PUT แทนทั้งก้อน ---
+  await step("c5.replace.create", "POST /api/courses", "admin", CO,
+    course("HRN_C5_REPLACE", "C5 แทนทั้งก้อน", { targetDepartmentIds: ["d-pd"], isMandatory: true, certificateValidityMonths: 6 }), 200);
+  const { tags: _t, badgeKey: _b, ...withoutTagsBadge } = course("HRN_C5_OTHER", "C5 แทนทั้งก้อน (แก้)", { targetPositions: ["ช่าง"] });
+  const replaced = await step("c5.replace.update", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_REPLACE`,
+    { ...withoutTagsBadge, isApproved: true }, 200);
+  check("PUT แทนทั้งก้อน: ไม่ส่ง tags / badgeKey → Key หาย", !!replaced.body && !has(replaced.body, "tags") && !has(replaced.body, "badgeKey"));
+  check("PUT แทนทั้งก้อน: ไม่ส่งช่องใหม่ → DEFAULT (false / true / [] / ไม่มี certificateValidityMonths)",
+    replaced.body?.isMandatory === false && replaced.body?.issuesCertificate === true &&
+      same(replaced.body?.targetDepartmentIds, []) && !has(replaced.body, "certificateValidityMonths"));
+  check("PUT: ส่ง targetPositions → ไม่ถูกเก็บ", !!replaced.body && !has(replaced.body, "targetPositions"));
+  check("PUT: id มาจาก URL (ไม่ใช่ id ใน Body)", replaced.body?.id === "HRN_C5_REPLACE");
+  const replacedGet = await step("c5.replace.list", "GET /api/courses", "admin", CO, undefined, 200);
+  check("GET หลัง PUT แทนทั้งก้อน = Response ของ PUT และไม่มีหลักสูตร id ใน Body",
+    same(findIn(replacedGet, "HRN_C5_REPLACE"), replaced.body) && !findIn(replacedGet, "HRN_C5_OTHER"));
+
+  // --- 4. ลำดับ (ใหม่สุดก่อน, PUT ไม่ย้ายลำดับ) · isApproved ตามกติกาเดิม · Viewer ไม่เห็นเฉลย / หลักสูตรรออนุมัติ ---
+  for (const n of [1, 2, 3]) {
+    await step(`c5.order.create.${n}`, "POST /api/courses", "admin", CO, course(`HRN_C5_ORD_${n}`, `C5 ลำดับ ${n}`), 200);
+  }
+  await step("c5.order.update.first", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_ORD_1`, course("HRN_C5_ORD_1", "C5 ลำดับ 1 (แก้)", { isApproved: true }), 200);
+  const ordList = await step("c5.order.list", "GET /api/courses", "admin", CO, undefined, 200);
+  check("GET: ใหม่สุดก่อน และ PUT ไม่ย้ายลำดับ (ORD_3, ORD_2, ORD_1)",
+    same(idsOf(ordList).filter((id) => typeof id === "string" && id.startsWith("HRN_C5_ORD_")), ["HRN_C5_ORD_3", "HRN_C5_ORD_2", "HRN_C5_ORD_1"]));
+
+  const pend = await step("c5.viewer.create.editorPending", "POST /api/courses", "editor", CO,
+    course("HRN_C5_PENDING", "C5 รออนุมัติ", { isApproved: true }), 200);
+  check("Editor POST: isApproved false (ไม่เชื่อ Body) / createdByRole Editor", pend.body?.isApproved === false && pend.body?.createdByRole === "Editor");
+  const pendPut = await step("c5.viewer.update.editorApprove", "PUT /api/courses/:id", "editor", `${CO}/HRN_C5_PENDING`,
+    course("HRN_C5_PENDING", "C5 รออนุมัติ (Editor แก้)", { isApproved: true, createdByRole: "Editor" }), 200);
+  check("Editor PUT isApproved true → ยังเป็น false (ค่าเดิม)", pendPut.body?.isApproved === false);
+  const vList = await step("c5.viewer.list", "GET /api/courses", "viewer", CO, undefined, 200);
+  check("Viewer ไม่เห็นหลักสูตรรออนุมัติ", !findIn(vList, "HRN_C5_PENDING"));
+  const eList = await step("c5.viewer.list.editor", "GET /api/courses", "editor", CO, undefined, 200);
+  check("Editor เห็นหลักสูตรรออนุมัติพร้อมเฉลย", findIn(eList, "HRN_C5_PENDING")?.isApproved === false &&
+    same(findIn(eList, "HRN_C5_PENDING")?.quiz, quiz4));
+  const vFull = findIn(vList, "HRN_C5_FULL");
+  const vQuiz: any[] = Array.isArray(vFull?.quiz) ? vFull.quiz : [];
+  check("Viewer: lessons ลำดับและค่าเดิม", same(vFull?.lessons, lessons3));
+  check("Viewer: ลำดับข้อสอบเดิม (q-z, q-a, q-m, q-e)", same(vQuiz.map((q) => q?.id), ["q-z", "q-a", "q-m", "q-e"]));
+  check("Viewer: ทุกข้อ correctAnswer = \"\"", vQuiz.length === 4 && vQuiz.every((q) => q?.correctAnswer === ""));
+  const vMatch = vQuiz.find((q) => q?.id === "q-m");
+  check("Viewer: Matching ได้ฝั่งซ้ายตามลำดับเดิม ฝั่งขวาว่าง และ options = ฝั่งขวา (สลับ)",
+    same(vMatch?.pairs, pairs.map((p) => ({ left: p.left, right: "" }))) &&
+      same([...(Array.isArray(vMatch?.options) ? vMatch.options : [])].sort(), pairs.map((p) => p.right).sort()));
+  check("Viewer: ข้อเลือกตอบได้ options ตามลำดับเดิม",
+    same(vQuiz.find((q) => q?.id === "q-z")?.options, quiz4[0].options));
+  check("Viewer: ช่องใหม่ส่งให้ Viewer ด้วย (targetDepartmentIds / isMandatory / issuesCertificate)",
+    same(vFull?.targetDepartmentIds, ["d-wh", "d-it"]) && vFull?.isMandatory === false && vFull?.issuesCertificate === false);
+  const aList = await step("c5.viewer.list.admin", "GET /api/courses", "admin", CO, undefined, 200);
+  check("Admin: Matching pairs ลำดับเดิมพร้อมเฉลย", same(findIn(aList, "HRN_C5_FULL")?.quiz?.[2]?.pairs, pairs));
+  await step("c5.viewer.update.adminApprove", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_PENDING`,
+    course("HRN_C5_PENDING", "C5 รออนุมัติ (Admin อนุมัติ)", { isApproved: true, createdByRole: "Editor" }), 200);
+  const vList2 = await step("c5.viewer.list.afterApprove", "GET /api/courses", "viewer", CO, undefined, 200);
+  check("Admin อนุมัติแล้ว → Viewer เห็น", findIn(vList2, "HRN_C5_PENDING")?.isApproved === true);
+
+  // --- 5. DELETE → บท / ข้อสอบ / แผนกถูกลบตาม (POST id เดิมได้ 200 และไม่มีลูกค้าง) ---
+  await step("c5.delete.create", "POST /api/courses", "admin", CO,
+    course("HRN_C5_DEL", "C5 ลบ", { targetDepartmentIds: ["d-qa", "d-pd", "d-hr"] }), 200);
+  await step("c5.delete.byEditor", "DELETE /api/courses/:id", "editor", `${CO}/HRN_C5_DEL`, undefined, 403);
+  const del = await step("c5.delete.admin", "DELETE /api/courses/:id", "admin", `${CO}/HRN_C5_DEL`, undefined, 200);
+  check("DELETE → { success: true }", same(del.body, { success: true }));
+  const delList = await step("c5.delete.list", "GET /api/courses", "admin", CO, undefined, 200);
+  check("DELETE → GET ไม่มีหลักสูตรนั้น", !findIn(delList, "HRN_C5_DEL"));
+  const oneLesson = [{ id: "l-x", title: "บทเดียว", content: "ใหม่", durationMinutes: 3, mediaType: "Text" }];
+  const oneQuiz = [{ id: "q-x", question: "ข้อเดียว", type: "SingleChoice", options: ["ก", "ข"], correctAnswer: "ข" }];
+  const reDel = await step("c5.delete.recreateSameId", "POST /api/courses", "admin", CO,
+    course("HRN_C5_DEL", "C5 ลบแล้วสร้างใหม่", { lessons: oneLesson, quiz: oneQuiz, targetDepartmentIds: ["d-it"] }), 200);
+  check("POST id เดิมหลัง DELETE → 200 และมีเฉพาะบท/ข้อ/แผนกชุดใหม่ (ลูกเดิมถูกลบตาม)",
+    reDel.status === 200 && same(reDel.body?.lessons, oneLesson) && same(reDel.body?.quiz, oneQuiz) && same(reDel.body?.targetDepartmentIds, ["d-it"]));
+  const reDelList = await step("c5.delete.recreate.list", "GET /api/courses", "admin", CO, undefined, 200);
+  check("GET หลังสร้างใหม่ = Response ของ POST", same(findIn(reDelList, "HRN_C5_DEL"), reDel.body));
+  const delNone = await step("c5.delete.notFound", "DELETE /api/courses/:id", "admin", `${CO}/${NOPE.course}`, undefined, 200);
+  check("DELETE id ไม่มีจริง → { success: true } (เดิม)", same(delNone.body, { success: true }));
+
+  // --- 6. POST id เดียวกันพร้อมกัน 5 คำขอ → 200×1 / 409×4 ---
+  const race = await Promise.all(Array.from({ length: 5 }, (_, i) =>
+    stepOneOf(`c5.race.create.${i + 1}`, "POST /api/courses", "admin", CO, course("HRN_C5_RACE", `C5 race ${i + 1}`), [200, 409])));
+  check("POST id เดียวกันพร้อมกัน 5 คำขอ → 200 หนึ่งเดียว ที่เหลือ 409 DUPLICATE_COURSE_ID",
+    race.filter((r) => r.status === 200).length === 1 &&
+      race.filter((r) => r.status === 409 && errOf(r) === "DUPLICATE_COURSE_ID").length === 4);
+  const raceList = await step("c5.race.list", "GET /api/courses", "admin", CO, undefined, 200);
+  const raceWinner = race.find((r) => r.status === 200);
+  check("GET มีหลักสูตร id นี้ 1 รายการ และเป็นของคำขอที่ได้ 200",
+    idsOf(raceList).filter((id) => id === "HRN_C5_RACE").length === 1 && findIn(raceList, "HRN_C5_RACE")?.title === raceWinner?.body?.title);
+
+  // --- 7. สื่อบทเรียน (อัปโหลดไฟล์จริง) ---
+  const pdfBase64 = Buffer.from("%PDF-1.4\n% HRN-C5 test file\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n", "utf-8").toString("base64");
+  const upload = async (label: string, actor: Actor = "admin") => {
+    const r = await step(`c5.file.upload.${label}`, "POST /api/upload", actor, "/api/upload", { filename: `hrn-c5-${label}.pdf`, fileData: pdfBase64 }, 200);
+    const name = typeof r.body?.filename === "string" ? r.body.filename : "missing-file";
+    if (name !== "missing-file") uploadedTestFiles.push(name);
+    return name;
+  };
+  const sign = (label: string, actor: Actor, filename: string, expect: number) =>
+    step(`c5.file.sign.${label}`, "POST /api/files/sign", actor, "/api/files/sign", { filename }, expect);
+  const mediaLessons = (name: string) => [
+    lessons3[0],
+    { id: "l-media", title: "บทสื่อ PDF", content: "สื่อ", durationMinutes: 5, mediaType: "PDF", mediaUrl: `/uploads/${name}` },
+  ];
+  const mediaUrlsOf = (c: any): string[] =>
+    (Array.isArray(c?.lessons) ? c.lessons : []).map((l: any) => l?.mediaUrl).filter((u: unknown) => typeof u === "string" && u.startsWith("/uploads/"));
+  const signedOk = (r: Res, name: string) => r.status === 200 && typeof r.body?.url === "string" && r.body.url.startsWith(`/uploads/${name}?t=`);
+
+  // 7.1 ผูกไฟล์กับหลักสูตร (Approved) → files/sign ได้ทุกคนที่ login · ไฟล์เดียวกันข้ามหลักสูตร → 409
+  const fA = await upload("a");
+  await step("c5.media.bind.a", "POST /api/courses", "admin", CO, course("HRN_C5_MEDIA", "C5 สื่อ", { lessons: mediaLessons(fA) }), 200);
+  check("files/sign: ไฟล์ของหลักสูตร Approved → Viewer ได้ URL", signedOk(await sign("viewer.a", "viewer", fA, 200), fA));
+  const dupBind = await step("c5.media.bind.a.otherCourse", "POST /api/courses", "admin", CO,
+    course("HRN_C5_MEDIA_DUP", "C5 สื่อซ้ำ", { lessons: mediaLessons(fA) }), 409);
+  check("ไฟล์ที่ผูกแล้วผูกกับหลักสูตรอื่น → 409 DUPLICATE_FILE_BINDING (เดิม)", errOf(dupBind) === "DUPLICATE_FILE_BINDING");
+
+  // 7.2 หลักสูตรรออนุมัติ (Editor) → Viewer 403 COURSE_NOT_APPROVED · Editor ได้ · อนุมัติแล้ว Viewer ได้
+  const fE = await upload("editor", "editor");
+  await step("c5.media.bind.editorPending", "POST /api/courses", "editor", CO, course("HRN_C5_MEDIA_PEND", "C5 สื่อรออนุมัติ", { lessons: mediaLessons(fE) }), 200);
+  const signPendV = await sign("viewer.pending", "viewer", fE, 403);
+  check("files/sign: หลักสูตรรออนุมัติ → Viewer 403 COURSE_NOT_APPROVED", errOf(signPendV) === "COURSE_NOT_APPROVED");
+  check("files/sign: หลักสูตรรออนุมัติ → Editor ได้ URL", signedOk(await sign("editor.pending", "editor", fE, 200), fE));
+  await step("c5.media.approve.editorPending", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_MEDIA_PEND`,
+    course("HRN_C5_MEDIA_PEND", "C5 สื่อรออนุมัติ (อนุมัติ)", { lessons: mediaLessons(fE), isApproved: true, createdByRole: "Editor" }), 200);
+  check("files/sign: หลังอนุมัติ → Viewer ได้ URL", signedOk(await sign("viewer.approved", "viewer", fE, 200), fE));
+
+  // 7.3 POST ที่ DB ล้มหลังผูกไฟล์ (title มี \u0000) → 500 INTERNAL_ERROR เท่านั้น → Binding ถูกย้อน ผูกกับหลักสูตรอื่นได้
+  const fN = await upload("nul");
+  const nul = await step("c5.media.post.nulTitle", "POST /api/courses", "admin", CO,
+    course("HRN_C5_NUL", "C5 NUL \u0000 title", { lessons: mediaLessons(fN) }), 500);
+  check("POST DB ล้มหลังผูกไฟล์ → 500 และ Body = INTERNAL_ERROR เท่านั้น", nul.status === 500 && same(nul.body, INTERNAL));
+  const nulList = await step("c5.media.post.nul.list", "GET /api/courses", "admin", CO, undefined, 200);
+  check("POST ที่ล้มไม่ถูกบันทึก", !findIn(nulList, "HRN_C5_NUL"));
+  const nulRebind = await step("c5.media.post.nul.rebind", "POST /api/courses", "admin", CO,
+    course("HRN_C5_NUL_OK", "C5 ผูกไฟล์หลัง NUL", { lessons: mediaLessons(fN) }), 200);
+  check("Binding ถูกย้อน → ไฟล์เดิมผูกกับหลักสูตรอื่นได้ 200", nulRebind.status === 200 && mediaUrlsOf(nulRebind.body).includes(`/uploads/${fN}`));
+
+  // 7.4 POST id เดียวกันพร้อมกัน 5 คำขอ แต่ละคำขอมีไฟล์ของตัวเอง → 200×1 / 409×4 · ไฟล์ของคำขอที่แพ้ไม่ถูกผูกค้าง
+  const fR: string[] = [];
+  for (let i = 1; i <= 5; i++) fR.push(await upload(`race${i}`));
+  const mRace = await Promise.all(fR.map((f, i) =>
+    stepOneOf(`c5.media.race.${i + 1}`, "POST /api/courses", "admin", CO,
+      course("HRN_C5_MRACE", `C5 media race ${i + 1}`, { lessons: mediaLessons(f) }), [200, 409])));
+  check("สื่อ + id เดียวกันพร้อมกัน 5 คำขอ → 200 หนึ่งเดียว ที่เหลือ 409 DUPLICATE_COURSE_ID",
+    mRace.filter((r) => r.status === 200).length === 1 &&
+      mRace.filter((r) => r.status === 409 && errOf(r) === "DUPLICATE_COURSE_ID").length === 4);
+  for (let i = 0; i < 5; i++) {
+    if (mRace[i].status === 200) {
+      check(`media race: ไฟล์ของคำขอที่ชนะ (${i + 1}) → Viewer ได้ URL`, signedOk(await sign(`viewer.race${i + 1}`, "viewer", fR[i], 200), fR[i]));
+    } else {
+      const rb = await step(`c5.media.race.rebind.${i + 1}`, "POST /api/courses", "admin", CO,
+        course(`HRN_C5_MRACE_RB_${i + 1}`, `C5 media race rebind ${i + 1}`, { lessons: mediaLessons(fR[i]) }), 200);
+      check(`media race: ไฟล์ของคำขอที่แพ้ (${i + 1}) ผูกกับหลักสูตรอื่นได้ 200`, rb.status === 200);
+    }
+  }
+
+  // 7.5 PUT เปลี่ยนไฟล์ → ไฟล์เดิมถูกปล่อย (ORPHANED_FILE) · ไฟล์ใหม่ใช้ได้
+  const fB = await upload("b");
+  const putB = await step("c5.media.put.changeFile", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_MEDIA`,
+    course("HRN_C5_MEDIA", "C5 สื่อ (เปลี่ยนไฟล์)", { lessons: mediaLessons(fB), isApproved: true }), 200);
+  check("PUT เปลี่ยนไฟล์ → lessons อ้างไฟล์ใหม่", same(mediaUrlsOf(putB.body), [`/uploads/${fB}`]));
+  const signOldA = await sign("admin.a.afterReplace", "admin", fA, 403);
+  check("PUT เปลี่ยนไฟล์ → ไฟล์เดิมถูกปล่อย: files/sign 403 ORPHANED_FILE", errOf(signOldA) === "ORPHANED_FILE");
+  check("PUT เปลี่ยนไฟล์ → ไฟล์ใหม่: Viewer ได้ URL", signedOk(await sign("viewer.b", "viewer", fB, 200), fB));
+
+  // 7.6 PUT ที่ DB ล้มหลังเปลี่ยน Binding → 500 เท่านั้น → ไฟล์เดิมกลับมาผูกกับหลักสูตร / ไฟล์ใหม่ไม่ถูกผูกค้าง / ข้อมูลไม่เปลี่ยน
+  const fC = await upload("c");
+  const putNul = await step("c5.media.put.nulTitle", "PUT /api/courses/:id", "admin", `${CO}/HRN_C5_MEDIA`,
+    course("HRN_C5_MEDIA", "C5 NUL \u0000 PUT", { lessons: mediaLessons(fC), isApproved: true }), 500);
+  check("PUT DB ล้มหลังเปลี่ยน Binding → 500 และ Body = INTERNAL_ERROR เท่านั้น", putNul.status === 500 && same(putNul.body, INTERNAL));
+  check("PUT ล้ม → ไฟล์เดิม (b) ยังผูกกับหลักสูตร: Viewer ได้ URL", signedOk(await sign("viewer.b.afterPutNul", "viewer", fB, 200), fB));
+  const putNulList = await step("c5.media.put.nul.list", "GET /api/courses", "admin", CO, undefined, 200);
+  check("PUT ล้ม → ข้อมูลหลักสูตรไม่เปลี่ยน (= Response ของ PUT ที่สำเร็จล่าสุด)", same(findIn(putNulList, "HRN_C5_MEDIA"), putB.body));
+  const cRebind = await step("c5.media.put.nul.rebindNew", "POST /api/courses", "admin", CO,
+    course("HRN_C5_MEDIA_C", "C5 ผูกไฟล์ c หลัง PUT ล้ม", { lessons: mediaLessons(fC) }), 200);
+  check("PUT ล้ม → ไฟล์ใหม่ (c) ไม่ถูกผูกค้าง: ผูกกับหลักสูตรอื่นได้ 200", cRebind.status === 200);
+
+  // 7.7 DELETE หลักสูตร → ไฟล์ถูกปล่อย
+  await step("c5.media.delete", "DELETE /api/courses/:id", "admin", `${CO}/HRN_C5_MEDIA`, undefined, 200);
+  const signDel = await sign("admin.b.afterDelete", "admin", fB, 403);
+  check("DELETE หลักสูตร → files/sign 403 ORPHANED_FILE", errOf(signDel) === "ORPHANED_FILE");
+  // พฤติกรรมเดิม (BUG-04): ไฟล์ที่ถูกปล่อยมี marker "deleted:<id>" → ผูกใหม่ได้ 409 DUPLICATE_FILE_BINDING
+  // (§D ของ Prompt เขียนว่า "ผูกใหม่ได้" — ไม่ตรงกับโค้ดเดิม · รอ Owner ตัดสินใน Preflight ส่วน A ข้อ A-Q1)
+  const rebindDel = await step("c5.media.delete.rebind", "POST /api/courses", "admin", CO,
+    course("HRN_C5_MEDIA_AFTER_DEL", "C5 ผูกไฟล์หลังลบหลักสูตร", { lessons: mediaLessons(fB) }), 409);
+  check("DELETE หลักสูตร → ไฟล์ที่ถูกปล่อยผูกใหม่ → 409 DUPLICATE_FILE_BINDING (เดิม)", errOf(rebindDel) === "DUPLICATE_FILE_BINDING");
+
+  // --- สถานะสุดท้าย ---
+  await step("c5.final.courses", "GET /api/courses", "admin", CO, undefined, 200);
+  await step("c5.final.viewer.courses", "GET /api/courses", "viewer", CO, undefined, 200);
+}
+
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   console.log(`Harness ชุด "${SUITE}" รอบ "${runName}" → ${BASE_URL}`);
@@ -1620,7 +1986,8 @@ async function main() {
     else if (SUITE === "01c1") await scenario01c1();
     else if (SUITE === "01c2") await scenario01c2();
     else if (SUITE === "01c3") await scenario01c3();
-    else await scenario01c4();
+    else if (SUITE === "01c4") await scenario01c4();
+    else await scenario01c5();
   } catch (e: any) {
     aborted = String(e?.message || e);
     console.error(aborted);
@@ -1632,8 +1999,8 @@ async function main() {
     aborted,
     unexpectedStatus: unexpected,
     checkFailures,
-    // ชุด 01c3 อัปโหลดไฟล์จริงลง public/uploads และ dist/uploads — Owner ลบตามรายการนี้หลังจบรอบ (README)
-    ...(SUITE === "01c3" ? { uploadedTestFiles } : {}),
+    // ชุด 01c3 / 01c5 อัปโหลดไฟล์จริงลง public/uploads และ dist/uploads — Owner ลบตามรายการนี้หลังจบรอบ (README)
+    ...(SUITE === "01c3" || SUITE === "01c5" ? { uploadedTestFiles } : {}),
     requestsByRoute: Object.fromEntries([...routeCounts.entries()].sort(([a], [b]) => a.localeCompare(b))),
   };
   fs.writeFileSync(path.join(OUT_DIR, "summary.json"), JSON.stringify(summary, null, 2) + "\n", "utf-8");

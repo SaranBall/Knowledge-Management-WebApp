@@ -55,7 +55,7 @@ import { getUserBadges } from "../utils/badgeUtils";
 import { BadgePill } from "./BadgeDisplay";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
 import {
-  getRequiredCoursesForPosition,
+  getRequiredCoursesForUser,
   getUserTrainingMinutes,
   getUserCompletedCourseIds,
   formatHours,
@@ -654,7 +654,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
       userProgressList,
       examResults,
     );
-    const reqIds = getRequiredCoursesForPosition(u.position);
+    const reqIds = getRequiredCoursesForUser(u, courses).map((c) => c.id);
     return {
       completed: doneIds.size,
       required: reqIds.length,
@@ -1203,7 +1203,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
         "สถานะการฝึกอบรม (Training Status)",
       ];
 
-      const reqCourseIds = getRequiredCoursesForPosition(u.position);
+      const reqCourseIds = getRequiredCoursesForUser(u, courses).map((c) => c.id);
       const userCompletedProgresses = userProgressList.filter(
         (p) => p.userId === u.id,
       );
@@ -2214,8 +2214,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({
                   const userExamLogs = examResults.filter(
                     (e) => e.employeeId === u.employeeId,
                   );
-                  const reqCourseIds = getRequiredCoursesForPosition(
-                    u.position,
+                  const reqCourseIds = getRequiredCoursesForUser(u, courses).map(
+                    (c) => c.id,
                   );
 
                   return (

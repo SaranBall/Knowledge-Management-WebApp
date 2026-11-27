@@ -108,6 +108,9 @@ function withArrayFields<T>(value: T, keys: readonly string[]): T {
 const normalizeExpert = (e: Expert): Expert => withArrayFields(e, ["skills"]);
 const normalizeKBArticle = (a: KBArticle): KBArticle =>
   withArrayFields(a, ["tags", "relatedWIs"]);
+// PERSIST-01C-5: Component เรียก .map ของ lessons / quiz / targetDepartmentIds ตรง ๆ — เติม [] กันจอขาว
+const normalizeCourse = (c: Course): Course =>
+  withArrayFields(c, ["lessons", "quiz", "targetDepartmentIds"]);
 const normalizeList = <T>(list: T[], fn: (item: T) => T): T[] =>
   Array.isArray(list) ? list.map(fn) : list;
 
@@ -256,17 +259,20 @@ export const api = {
     }),
 
   // Courses APIs
-  getCourses: () => request<Course[]>("/api/courses"),
+  getCourses: () =>
+    request<Course[]>("/api/courses").then((list) =>
+      normalizeList(list, normalizeCourse),
+    ),
   createCourse: (course: Course) =>
     request<Course>("/api/courses", {
       method: "POST",
       body: JSON.stringify(course),
-    }),
+    }).then(normalizeCourse),
   updateCourse: (course: Course) =>
     request<Course>(`/api/courses/${course.id}`, {
       method: "PUT",
       body: JSON.stringify(course),
-    }),
+    }).then(normalizeCourse),
   deleteCourse: (id: string) =>
     request<{ success: boolean }>(`/api/courses/${id}`, {
       method: "DELETE",

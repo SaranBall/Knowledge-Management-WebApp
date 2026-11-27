@@ -36,7 +36,7 @@ import { getDepartmentById } from "../utils/departmentUtils";
 import { DEFAULT_AVATAR_URL } from "../utils/assets";
 import type { DocumentStats } from "../services/api";
 import {
-  getRequiredCoursesForPosition,
+  getRequiredCoursesForUser,
   getUserTrainingMinutes,
   getUserCompletedCourseIds,
   formatHours,
@@ -243,7 +243,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         userProgressList,
         examResults,
       );
-      const reqIds = getRequiredCoursesForPosition(u.position);
+      // 01C-5 (G-8.1 / Q-3): หลักสูตรบังคับตามแผนก (แทนตามตำแหน่ง)
+      const reqIds = getRequiredCoursesForUser(u, courses).map((c) => c.id);
       acc.assigned += reqIds.length;
       acc.requiredDone += reqIds.filter((id) => doneIds.has(id)).length;
       acc.uniqueCompletions += doneIds.size;
@@ -839,10 +840,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </span>
               <div>
                 <h3 className="font-bold text-slate-900 text-sm">
-                  Competency Matrix & Learning Transcripts
+                  หลักสูตรบังคับตามแผนก & Learning Transcripts
                 </h3>
                 <p className="text-xs text-slate-500">
-                  ติดตามพนักงานแต่ละท่านว่าอบรมครบตามกำหนดของตำแหน่งงานหรือไม่
+                  ติดตามพนักงานแต่ละท่านว่าอบรมหลักสูตรบังคับตามแผนกครบหรือไม่
                 </p>
               </div>
             </div>
@@ -855,7 +856,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 เลือกพนักงานเพื่อดูประวัติการฝึกอบรม (Transcript)
               </span>
               {visibleUsers.map((u) => {
-                const reqs = getRequiredCoursesForPosition(u.position);
+                const reqs = getRequiredCoursesForUser(u, courses).map((c) => c.id);
 
                 return (
                   <button
@@ -912,7 +913,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       ส่งออกรายงาน ISO Audit (PDF)
                     </button>
                     <span className="text-[10px] font-extrabold bg-[#15329c]/10 text-[#15329c] px-2.5 py-1.5 rounded border border-[#15329c]/20 font-mono text-right">
-                      หลักสูตรตาม Competency Matrix
+                      หลักสูตรบังคับตามแผนก
                     </span>
                   </div>
                 </div>
@@ -952,13 +953,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {/* Requirement Matrix compliance display */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
                   <span className="block text-[10px] font-bold text-slate-400 uppercase">
-                    หลักสูตรบังคับตามตำแหน่งงาน (Competency Matrix Verification)
+                    หลักสูตรบังคับตามแผนก
                   </span>
 
                   <div className="space-y-2">
-                    {getRequiredCoursesForPosition(
-                      selectedUserTranscript.position,
-                    ).map((reqCourseId) => {
+                    {getRequiredCoursesForUser(selectedUserTranscript, courses)
+                      .map((c) => c.id)
+                      .map((reqCourseId) => {
                       const matchedCourse = courses.find(
                         (c) => c.id === reqCourseId,
                       );
@@ -1257,8 +1258,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="space-y-3 mb-6 text-left">
                   <div className="border-b border-[#15329c]/20 pb-1.5 flex items-center justify-between">
                     <span className="text-[10.5px] font-black text-[#15329c] tracking-wider uppercase">
-                      ส่วนที่ 1: ตารางประเมินระดับสมรรถนะขั้นบังคับ (COMPETENCY
-                      MATRIX EVALUATION)
+                      ส่วนที่ 1: หลักสูตรบังคับตามแผนก
                     </span>
                     <span className="text-[9px] text-slate-400 font-mono">
                       ISO 9001:2015 Clause 7.2 Requirements
@@ -1266,9 +1266,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
 
                   <div className="space-y-2 text-xs">
-                    {getRequiredCoursesForPosition(
-                      selectedUserTranscript.position,
-                    ).map((reqCourseId, idx) => {
+                    {getRequiredCoursesForUser(selectedUserTranscript, courses)
+                      .map((c) => c.id)
+                      .map((reqCourseId, idx) => {
                       const matchedCourse = courses.find(
                         (c) => c.id === reqCourseId,
                       );

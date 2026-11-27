@@ -10,7 +10,6 @@ import jwt from "jsonwebtoken";
 
 import {
   INITIAL_USERS,
-  INITIAL_COURSES,
   INITIAL_USER_PROGRESS,
   INITIAL_EXAM_RESULTS,
 } from "./src/data/initialData";
@@ -78,6 +77,16 @@ import {
   toDocumentFields,
   updateDocument,
 } from "./src/server/repos/documents";
+import {
+  courseIdExists,
+  deleteCourse,
+  findCourse,
+  insertCourse,
+  listCourses,
+  replaceCourse,
+  toCourseFields,
+  validateCourseNewFields,
+} from "./src/server/repos/courses";
 import { classifyDbError, isDbError } from "./src/server/dbErrors";
 import { loadDepartments } from "./src/server/repos/departments";
 import {
@@ -663,8 +672,7 @@ async function startServer() {
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
   // users และ system_audit_logs อยู่ใน DB แล้ว (01C-1), employee_master (01C-2),
   // documents + ACL (01C-3), kb_articles / experts / contact_requests / custom_resources /
-  // ratings / search_logs / search_resolutions (01C-4) — ดู src/server/repos/
-  let db_courses: Course[] = [...INITIAL_COURSES];
+  // ratings / search_logs / search_resolutions (01C-4), courses + บท/ข้อสอบ/แผนกเป้าหมาย (01C-5) — ดู src/server/repos/
   let db_user_progress: UserCourseProgress[] = [...INITIAL_USER_PROGRESS];
   let db_exam_results: any[] = [...INITIAL_EXAM_RESULTS];
   let db_user_competencies: UserCompetency[] = INITIAL_USERS.flatMap((u) =>
@@ -1194,13 +1202,15 @@ async function startServer() {
   // ถ้าขั้นใดล้มเหลว จะย้อนการเปลี่ยนแปลงที่ทำไปแล้วใน request นี้ และคืน failure (caller ต้องไม่บันทึก Course)
   // - update: ไฟล์ที่อ้างอยู่เดิมในคอร์สนี้ (ไฟล์เก่าก่อนมี binding) ไม่ถูกผูกย้อนหลัง
   // - ปล่อยเฉพาะไฟล์ที่ sidecar ผูกกับคอร์สนี้จริง → marker "replaced:<id>" / "deleted:<id>"
+  // 01C-5 (A3): สำเร็จ → คืน `rollback` ให้ Route เรียกเมื่อการบันทึกลงฐานข้อมูลล้มเหลวภายหลัง
+  //   (เรียกซ้ำได้ปลอดภัย — ย้อนครั้งเดียว) · พฤติกรรมเมื่อสำเร็จ/ล้มก่อนบันทึกเหมือนเดิม
   function applyCourseMediaChange(
     courseId: string,
     oldFiles: Set<string>,
     newFiles: Set<string>,
     user: CurrentUserAuth,
     mode: "create" | "update" | "delete",
-  ): { ok: true } | CourseMediaFailure {
+  ): { ok: true; rollback: () => void } | CourseMediaFailure {
     const refuse = (
       status: number,
       error: string,
@@ -1265,8 +1275,11 @@ async function startServer() {
     }
 
     const journal: Array<{ name: string; previous: string | undefined }> = [];
+    let rolledBack = false;
     const rollback = () => {
-      for (const entry of journal.reverse()) {
+      if (rolledBack) return;
+      rolledBack = true;
+      for (const entry of [...journal].reverse()) {
         if (!setFileCourseBinding(entry.name, entry.previous)) {
           console.error(
             `[COURSE_MEDIA] ROLLBACK FAILED: ${entry.name} (ควรเป็น courseId=${entry.previous ?? "unbound"}) ต้องตรวจสอบไฟล์ .meta.json ด้วยตนเอง`,
@@ -1293,22 +1306,23 @@ async function startServer() {
       }
       journal.push({ name: step.name, previous });
     }
-    return { ok: true };
+    return { ok: true, rollback };
   }
 
   // สิทธิ์เข้าถึงไฟล์ที่ผูกกับ Course: คืน null = อนุญาต
   // - marker deleted:/replaced: หรือไม่พบ Course ที่ใช้งานอยู่ = orphan → ปฏิเสธ
   // - Course ที่ยังไม่ Approved: เฉพาะ Admin/Editor
   // - Course ที่ Approved: ผู้ใช้ที่ login (และบัญชีใช้งานได้) เปิดได้ — ตรงกับ GET /api/courses ที่ให้ทุก role เห็นคอร์สที่อนุมัติแล้ว
+  // 01C-5: หลักสูตรที่ไฟล์อ้างอ่านจาก DB ก่อน (loadCourseOfFile) แล้วตัดสินแบบ Synchronous เหมือนเดิม
+  async function loadCourseOfFile(meta: UploadedFileMeta): Promise<Course | undefined> {
+    const ref = meta.courseId || "";
+    if (!ref || ref.startsWith("deleted:") || ref.startsWith("replaced:")) return undefined;
+    return findCourse(undefined, ref);
+  }
   function courseFileDenial(
     user: CurrentUserAuth,
-    meta: UploadedFileMeta,
+    course: Course | undefined,
   ): { status: number; body: { error: string; message: string } } | null {
-    const ref = meta.courseId || "";
-    const course =
-      ref.startsWith("deleted:") || ref.startsWith("replaced:")
-        ? undefined
-        : db_courses.find((c) => c.id === ref);
     if (!course) {
       return {
         status: 403,
@@ -1501,7 +1515,8 @@ async function startServer() {
           });
         }
       } else if (meta.courseId) {
-        const denial = courseFileDenial(currentDbUser, meta);
+        // 01C-5: หลักสูตรที่ผูกไฟล์อ่านจาก DB (Error → catch ด้านล่าง = 500 INTERNAL_ERROR)
+        const denial = courseFileDenial(currentDbUser, await loadCourseOfFile(meta));
         if (denial) {
           return res.status(denial.status).json(denial.body);
         }
@@ -1639,7 +1654,14 @@ async function startServer() {
         });
       }
     } else if (meta.courseId) {
-      const denial = courseFileDenial(currentDbUser, meta);
+      // 01C-5: หลักสูตรที่ผูกไฟล์อ่านจาก DB (แบบเดียวกับเอกสารด้านบน)
+      let fileCourse: Course | undefined;
+      try {
+        fileCourse = await loadCourseOfFile(meta);
+      } catch (err) {
+        return sendDbFailure(res, err, "GET /uploads/:filename");
+      }
+      const denial = courseFileDenial(currentDbUser, fileCourse);
       if (denial) {
         return res.status(denial.status).json(denial.body);
       }
@@ -1736,14 +1758,16 @@ async function startServer() {
       }
       // Context is built purely from authorized resources on the server
       // 01C-3: เอกสารอ่านจาก DB แล้วกรอง Published + ACL แบบเดิม
-      // 01C-4: KB (Approved) และ custom_resources อ่านจาก DB เช่นกัน
+      // 01C-4: KB (Approved) และ custom_resources อ่านจาก DB เช่นกัน · 01C-5: หลักสูตรจาก DB
       let allDocs: DocumentItem[];
       let allKbs: KBArticle[];
       let resources: CustomResource[];
+      let allCourses: Course[];
       try {
         allDocs = await listDocuments();
         allKbs = await listKbArticles();
         resources = await listCustomResources();
+        allCourses = await listCourses();
       } catch (dbErr) {
         return sendDbFailure(res, dbErr, "POST /api/chat");
       }
@@ -1751,7 +1775,7 @@ async function startServer() {
         (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
       );
       const approvedKBs = allKbs.filter((k) => k.status === "Approved");
-      const approvedCourses = db_courses.filter((c) => c.isApproved !== false);
+      const approvedCourses = allCourses.filter((c) => c.isApproved !== false);
 
       // Compile current RMP Knowledge Base as a structured context list
       const serializedRMPContext = [
@@ -2079,11 +2103,21 @@ ${deptList}`,
         });
       }
 
-      const simpleCourses = (courses || []).map((c: any) => ({
-        id: c.id,
-        title: c.title,
-        targetPositions: c.targetPositions,
-      }));
+      // 01C-5 (A-Q2): ใช้หลักสูตรที่ Client ส่งมาเหมือนเดิม — ส่งชื่อแผนกเป้าหมายแทน targetPositions (ยกเลิก G-12)
+      // ไม่เลือกแผนก = ทุกแผนก (Q-3) · รหัสที่ไม่รู้จักถูกข้าม
+      const simpleCourses = (courses || []).map((c: any) => {
+        const deptIds: unknown[] = Array.isArray(c?.targetDepartmentIds)
+          ? c.targetDepartmentIds
+          : [];
+        const names = deptIds
+          .map((d) => (typeof d === "string" ? getDepartmentById(d)?.name : undefined))
+          .filter((n): n is string => typeof n === "string" && n !== "");
+        return {
+          id: c?.id,
+          title: c?.title,
+          targetDepartments: deptIds.length === 0 ? ["ทุกแผนก"] : names,
+        };
+      });
       const simpleWIs = (documents || []).map((d: any) => ({
         id: d.id,
         title: d.title,
@@ -2905,22 +2939,44 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     },
   );
 
-  // Courses APIs
-  app.get("/api/courses", requireAuth, (req, res) => {
+  // Courses APIs — 01C-5: km.courses + บท / ข้อสอบ / แผนกเป้าหมาย (ใหม่สุดก่อน)
+  // ไฟล์สื่อ (Sidecar) ยังอยู่นอกฐาน: ผูก/ปล่อยแบบ Synchronous ก่อนเขียนฐาน แล้วย้อน Binding เมื่อการเขียนฐานล้มเหลว (A3)
+  const DUPLICATE_COURSE_ID_BODY = {
+    error: "DUPLICATE_COURSE_ID",
+    message: "รหัสหลักสูตรนี้มีอยู่ในระบบแล้ว",
+  } as const;
+  const departmentExists = (id: string) => !!getDepartmentById(id);
+
+  // FS-12: c-<ts> และกันชนกับฐาน
+  async function generateCourseId(): Promise<string> {
+    let id = `c-${Date.now()}`;
+    while (await courseIdExists(undefined, id)) {
+      id = `c-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    }
+    return id;
+  }
+
+  app.get("/api/courses", requireAuth, async (req, res) => {
     // Viewer ไม่เห็นคอร์สที่ยังไม่อนุมัติ และไม่ได้รับเฉลยข้อสอบ (ตรวจที่ server ผ่าน submit-quiz)
     // Admin/Editor ยังได้เฉลยครบ เพราะต้องใช้แก้ไขหลักสูตรและตรวจข้อ Essay
-    if (req.authUser!.role === "Viewer") {
-      return res.json(
-        db_courses.filter((c) => c.isApproved !== false).map(stripQuizAnswers),
-      );
+    try {
+      const courses = await listCourses();
+      if (req.authUser!.role === "Viewer") {
+        return res.json(
+          courses.filter((c) => c.isApproved !== false).map(stripQuizAnswers),
+        );
+      }
+      res.json(courses);
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/courses");
     }
-    res.json(db_courses);
   });
   app.post(
     "/api/courses",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
+    async (req, res) => {
+      let undoMedia: (() => void) | null = null;
       try {
         const newCourse = req.body;
         if (
@@ -2933,16 +2989,14 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             message: "ข้อมูลหลักสูตรไม่ถูกต้อง",
           });
         }
+        let generatedId = false;
         if (
           newCourse.id === undefined ||
           newCourse.id === null ||
           newCourse.id === ""
         ) {
-          let generatedId = `c-${Date.now()}`;
-          while (db_courses.some((c) => c.id === generatedId)) {
-            generatedId = `c-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-          }
-          newCourse.id = generatedId;
+          newCourse.id = await generateCourseId();
+          generatedId = true;
         } else if (
           typeof newCourse.id !== "string" ||
           !COURSE_ID_RE.test(newCourse.id)
@@ -2952,11 +3006,15 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             message: "รหัสหลักสูตรไม่ถูกต้อง",
           });
         }
-        if (db_courses.some((c) => c.id === newCourse.id)) {
-          return res.status(409).json({
-            error: "DUPLICATE_COURSE_ID",
-            message: "รหัสหลักสูตรนี้มีอยู่ในระบบแล้ว",
-          });
+        if (!generatedId && (await courseIdExists(undefined, newCourse.id))) {
+          return res.status(409).json(DUPLICATE_COURSE_ID_BODY);
+        }
+        // Q-4 (ก): ช่องใหม่ — หลังการตรวจเดิม (Body / id / ซ้ำ) และก่อนสแกนสื่อ
+        const extra = validateCourseNewFields(newCourse, departmentExists);
+        if (extra.ok === false) {
+          return res
+            .status(400)
+            .json({ error: "INVALID_COURSE", message: extra.message });
         }
         const mediaScan = scanLessonMedia(newCourse.lessons);
         if (mediaScan.ok === false) {
@@ -2965,24 +3023,62 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             message: mediaScan.message,
           });
         }
-        const mediaResult = applyCourseMediaChange(
-          newCourse.id,
-          new Set<string>(),
-          mediaScan.files,
-          req.authUser!,
-          "create",
-        );
+        // ----- ผูกไฟล์สื่อแบบ Synchronous (ไม่มี await คั่นระหว่างตรวจกับผูก) -----
+        const bindMedia = (courseId: string) =>
+          applyCourseMediaChange(
+            courseId,
+            new Set<string>(),
+            mediaScan.files,
+            req.authUser!,
+            "create",
+          );
+        const mediaResult = bindMedia(newCourse.id);
         if (mediaResult.ok === false) {
           return res
             .status(mediaResult.status)
             .json({ error: mediaResult.error, message: mediaResult.message });
         }
+        undoMedia = mediaResult.rollback;
         newCourse.isApproved = req.authUser!.role === "Admin";
         newCourse.createdByRole = req.authUser!.role;
-        db_courses.unshift(newCourse);
-        res.json(newCourse);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+
+        for (let attempt = 1; ; attempt++) {
+          try {
+            const saved = await withTransaction(async (client) => {
+              await insertCourse(
+                client,
+                newCourse.id,
+                toCourseFields(newCourse, extra.value),
+              );
+              return findCourse(client, newCourse.id);
+            });
+            return res.json(saved);
+          } catch (err) {
+            const info = classifyDbError(err);
+            if (info.kind !== "unique" || info.constraint !== "courses_pk") {
+              throw err;
+            }
+            // id ชน (คำขอพร้อมกัน) → ย้อน Binding ก่อนตอบ/ลองใหม่
+            undoMedia?.();
+            undoMedia = null;
+            if (!generatedId) {
+              return res.status(409).json(DUPLICATE_COURSE_ID_BODY);
+            }
+            if (attempt >= 5) throw err;
+            // A-Q4: id ที่ Server สร้างชน → id ใหม่ แล้วผูกไฟล์ใหม่กับ id นั้น (Sync)
+            newCourse.id = `c-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+            const again = bindMedia(newCourse.id);
+            if (again.ok === false) {
+              return res
+                .status(again.status)
+                .json({ error: again.error, message: again.message });
+            }
+            undoMedia = again.rollback;
+          }
+        }
+      } catch (err) {
+        undoMedia?.();
+        return sendDbFailure(res, err, "POST /api/courses");
       }
     },
   );
@@ -2990,43 +3086,66 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/courses/:id",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
+    async (req, res) => {
+      let undoMedia: (() => void) | null = null;
       try {
         const { id } = req.params;
-        const existing = db_courses.find((c) => c.id === id);
-        if (!existing) {
-          return res.status(404).json({ error: "NOT_FOUND" });
-        }
-        const mediaScan = scanLessonMedia(req.body?.lessons);
-        if (mediaScan.ok === false) {
-          return res.status(400).json({
-            error: "INVALID_COURSE_MEDIA",
-            message: mediaScan.message,
-          });
-        }
-        const oldScan = scanLessonMedia(existing.lessons);
-        const mediaResult = applyCourseMediaChange(
-          id,
-          oldScan.ok ? oldScan.files : new Set<string>(),
-          mediaScan.files,
-          req.authUser!,
-          "update",
+        const body: Record<string, any> =
+          req.body && typeof req.body === "object" && !Array.isArray(req.body)
+            ? req.body
+            : {};
+        const reply = await withTransaction<{ status: number; body: unknown }>(
+          async (client) => {
+            const existing = await findCourse(client, id, { forUpdate: true });
+            if (!existing) {
+              return { status: 404, body: { error: "NOT_FOUND" } };
+            }
+            // Q-4 (ก): หลัง 404 เดิม และก่อนสแกนสื่อ
+            const extra = validateCourseNewFields(body, departmentExists);
+            if (extra.ok === false) {
+              return {
+                status: 400,
+                body: { error: "INVALID_COURSE", message: extra.message },
+              };
+            }
+            const mediaScan = scanLessonMedia(body.lessons);
+            if (mediaScan.ok === false) {
+              return {
+                status: 400,
+                body: { error: "INVALID_COURSE_MEDIA", message: mediaScan.message },
+              };
+            }
+            // ----- เปลี่ยน Binding แบบ Synchronous (แถวถูกล็อกด้วย FOR UPDATE แล้ว) -----
+            const oldScan = scanLessonMedia(existing.lessons);
+            const mediaResult = applyCourseMediaChange(
+              id,
+              oldScan.ok ? oldScan.files : new Set<string>(),
+              mediaScan.files,
+              req.authUser!,
+              "update",
+            );
+            if (mediaResult.ok === false) {
+              return {
+                status: mediaResult.status,
+                body: { error: mediaResult.error, message: mediaResult.message },
+              };
+            }
+            undoMedia = mediaResult.rollback;
+            // แทนทั้งก้อน: id จาก URL · isApproved ตามกติกาเดิม (Admin = ค่าใน Body, อื่น = ค่าเดิม)
+            const isAdmin = req.authUser!.role === "Admin";
+            const updatedCourse: Record<string, unknown> = {
+              ...body,
+              id,
+              isApproved: isAdmin ? body.isApproved : existing.isApproved,
+            };
+            await replaceCourse(client, id, toCourseFields(updatedCourse, extra.value));
+            return { status: 200, body: await findCourse(client, id) };
+          },
         );
-        if (mediaResult.ok === false) {
-          return res
-            .status(mediaResult.status)
-            .json({ error: mediaResult.error, message: mediaResult.message });
-        }
-        const isAdmin = req.authUser!.role === "Admin";
-        const updatedCourse: Course = {
-          ...req.body,
-          id,
-          isApproved: isAdmin ? req.body.isApproved : existing.isApproved,
-        };
-        db_courses = db_courses.map((c) => (c.id === id ? updatedCourse : c));
-        res.json(updatedCourse);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        return res.status(reply.status).json(reply.body);
+      } catch (err) {
+        undoMedia?.();
+        return sendDbFailure(res, err, "PUT /api/courses/:id");
       }
     },
   );
@@ -3034,29 +3153,39 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/courses/:id",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
+      let undoMedia: (() => void) | null = null;
       try {
         const { id } = req.params;
-        const existing = db_courses.find((c) => c.id === id);
-        if (existing) {
-          const oldScan = scanLessonMedia(existing.lessons);
-          const mediaResult = applyCourseMediaChange(
-            id,
-            oldScan.ok ? oldScan.files : new Set<string>(),
-            new Set<string>(),
-            req.authUser!,
-            "delete",
-          );
-          if (mediaResult.ok === false) {
-            return res
-              .status(mediaResult.status)
-              .json({ error: mediaResult.error, message: mediaResult.message });
-          }
-        }
-        db_courses = db_courses.filter((c) => c.id !== id);
-        res.json({ success: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        const reply = await withTransaction<{ status: number; body: unknown }>(
+          async (client) => {
+            const existing = await findCourse(client, id, { forUpdate: true });
+            if (existing) {
+              // ปล่อย Binding ก่อน (ล้ม = ตอบ Error เดิม ไม่ลบ)
+              const oldScan = scanLessonMedia(existing.lessons);
+              const mediaResult = applyCourseMediaChange(
+                id,
+                oldScan.ok ? oldScan.files : new Set<string>(),
+                new Set<string>(),
+                req.authUser!,
+                "delete",
+              );
+              if (mediaResult.ok === false) {
+                return {
+                  status: mediaResult.status,
+                  body: { error: mediaResult.error, message: mediaResult.message },
+                };
+              }
+              undoMedia = mediaResult.rollback;
+              await deleteCourse(client, id);
+            }
+            return { status: 200, body: { success: true } };
+          },
+        );
+        return res.status(reply.status).json(reply.body);
+      } catch (err) {
+        undoMedia?.();
+        return sendDbFailure(res, err, "DELETE /api/courses/:id");
       }
     },
   );
@@ -3065,14 +3194,16 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   // ถ้ามีข้อ Essay จะเป็น PendingReview จนกว่าผู้ตรวจให้คะแนนครบ (ก้อนที่ 2)
   app.post("/api/courses/:id/submit-quiz", requireAuth, async (req, res) => {
     // 01C-1: อ่านผู้ใช้จาก DB ก่อน — การตรวจและแก้ข้อมูลใน Memory ด้านล่างยังทำต่อเนื่องแบบ Synchronous เหมือนเดิม
+    // 01C-5: หลักสูตรอ่านจาก DB ในช่วงเดียวกัน
     let user: UserType | undefined;
+    let course: Course | undefined;
     try {
       user = await findUserById(req.authUser!.id);
+      course = await findCourse(undefined, req.params.id);
     } catch (err) {
       return sendDbFailure(res, err, "POST /api/courses/:id/submit-quiz");
     }
     try {
-      const course = db_courses.find((c) => c.id === req.params.id);
       if (!course) {
         return res
           .status(404)
@@ -3182,9 +3313,13 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     requireRole("Admin", "Editor"),
     async (req, res) => {
       // 01C-1: อ่านผู้ตรวจจาก DB ก่อน (ใช้แค่ข้อความ Audit) — Guard และ finalize ใน Memory ยังต่อเนื่องแบบ Synchronous
+      // 01C-5: หลักสูตรของรายการนี้อ่านจาก DB ในช่วงเดียวกัน (courseId ของรายการไม่เปลี่ยน)
       let reviewer: UserType | undefined;
+      let gradeCourse: Course | undefined;
       try {
         reviewer = await findUserById(req.authUser!.id);
+        const pre = db_quiz_submissions.find((s) => s.id === req.params.id);
+        if (pre) gradeCourse = await findCourse(undefined, pre.courseId);
       } catch (err) {
         return sendDbFailure(res, err, "POST /api/quiz_submissions/:id/grade");
       }
@@ -3208,7 +3343,8 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             message: "ไม่สามารถตรวจข้อสอบของตัวเองได้",
           });
         }
-        const course = db_courses.find((c) => c.id === sub.courseId);
+        const course =
+          gradeCourse && gradeCourse.id === sub.courseId ? gradeCourse : undefined;
         if (!course) {
           return res.status(404).json({
             error: "COURSE_NOT_FOUND",
@@ -3676,7 +3812,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/user_progress",
     requireAuth,
     requireOwnField("userId"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const isAdmin = req.authUser!.role === "Admin";
         const prog = req.body;
@@ -3698,11 +3834,22 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         }
 
         // ผู้เรียนทั่วไปทำได้แค่ "เริ่มเรียน" — Completed/score/attempts ตั้งโดย server ตอนปิดผลสอบเท่านั้น
-        if (!db_courses.some((c) => c.id === prog.courseId)) {
+        // 01C-5: ตรวจรหัสหลักสูตรจาก DB (เทียบแบบ === เดิม: ค่าที่ไม่ใช่ข้อความไม่ตรงกับหลักสูตรใด)
+        const wantedCourseId: unknown = prog.courseId;
+        let courseExists: boolean;
+        try {
+          courseExists =
+            typeof wantedCourseId === "string" &&
+            (await courseIdExists(undefined, wantedCourseId));
+        } catch (dbErr) {
+          return sendDbFailure(res, dbErr, "POST /api/user_progress");
+        }
+        if (!courseExists) {
           return res
             .status(400)
             .json({ error: "INVALID_COURSE", message: "ไม่พบหลักสูตร" });
         }
+        // หลังจุดนี้ยังเป็น Synchronous เหมือนเดิม
         const existing = db_user_progress.find(
           (p) => p.userId === req.authUser!.id && p.courseId === prog.courseId,
         );
@@ -3757,8 +3904,10 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   // ไม่อ่าน req.query / req.body เลย → ไม่มีช่องให้ client เลือก user
   app.get("/api/learning/stats", requireAuth, async (req, res) => {
     let allUsers: UserType[];
+    let allCourses: Course[];
     try {
       allUsers = await listUsers();
+      allCourses = await listCourses(); // 01C-5: ใหม่สุดก่อน = ลำดับเดิมของ db_courses
     } catch (err) {
       return sendDbFailure(res, err, "GET /api/learning/stats");
     }
@@ -3807,7 +3956,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
       let trainingMinutes = 0;
       let minutesKnown = false;
       completed.forEach(({ courseId }) => {
-        const c = db_courses.find((x) => x.id === courseId);
+        const c = allCourses.find((x) => x.id === courseId);
         if (c?.durationMinutes) {
           trainingMinutes += c.durationMinutes;
           minutesKnown = true;
@@ -3818,7 +3967,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         .map((e) => Number(e.score))
         .filter((n) => !isNaN(n));
 
-      const perCourse = db_courses
+      const perCourse = allCourses
         .filter((c) => orgWide || c.isApproved !== false)
         .map((c) => {
           const ex = exams.filter((e) => e.courseId === c.id);
@@ -3954,7 +4103,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/training_sessions",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const {
           courseId,
@@ -3978,12 +4127,22 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             message: "ช่วงเวลาไม่ถูกต้อง (เวลาสิ้นสุดต้องหลังเวลาเริ่ม)",
           });
         }
-        const course = db_courses.find((c) => c.id === courseId);
+        // 01C-5: หลักสูตรอ่านจาก DB (เทียบแบบ === เดิม: ค่าที่ไม่ใช่ข้อความไม่ตรงกับหลักสูตรใด)
+        let course: Course | undefined;
+        try {
+          course =
+            typeof courseId === "string"
+              ? await findCourse(undefined, courseId)
+              : undefined;
+        } catch (dbErr) {
+          return sendDbFailure(res, dbErr, "POST /api/training_sessions");
+        }
         if (!course) {
           return res
             .status(400)
             .json({ error: "COURSE_NOT_FOUND", message: "ไม่พบคอร์สที่เลือก" });
         }
+        // หลังจุดนี้ยังเป็น Synchronous เหมือนเดิม
         const session: TrainingSession = {
           id: `ts-${crypto.randomUUID()}`,
           courseId,
