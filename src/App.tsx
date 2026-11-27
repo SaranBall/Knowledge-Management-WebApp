@@ -642,7 +642,11 @@ export default function App() {
     };
     setRatings((prev) => [newRating, ...prev]);
     try {
-      await api.createRating(newRating);
+      // 01C-4 (Q-1 ก): แทนรายการที่ใส่ไว้ (id ชั่วคราว) ด้วยค่าที่ Server ตอบ (id จริง)
+      const saved = await api.createRating(newRating);
+      if (saved && typeof saved.id === "string") {
+        setRatings((prev) => prev.map((r) => (r.id === newRating.id ? saved : r)));
+      }
     } catch (e) {
       console.error(e);
     }
@@ -760,10 +764,19 @@ export default function App() {
   };
 
   // Technical KB: Create article draft (by Editor)
-  const handleAddKBArticle = async (newArticle: KBArticle) => {
+  const handleAddKBArticle = async (
+    newArticle: KBArticle,
+  ): Promise<KBArticle | void> => {
     setKbArticles((prev) => [newArticle, ...prev]);
     try {
-      await api.createKBArticle(newArticle);
+      // 01C-4 (Q-1 ก): แทนรายการที่ใส่ไว้ (id ชั่วคราว) ด้วยค่าที่ Server ตอบ (id จริง) แล้วคืนให้ Component
+      const saved = await api.createKBArticle(newArticle);
+      if (saved && typeof saved.id === "string") {
+        setKbArticles((prev) =>
+          prev.map((art) => (art.id === newArticle.id ? saved : art)),
+        );
+        return saved;
+      }
     } catch (e) {
       console.error(e);
     }
@@ -878,7 +891,13 @@ export default function App() {
   const handleAddContactRequest = async (newReq: ContactRequest) => {
     setContactRequests((prev) => [newReq, ...prev]);
     try {
-      await api.createContactRequest(newReq);
+      // 01C-4 (Q-1 ก): แทนรายการที่ใส่ไว้ (id ชั่วคราว) ด้วยค่าที่ Server ตอบ (id จริง)
+      const saved = await api.createContactRequest(newReq);
+      if (saved && typeof saved.id === "string") {
+        setContactRequests((prev) =>
+          prev.map((req) => (req.id === newReq.id ? saved : req)),
+        );
+      }
     } catch (e) {
       console.error(e);
     }

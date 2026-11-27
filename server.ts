@@ -11,13 +11,8 @@ import jwt from "jsonwebtoken";
 import {
   INITIAL_USERS,
   INITIAL_COURSES,
-  INITIAL_KB_ARTICLES,
-  INITIAL_EXPERTS,
-  INITIAL_RATINGS,
   INITIAL_USER_PROGRESS,
   INITIAL_EXAM_RESULTS,
-  INITIAL_SEARCH_LOGS,
-  INITIAL_CONTACT_REQUESTS,
 } from "./src/data/initialData";
 import {
   DEFAULT_AVATAR_URL,
@@ -103,6 +98,51 @@ import {
   userIdExists,
 } from "./src/server/repos/users";
 import { insertAuditLog, listAuditLogs } from "./src/server/repos/auditLogs";
+import {
+  approveKbArticle,
+  deleteKbArticle,
+  findKbArticle,
+  insertKbArticle,
+  kbArticleIdExists,
+  likeKbArticle,
+  listKbArticles,
+  replaceKbArticle,
+  toKbFields,
+} from "./src/server/repos/kbArticles";
+import {
+  deleteExpert,
+  expertIdExists,
+  findExpert,
+  insertExpert,
+  listExperts,
+  replaceExpert,
+  toExpertFields,
+} from "./src/server/repos/experts";
+import {
+  contactRequestIdExists,
+  insertContactRequest,
+  listContactRequests,
+  replyContactRequest,
+} from "./src/server/repos/contactRequests";
+import {
+  customResourceIdExists,
+  deleteCustomResource,
+  encodeCustomResource,
+  insertCustomResource,
+  listCustomResources,
+} from "./src/server/repos/customResources";
+import { insertRating, listRatings, ratingIdExists } from "./src/server/repos/ratings";
+import {
+  type SearchResolution,
+  insertSearchLog,
+  insertSearchResolution,
+  isRealGap,
+  listSearchLogs,
+  listSearchResolutions,
+  resolutionExists,
+  searchLogIdExists,
+} from "./src/server/repos/searchLogs";
+import { clientIdOf, isPlainObject } from "./src/server/repos/rowHelpers";
 import { setDepartments, type Department } from "./src/utils/departmentUtils";
 
 dotenv.config();
@@ -553,15 +593,48 @@ function pickUserFields(
   return out;
 }
 
-// N6: บันทึกการปิดช่องว่างความรู้ (Knowledge Gap) จาก Report D
-interface SearchResolution {
-  id: string;
-  keyword: string; // ตรงกับ SearchLog.keyword แบบดิบ
-  action: string; // มาตรการ/SOP ที่ใช้ปิดช่องว่าง
-  assignedTo?: string; // ผู้เชี่ยวชาญ/ผู้รับมอบ (ไม่บังคับ)
-  resolvedBy: string; // employeeId จาก token
-  resolvedByName: string;
-  resolvedAt: string;
+// N6: บันทึกการปิดช่องว่างความรู้ (Knowledge Gap) จาก Report D — Type อยู่ที่ src/server/repos/searchLogs.ts
+
+// 01C-4: Body ของ Error ที่ใช้หลายเส้น
+const INVALID_PAYLOAD_BODY = { error: "INVALID_PAYLOAD" } as const; // Q-2 (ก)
+const DUPLICATE_ID_BODY = {
+  error: "DUPLICATE_ID",
+  message: "รหัส (id) นี้มีอยู่ในระบบแล้ว",
+} as const; // E-2 (§21.18.A)
+const GAP_NOT_FOUND_BODY = {
+  error: "GAP_NOT_FOUND",
+  message: "ไม่พบช่องว่างความรู้ของคำค้นหานี้ในประวัติการสืบค้น",
+} as const;
+const ALREADY_RESOLVED_BODY = {
+  error: "ALREADY_RESOLVED",
+  message: "ช่องว่างความรู้นี้ถูกปิดไปแล้ว",
+} as const;
+
+/**
+ * FS-12 / C-15: id ที่ Server สร้าง `<prefix>-<Date.now()>` — ชนในฐานแล้วใช้ `-hex6`
+ * และถ้าชนกันพร้อมกันตอน INSERT (Unique ของ PK) ลองใหม่ ≤ 5 ครั้ง (ไม่ตอบ 409)
+ */
+async function insertWithFreshId<T>(
+  prefix: string,
+  exists: (id: string) => Promise<boolean>,
+  insert: (id: string) => Promise<T>,
+  pkConstraint: string,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    let id = `${prefix}-${Date.now()}`;
+    while (await exists(id)) {
+      id = `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    }
+    try {
+      return await insert(id);
+    } catch (err) {
+      const info = classifyDbError(err);
+      if (info.kind === "unique" && info.constraint === pkConstraint && attempt < 5) {
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 async function startServer() {
@@ -589,16 +662,11 @@ async function startServer() {
 
   // --- In-Memory Databases mirroring real SQL/NoSQL schemas ---
   // users และ system_audit_logs อยู่ใน DB แล้ว (01C-1), employee_master (01C-2),
-  // documents + ACL (01C-3) — ดู src/server/repos/
+  // documents + ACL (01C-3), kb_articles / experts / contact_requests / custom_resources /
+  // ratings / search_logs / search_resolutions (01C-4) — ดู src/server/repos/
   let db_courses: Course[] = [...INITIAL_COURSES];
-  let db_kb_articles: KBArticle[] = [...INITIAL_KB_ARTICLES];
-  let db_experts: Expert[] = [...INITIAL_EXPERTS];
-  let db_ratings: RatingAndComment[] = [...INITIAL_RATINGS];
   let db_user_progress: UserCourseProgress[] = [...INITIAL_USER_PROGRESS];
   let db_exam_results: any[] = [...INITIAL_EXAM_RESULTS];
-  let db_search_logs: SearchLog[] = [...INITIAL_SEARCH_LOGS];
-  let db_contact_requests: ContactRequest[] = [...INITIAL_CONTACT_REQUESTS];
-  let db_custom_resources: CustomResource[] = [];
   let db_user_competencies: UserCompetency[] = INITIAL_USERS.flatMap((u) =>
     getInitialCompetencies(u.id, u.departmentId, u.position),
   );
@@ -610,7 +678,6 @@ async function startServer() {
   let db_attendance_logs: AttendanceLog[] = [];
   let db_training_sessions: TrainingSession[] = [];
   let db_quiz_submissions: QuizSubmission[] = [];
-  let db_search_resolutions: SearchResolution[] = [];
 
   // --- Quiz: server เป็นผู้ตัดสินคะแนนเท่านั้น ไม่เชื่อค่าที่ client ส่ง ---
   // กฎตรวจ/คิดคะแนนอยู่ที่ src/utils/quizRules.ts (ใช้ร่วมกับ Reviewer preview)
@@ -1669,18 +1736,22 @@ async function startServer() {
       }
       // Context is built purely from authorized resources on the server
       // 01C-3: เอกสารอ่านจาก DB แล้วกรอง Published + ACL แบบเดิม
+      // 01C-4: KB (Approved) และ custom_resources อ่านจาก DB เช่นกัน
       let allDocs: DocumentItem[];
+      let allKbs: KBArticle[];
+      let resources: CustomResource[];
       try {
         allDocs = await listDocuments();
+        allKbs = await listKbArticles();
+        resources = await listCustomResources();
       } catch (dbErr) {
         return sendDbFailure(res, dbErr, "POST /api/chat");
       }
       const authorizedDocs = allDocs.filter(
         (d) => d.status === "Published" && canAccessDocument(currentDbUser, d),
       );
-      const approvedKBs = db_kb_articles.filter((k) => k.status === "Approved");
+      const approvedKBs = allKbs.filter((k) => k.status === "Approved");
       const approvedCourses = db_courses.filter((c) => c.isApproved !== false);
-      const resources = db_custom_resources;
 
       // Compile current RMP Knowledge Base as a structured context list
       const serializedRMPContext = [
@@ -2358,16 +2429,17 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // GET /api/documents/stats: Global Stats (สำหรับ Dashboard KPI ส่วนกลาง)
-  // คำนวณใน JS จากรายการเอกสารเดียวกับ GET (ไม่ใช้ SQL aggregate) + KB ใน Memory (ย้ายใน 01C-4)
+  // คำนวณใน JS จากรายการเอกสารเดียวกับ GET (ไม่ใช้ SQL aggregate) + KB จาก DB (01C-4)
   app.get("/api/documents/stats", requireAuth, async (req, res) => {
     try {
       const allDocs = await listDocuments();
+      const allKbs = await listKbArticles();
       const currentMonthKey = new Date().toISOString().slice(0, 7); // "YYYY-MM"
       const publishedDocs = allDocs.filter((d) => d.status === "Published");
       const pendingDocs = allDocs.filter(
         (d) => d.status === "Pending Approval",
       );
-      const approvedKBs = db_kb_articles.filter((k) => k.status === "Approved");
+      const approvedKBs = allKbs.filter((k) => k.status === "Approved");
 
       const docViews = allDocs.reduce((sum, d) => sum + (d.views || 0), 0);
       const docDownloads = allDocs.reduce(
@@ -3213,15 +3285,18 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     },
   );
 
-  // KB Articles APIs
-  app.get("/api/kb_articles", requireAuth, (req, res) => {
-    // Viewer เห็นเฉพาะบทความที่ Approved แล้ว — เดิมกรองแค่ฝั่ง client (TechnicalKB.tsx)
-    if (req.authUser!.role === "Viewer") {
-      return res.json(
-        db_kb_articles.filter((art) => art.status === "Approved"),
-      );
+  // KB Articles APIs — 01C-4: km.kb_articles (ใหม่สุดก่อน)
+  app.get("/api/kb_articles", requireAuth, async (req, res) => {
+    try {
+      const articles = await listKbArticles();
+      // Viewer เห็นเฉพาะบทความที่ Approved แล้ว — เดิมกรองแค่ฝั่ง client (TechnicalKB.tsx)
+      if (req.authUser!.role === "Viewer") {
+        return res.json(articles.filter((art) => art.status === "Approved"));
+      }
+      res.json(articles);
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/kb_articles");
     }
-    res.json(db_kb_articles);
   });
   app.post("/api/kb_articles", requireAuth, async (req, res) => {
     // ทุก role ที่ login แล้วเสนอความรู้/ร่างบทความได้ (workflow อนุมัติควบคุมที่ /approve)
@@ -3288,23 +3363,11 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
       // --- ฟิลด์ระบบ: มาจากผู้ใช้ที่ server ยืนยันแล้วเท่านั้น ---
       const me = req.authUser!;
-      let userRecord: UserType | undefined;
-      try {
-        userRecord = await findUserById(me.id);
-      } catch (dbErr) {
-        return sendDbFailure(res, dbErr, "POST /api/kb_articles");
-      }
-      // หลังจุดนี้ การสร้าง id กันชนและ unshift ทำต่อเนื่องแบบ Synchronous เหมือนเดิม
+      const userRecord: UserType | undefined = await findUserById(me.id);
       const authorDeptId = userRecord?.departmentId || me.departmentId;
 
-      // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision
-      let generatedId = `kb-${Date.now()}`;
-      while (db_kb_articles.some((a) => a.id === generatedId)) {
-        generatedId = `kb-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-      }
-
-      const newArt: KBArticle = {
-        id: generatedId,
+      // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision ในฐาน (FS-12)
+      const newArt: Omit<KBArticle, "id"> = {
         title,
         type: body.type,
         problem,
@@ -3322,26 +3385,38 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
         status: me.role === "Admin" ? "Approved" : "Pending",
         createdAt: new Date().toISOString(),
       };
-      db_kb_articles.unshift(newArt);
-      res.json(newArt);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const saved = await insertWithFreshId(
+        "kb",
+        (id) => kbArticleIdExists(undefined, id),
+        (id) =>
+          insertKbArticle(
+            undefined,
+            id,
+            toKbFields(newArt as unknown as Record<string, unknown>),
+          ),
+        "kb_articles_pk",
+      );
+      res.json(saved);
+    } catch (err) {
+      return sendDbFailure(res, err, "POST /api/kb_articles");
     }
   });
+  // PUT แทนทั้งก้อนด้วย Body (ช่องที่ไม่ส่ง = NULL → Key หาย) ที่ id ใน URL เสมอ (F-06)
+  // ไม่พบ → 200 + Body เดิม · พบ → ค่าที่อ่านกลับ · Body ไม่ใช่ Plain object → 400 (Q-2 ก)
   app.put(
     "/api/kb_articles/:id",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
+        if (!isPlainObject(req.body)) {
+          return res.status(400).json(INVALID_PAYLOAD_BODY);
+        }
         const { id } = req.params;
-        const updatedArt = req.body;
-        db_kb_articles = db_kb_articles.map((art) =>
-          art.id === id ? updatedArt : art,
-        );
-        res.json(updatedArt);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        const saved = await replaceKbArticle(undefined, id, toKbFields(req.body));
+        res.json(saved ?? req.body);
+      } catch (err) {
+        return sendDbFailure(res, err, "PUT /api/kb_articles/:id");
       }
     },
   );
@@ -3349,13 +3424,13 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/kb_articles/:id",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const { id } = req.params;
-        db_kb_articles = db_kb_articles.filter((art) => art.id !== id);
-        res.json({ success: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        await deleteKbArticle(undefined, id);
+        res.json({ success: true }); // ไม่พบก็ตอบ success ตามเดิม
+      } catch (err) {
+        return sendDbFailure(res, err, "DELETE /api/kb_articles/:id");
       }
     },
   );
@@ -3363,81 +3438,108 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/kb_articles/:id/approve",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const { id } = req.params;
-        db_kb_articles = db_kb_articles.map((art) =>
-          art.id === id ? { ...art, status: "Approved" } : art,
-        );
-        const updated = db_kb_articles.find((art) => art.id === id);
-        res.json(updated);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        // ไม่พบ → res.json(undefined) = 200 Body ว่าง ตามเดิม
+        res.json(await approveKbArticle(undefined, id));
+      } catch (err) {
+        return sendDbFailure(res, err, "POST /api/kb_articles/:id/approve");
       }
     },
   );
-  app.post("/api/kb_articles/:id/like", requireAuth, (req, res) => {
+  // TX-12 (B-14): `likes = likes + 1` แบบ Atomic · ไม่พบ → 200 Body ว่าง ตามเดิม
+  app.post("/api/kb_articles/:id/like", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      db_kb_articles = db_kb_articles.map((art) =>
-        art.id === id ? { ...art, likes: art.likes + 1 } : art,
-      );
-      const updated = db_kb_articles.find((art) => art.id === id);
-      res.json(updated);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.json(await likeKbArticle(undefined, id));
+    } catch (err) {
+      return sendDbFailure(res, err, "POST /api/kb_articles/:id/like");
     }
   });
 
-  // Experts APIs — จัดการได้เฉพาะ Admin
-  app.get("/api/experts", requireAuth, (req, res) => {
-    res.json(db_experts);
-  });
-  app.post("/api/experts", requireAuth, requireRole("Admin"), (req, res) => {
+  // Experts APIs — จัดการได้เฉพาะ Admin · 01C-4: km.experts (เรียงตามลำดับที่สร้าง ASC — เดิม push)
+  app.get("/api/experts", requireAuth, async (req, res) => {
     try {
-      const newExpert = req.body;
-      if (!newExpert.id) {
-        newExpert.id = `exp-${Date.now()}`;
-      }
-      db_experts.push(newExpert);
-      res.json(newExpert);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.json(await listExperts());
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/experts");
     }
   });
-  app.put("/api/experts/:id", requireAuth, requireRole("Admin"), (req, res) => {
+  // E-2 (§21.18.A): id ที่ Client ส่งมาซ้ำ → 409 DUPLICATE_ID · ไม่ส่ง id → `exp-<ts>` ชนแล้วสร้างใหม่ (FS-12)
+  app.post("/api/experts", requireAuth, requireRole("Admin"), async (req, res) => {
     try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json(INVALID_PAYLOAD_BODY);
+      }
+      const fields = toExpertFields(req.body);
+      const clientId = clientIdOf(req.body);
+      if (clientId === undefined) {
+        const saved = await insertWithFreshId(
+          "exp",
+          (id) => expertIdExists(undefined, id),
+          (id) => insertExpert(undefined, id, fields),
+          "experts_pk",
+        );
+        return res.json(saved);
+      }
+      if (await expertIdExists(undefined, clientId)) {
+        return res.status(409).json(DUPLICATE_ID_BODY);
+      }
+      try {
+        return res.json(await insertExpert(undefined, clientId, fields));
+      } catch (err) {
+        const info = classifyDbError(err);
+        if (info.kind === "unique" && info.constraint === "experts_pk") {
+          return res.status(409).json(DUPLICATE_ID_BODY);
+        }
+        throw err;
+      }
+    } catch (err) {
+      return sendDbFailure(res, err, "POST /api/experts");
+    }
+  });
+  // PUT แทนทั้งก้อนที่ id ใน URL เสมอ (F-06) · ไม่พบ → 200 + Body เดิม · พบ → ค่าที่อ่านกลับ
+  app.put("/api/experts/:id", requireAuth, requireRole("Admin"), async (req, res) => {
+    try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json(INVALID_PAYLOAD_BODY);
+      }
       const { id } = req.params;
-      const updatedExpert = req.body;
-      db_experts = db_experts.map((e) => (e.id === id ? updatedExpert : e));
-      res.json(updatedExpert);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const saved = await replaceExpert(undefined, id, toExpertFields(req.body));
+      res.json(saved ?? req.body);
+    } catch (err) {
+      return sendDbFailure(res, err, "PUT /api/experts/:id");
     }
   });
   app.delete(
     "/api/experts/:id",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const { id } = req.params;
-        db_experts = db_experts.filter((e) => e.id !== id);
-        res.json({ success: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        await deleteExpert(undefined, id);
+        res.json({ success: true }); // ไม่พบก็ตอบ success ตามเดิม
+      } catch (err) {
+        return sendDbFailure(res, err, "DELETE /api/experts/:id");
       }
     },
   );
 
   // Ratings APIs — เขียนได้ทุก login
   app.get("/api/ratings", requireAuth, async (req, res) => {
-    // กรองฝั่ง server ตามสิทธิ์ผู้ใช้ — กรองเฉพาะข้อมูลที่ส่งกลับ ไม่แก้ db_ratings
+    // กรองฝั่ง server ตามสิทธิ์ผู้ใช้ — กรองเฉพาะข้อมูลที่ส่งกลับ ไม่แก้ข้อมูลในฐาน
     // ลำดับค้นเหมือน POST /api/ratings: Document ก่อน แล้วค่อย KB (ไม่ใช้ prefix ของ id)
-    // 01C-3: โหลดเอกสารจาก DB ครั้งเดียวต่อ Request แล้วค้นแบบ Document-first เดิม
+    // 01C-3/01C-4: โหลดเอกสาร + KB + Rating จาก DB ครั้งเดียวต่อ Request แล้วค้นแบบ Document-first เดิม
+    // (เป้าหมายหาตอนอ่านด้วย target_id — ถูกลบแล้ว = Orphan เห็นเฉพาะ Admin · OD-FK-07)
     let docsById: Map<string, DocumentItem>;
+    let kbById: Map<string, KBArticle>;
+    let allRatings: RatingAndComment[];
     try {
       docsById = new Map((await listDocuments()).map((d) => [d.id, d]));
+      kbById = new Map((await listKbArticles()).map((a) => [a.id, a]));
+      allRatings = await listRatings();
     } catch (err) {
       return sendDbFailure(res, err, "GET /api/ratings");
     }
@@ -3445,7 +3547,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     const isAdmin = me.role === "Admin";
     const isEditor = me.role === "Editor";
 
-    const visible = db_ratings.filter((r) => {
+    const visible = allRatings.filter((r) => {
       const targetDoc = docsById.get(r.docOrKBId);
       if (targetDoc) {
         // Admin/Editor: ตามสิทธิ์แผนก (ทุกสถานะ); role อื่น: ต้อง Published + มีสิทธิ์แผนก
@@ -3454,7 +3556,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           (isAdmin || isEditor || targetDoc.status === "Published")
         );
       }
-      const targetKB = db_kb_articles.find((a) => a.id === r.docOrKBId);
+      const targetKB = kbById.get(r.docOrKBId);
       if (targetKB) {
         // Admin/Editor เห็นทุกสถานะ; Viewer และ role อื่นเห็นเฉพาะ Approved
         return isAdmin || isEditor || targetKB.status === "Approved";
@@ -3499,13 +3601,9 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
         // --- ตรวจว่าเป้าหมายมีอยู่จริงและผู้ใช้มีสิทธิ์เห็น (ใช้กฎเดียวกับ GET) ---
         const me = req.authUser!;
-        // 01C-3: เอกสารเป้าหมายอ่านจาก DB — หลังจุดนี้ การสร้าง id กันชนและ unshift ยังต่อเนื่องแบบ Synchronous
-        let targetDoc: DocumentItem | undefined;
-        try {
-          targetDoc = await findDocument(undefined, docOrKBId);
-        } catch (dbErr) {
-          return sendDbFailure(res, dbErr, "POST /api/ratings");
-        }
+        // 01C-3/01C-4: เป้าหมายอ่านจาก DB แบบ Document-first เดิม · target_type ตามที่หาเจอ
+        const targetDoc = await findDocument(undefined, docOrKBId);
+        let targetType: "document" | "kb" = "document";
         if (targetDoc) {
           // เหมือน GET /api/documents: Admin/Editor เห็นตามสิทธิ์แผนก (ทุกสถานะ),
           // role อื่นเห็นเฉพาะ Published ที่มีสิทธิ์แผนก
@@ -3521,7 +3619,8 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             });
           }
         } else {
-          const targetKB = db_kb_articles.find((a) => a.id === docOrKBId);
+          const targetKB = await findKbArticle(undefined, docOrKBId);
+          targetType = "kb";
           if (!targetKB) {
             return res.status(404).json({
               error: "NOT_FOUND",
@@ -3537,26 +3636,31 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           }
         }
 
-        // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision
-        let generatedId = `r-${Date.now()}`;
-        while (db_ratings.some((r) => r.id === generatedId)) {
-          generatedId = `r-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-        }
-
+        // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision ในฐาน (FS-12)
         // ฟิลด์ระบุตัวตนและเวลา มาจาก server เสมอ (รวมกรณี Admin)
-        const newRating: RatingAndComment = {
-          id: generatedId,
-          docOrKBId,
-          userId: me.id,
-          userName: me.name,
-          rating: ratingValue,
-          comment,
-          createdAt: new Date().toISOString(),
-        };
-        db_ratings.unshift(newRating);
-        res.json(newRating);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        const createdAt = new Date().toISOString();
+        const saved = await insertWithFreshId(
+          "r",
+          (id) => ratingIdExists(undefined, id),
+          (id) =>
+            insertRating(
+              undefined,
+              {
+                id,
+                docOrKBId,
+                userId: me.id,
+                userName: me.name,
+                rating: ratingValue,
+                comment,
+                createdAt,
+              },
+              targetType,
+            ),
+          "ratings_pk",
+        );
+        res.json(saved);
+      } catch (err) {
+        return sendDbFailure(res, err, "POST /api/ratings");
       }
     },
   );
@@ -3998,8 +4102,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
   });
 
   // Search Logs APIs: Server-authoritative hasResult calculation
-  app.get("/api/search_logs", requireAuth, requireRole("Admin"), (req, res) => {
-    res.json(db_search_logs);
+  app.get("/api/search_logs", requireAuth, requireRole("Admin"), async (req, res) => {
+    try {
+      res.json(await listSearchLogs());
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/search_logs");
+    }
   });
   app.post("/api/search_logs", requireAuth, async (req, res) => {
     try {
@@ -4013,9 +4121,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
       // Server computes hasResult authoritatively from authorized documents & approved KBs
       // 01C-3: เอกสารอ่านจาก DB แล้วกรองแบบเดิม (รวม d.title.toLowerCase() เดิม) — หลังจุดนี้ยัง Synchronous
+      // 01C-4: KB อ่านจาก DB เช่นกัน — การคำนวณ hasResult เหมือนเดิมทุกบรรทัด
       let allDocs: DocumentItem[];
+      let allKbs: KBArticle[];
       try {
         allDocs = await listDocuments();
+        allKbs = await listKbArticles();
       } catch (dbErr) {
         return sendDbFailure(res, dbErr, "POST /api/search_logs");
       }
@@ -4027,7 +4138,7 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             (d.description ?? "").toLowerCase().includes(keyword)),
       );
       // N15: ฟิลด์ตรงกับ matchStr ใน TechnicalKB.tsx (title/problem/cause/solution/prevention/tags/relatedWIs)
-      const hasKBMatch = db_kb_articles.some((k) => {
+      const hasKBMatch = allKbs.some((k) => {
         if (k.status !== "Approved") return false;
         const haystack = [
           k.title,
@@ -4045,16 +4156,25 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
 
       const hasResult = hasDocMatch || hasKBMatch;
 
-      const log: SearchLog = {
-        id: `sl-${Date.now()}`,
-        keyword: rawKeyword,
-        userId: currentDbUser.id,
-        timestamp: new Date().toISOString(),
-        hasResult,
-      };
-      db_search_logs.unshift(log);
-      res.json(log);
+      // C-15 (V4-01): id `sl-<ts>` ชนในฐาน → `sl-<ts>-hex6` (FS-12) — เดิมไม่กันชน
+      const timestamp = new Date().toISOString();
+      const saved = await insertWithFreshId(
+        "sl",
+        (id) => searchLogIdExists(undefined, id),
+        (id) =>
+          insertSearchLog(undefined, {
+            id,
+            keyword: rawKeyword,
+            userId: currentDbUser.id,
+            timestamp,
+            hasResult,
+          }),
+        "search_logs_pk",
+      );
+      res.json(saved);
     } catch (err: any) {
+      if (isDbError(err)) return sendDbFailure(res, err, "POST /api/search_logs");
+      // Error อื่น (เช่น d.title.toLowerCase() ของเอกสารที่ไม่มีหัวข้อ) ตอบแบบเดิม
       res.status(500).json({ error: err.message });
     }
   });
@@ -4065,8 +4185,12 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/search_resolutions",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
-      res.json(db_search_resolutions);
+    async (req, res) => {
+      try {
+        res.json(await listSearchResolutions());
+      } catch (err) {
+        return sendDbFailure(res, err, "GET /api/search_resolutions");
+      }
     },
   );
   app.post(
@@ -4096,68 +4220,69 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
             message: "กรุณากรอกมาตรการปิดช่องว่างความรู้",
           });
         }
-        const isRealGap = db_search_logs.some(
-          (l) => l.keyword === keyword && !l.hasResult,
+        // TX-08: ตรวจ Gap → ตรวจซ้ำ → INSERT Resolution → INSERT Audit ใน Transaction เดียว
+        // ล้มตรงไหน = ไม่มีทั้งคู่ · ชนกันพร้อมกัน (UNIQUE km.text_sha256(keyword), FS-07) → 409 เดิม
+        const reply = await withTransaction<{ status: number; body: unknown }>(
+          async (client) => {
+            if (!(await isRealGap(client, keyword))) {
+              return { status: 404, body: GAP_NOT_FOUND_BODY };
+            }
+            if (await resolutionExists(client, keyword)) {
+              return { status: 409, body: ALREADY_RESOLVED_BODY };
+            }
+            const resolution: SearchResolution = {
+              id: `sr-${crypto.randomUUID()}`,
+              keyword,
+              action: action.slice(0, 2000),
+              assignedTo: assignedTo || undefined,
+              resolvedBy: req.authUser!.employeeId,
+              resolvedByName: req.authUser!.name,
+              resolvedAt: new Date().toISOString(),
+            };
+            const saved = await insertSearchResolution(client, resolution);
+            await insertAuditLog(client, {
+              id: `log-${crypto.randomUUID()}`,
+              action: "RESOLVE_GAP",
+              details: `ปิดช่องว่างความรู้ "${keyword.slice(0, 200)}" มาตรการ: ${resolution.action.slice(0, 200)}`,
+              performedBy: `${req.authUser!.name} (${req.authUser!.employeeId})`,
+              timestamp: resolution.resolvedAt,
+            });
+            return { status: 200, body: saved };
+          },
         );
-        if (!isRealGap) {
-          return res.status(404).json({
-            error: "GAP_NOT_FOUND",
-            message: "ไม่พบช่องว่างความรู้ของคำค้นหานี้ในประวัติการสืบค้น",
-          });
+        return res.status(reply.status).json(reply.body);
+      } catch (err) {
+        const info = classifyDbError(err);
+        if (
+          info.kind === "unique" &&
+          info.constraint === "search_resolutions_keyword_uq"
+        ) {
+          return res.status(409).json(ALREADY_RESOLVED_BODY);
         }
-        if (db_search_resolutions.some((r) => r.keyword === keyword)) {
-          return res.status(409).json({
-            error: "ALREADY_RESOLVED",
-            message: "ช่องว่างความรู้นี้ถูกปิดไปแล้ว",
-          });
-        }
-
-        const resolution: SearchResolution = {
-          id: `sr-${crypto.randomUUID()}`,
-          keyword,
-          action: action.slice(0, 2000),
-          assignedTo: assignedTo || undefined,
-          resolvedBy: req.authUser!.employeeId,
-          resolvedByName: req.authUser!.name,
-          resolvedAt: new Date().toISOString(),
-        };
-        db_search_resolutions.unshift(resolution);
-
-        // TODO(01C-4, TX-08): Audit ยังไม่อยู่ใน Transaction เดียวกับ search_resolutions — จะรวมเมื่อกลุ่มนี้ย้ายขึ้น DB
-        // ระหว่างนี้ ถ้าเขียน Audit ไม่สำเร็จ การปิดช่องว่างใน Memory ถูกบันทึกแล้วแต่ตอบ 500
-        try {
-          await insertAuditLog(undefined, {
-            id: `log-${crypto.randomUUID()}`,
-            action: "RESOLVE_GAP",
-            details: `ปิดช่องว่างความรู้ "${keyword.slice(0, 200)}" มาตรการ: ${resolution.action.slice(0, 200)}`,
-            performedBy: `${req.authUser!.name} (${req.authUser!.employeeId})`,
-            timestamp: resolution.resolvedAt,
-          });
-        } catch (auditErr) {
-          return sendDbFailure(res, auditErr, "POST /api/search_resolutions (audit)");
-        }
-
-        res.json(resolution);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        return sendDbFailure(res, err, "POST /api/search_resolutions");
       }
     },
   );
 
   // Contact Requests APIs
-  app.get("/api/contact_requests", requireAuth, (req, res) => {
-    const role = req.authUser!.role;
-    if (role === "Admin" || role === "Editor") {
-      return res.json(db_contact_requests);
+  // 01C-4: km.contact_requests (ใหม่สุดก่อน)
+  app.get("/api/contact_requests", requireAuth, async (req, res) => {
+    try {
+      const role = req.authUser!.role;
+      if (role === "Admin" || role === "Editor") {
+        return res.json(await listContactRequests(undefined));
+      }
+      // Viewer เห็นเฉพาะคำถามที่ตนเองเป็นคนส่งเท่านั้น
+      res.json(await listContactRequests(undefined, req.authUser!.id));
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/contact_requests");
     }
-    // Viewer เห็นเฉพาะคำถามที่ตนเองเป็นคนส่งเท่านั้น
-    res.json(db_contact_requests.filter((r) => r.userId === req.authUser!.id));
   });
   app.post(
     "/api/contact_requests",
     requireAuth,
     requireOwnField("userId"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const body = req.body && typeof req.body === "object" ? req.body : {};
         const bad = (message: string) =>
@@ -4180,8 +4305,8 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           return bad("กรุณากรอกรายละเอียด (ไม่ว่าง และไม่เกิน 5,000 ตัวอักษร)");
         }
 
-        // --- ผู้เชี่ยวชาญต้องมีอยู่จริง; expertName มาจาก db_experts ไม่ใช่ client ---
-        const expert = db_experts.find((e) => e.id === expertId);
+        // --- ผู้เชี่ยวชาญต้องมีอยู่จริง; expertName มาจากฐาน (km.experts) ไม่ใช่ client ---
+        const expert = await findExpert(undefined, expertId);
         if (!expert) {
           return res.status(404).json({
             error: "EXPERT_NOT_FOUND",
@@ -4189,76 +4314,94 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
           });
         }
 
-        // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision
-        let generatedId = `cr-${Date.now()}`;
-        while (db_contact_requests.some((r) => r.id === generatedId)) {
-          generatedId = `cr-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-        }
-
+        // id ให้ server สร้างเสมอ (ไม่ใช้ id จาก client) และกัน collision ในฐาน (FS-12)
         // ฟิลด์ระบุตัวตน/สถานะ/เวลา มาจาก server เสมอ (รวมกรณี Admin)
         const me = req.authUser!;
-        const newRequest: ContactRequest = {
-          id: generatedId,
-          userId: me.id,
-          userName: me.name,
-          userDept: me.departmentId,
-          expertId: expert.id,
-          expertName: expert.name,
-          topic,
-          message,
-          status: "Sent",
-          createdAt: new Date().toISOString(),
-        };
-        db_contact_requests.unshift(newRequest);
-        res.json(newRequest);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        const createdAt = new Date().toISOString();
+        const saved = await insertWithFreshId(
+          "cr",
+          (id) => contactRequestIdExists(undefined, id),
+          (id) =>
+            insertContactRequest(undefined, {
+              id,
+              userId: me.id,
+              userName: me.name,
+              userDept: me.departmentId,
+              expertId: expert.id,
+              expertName: expert.name,
+              topic,
+              message,
+              status: "Sent",
+              createdAt,
+            }),
+          "contact_requests_pk",
+        );
+        res.json(saved);
+      } catch (err) {
+        return sendDbFailure(res, err, "POST /api/contact_requests");
       }
     },
   );
+  // ตอบคำถาม: status = Replied · replyMessage ที่ไม่ใช่ String → toTextOrNull (Q-2 ก) · ไม่พบ → 200 Body ว่าง เดิม
   app.post(
     "/api/contact_requests/:id/reply",
     requireAuth,
     requireRole("Admin", "Editor"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const { id } = req.params;
         const { replyMessage } = req.body;
-        db_contact_requests = db_contact_requests.map((r) =>
-          r.id === id
-            ? {
-                ...r,
-                status: "Replied",
-                replyMessage,
-              }
-            : r,
-        );
-        const updated = db_contact_requests.find((r) => r.id === id);
-        res.json(updated);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        res.json(await replyContactRequest(undefined, id, replyMessage));
+      } catch (err) {
+        return sendDbFailure(res, err, "POST /api/contact_requests/:id/reply");
       }
     },
   );
 
   // Custom Resources APIs — เพิ่ม/ลบได้เฉพาะ Admin (ตรงกับ UI ที่ล็อกไว้แล้ว)
-  app.get("/api/custom_resources", requireAuth, (req, res) => {
-    res.json(db_custom_resources);
+  // 01C-4: km.custom_resources (ใหม่สุดก่อน) · F-05 Raw Known Field: ค่าที่ไม่ใช่ String/ช่องแปลกเก็บใน extra_data
+  app.get("/api/custom_resources", requireAuth, async (req, res) => {
+    try {
+      res.json(await listCustomResources());
+    } catch (err) {
+      return sendDbFailure(res, err, "GET /api/custom_resources");
+    }
   });
+  // E-2: id ที่ Client ส่งมาซ้ำ → 409 DUPLICATE_ID · ไม่ส่ง id → `res-<ts>` ชนแล้วสร้างใหม่ (FS-12)
   app.post(
     "/api/custom_resources",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
-        const resItem = req.body;
-        if (!resItem.id) {
-          resItem.id = `res-${Date.now()}`;
+        if (!isPlainObject(req.body)) {
+          return res.status(400).json(INVALID_PAYLOAD_BODY);
         }
-        db_custom_resources.unshift(resItem);
-        res.json(resItem);
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        const stored = encodeCustomResource(req.body);
+        const clientId = clientIdOf(req.body);
+        if (clientId === undefined) {
+          const saved = await insertWithFreshId(
+            "res",
+            (id) => customResourceIdExists(undefined, id),
+            (id) => insertCustomResource(undefined, id, stored),
+            "custom_resources_pk",
+          );
+          return res.json(saved);
+        }
+        if (await customResourceIdExists(undefined, clientId)) {
+          return res.status(409).json(DUPLICATE_ID_BODY);
+        }
+        try {
+          return res.json(await insertCustomResource(undefined, clientId, stored));
+        } catch (err) {
+          const info = classifyDbError(err);
+          if (info.kind === "unique" && info.constraint === "custom_resources_pk") {
+            return res.status(409).json(DUPLICATE_ID_BODY);
+          }
+          throw err;
+        }
+      } catch (err) {
+        return sendDbFailure(res, err, "POST /api/custom_resources");
       }
     },
   );
@@ -4266,13 +4409,13 @@ Format your output strictly in the requested JSON schema. No additional wrap tex
     "/api/custom_resources/:id",
     requireAuth,
     requireRole("Admin"),
-    (req, res) => {
+    async (req, res) => {
       try {
         const { id } = req.params;
-        db_custom_resources = db_custom_resources.filter((r) => r.id !== id);
-        res.json({ success: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+        await deleteCustomResource(undefined, id);
+        res.json({ success: true }); // ไม่พบก็ตอบ success ตามเดิม
+      } catch (err) {
+        return sendDbFailure(res, err, "DELETE /api/custom_resources/:id");
       }
     },
   );

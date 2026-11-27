@@ -93,6 +93,24 @@ export function setUnauthorizedHandler(
   sessionEndedHandler = handler;
 }
 
+// PERSIST-01C-4: Server ไม่ส่ง Key เมื่อค่าในฐานเป็น NULL — Component เรียก .join/.map ตรง ๆ
+// จึงเติม Array ว่างให้ skills / tags / relatedWIs เมื่อค่าที่ได้ไม่ใช่ Array (ค่าที่ไม่ใช่ Object คืนตามเดิม)
+function withArrayFields<T>(value: T, keys: readonly string[]): T {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const src = value as Record<string, unknown>;
+  if (keys.every((k) => Array.isArray(src[k]))) return value;
+  const out: Record<string, unknown> = { ...src };
+  for (const k of keys) {
+    if (!Array.isArray(out[k])) out[k] = [];
+  }
+  return out as T;
+}
+const normalizeExpert = (e: Expert): Expert => withArrayFields(e, ["skills"]);
+const normalizeKBArticle = (a: KBArticle): KBArticle =>
+  withArrayFields(a, ["tags", "relatedWIs"]);
+const normalizeList = <T>(list: T[], fn: (item: T) => T): T[] =>
+  Array.isArray(list) ? list.map(fn) : list;
+
 function extractServerMessage(raw: string, fallback: string): string {
   try {
     return JSON.parse(raw).message || fallback;
@@ -255,17 +273,20 @@ export const api = {
     }),
 
   // KB Articles APIs
-  getKBArticles: () => request<KBArticle[]>("/api/kb_articles"),
+  getKBArticles: () =>
+    request<KBArticle[]>("/api/kb_articles").then((list) =>
+      normalizeList(list, normalizeKBArticle),
+    ),
   createKBArticle: (art: KBArticle) =>
     request<KBArticle>("/api/kb_articles", {
       method: "POST",
       body: JSON.stringify(art),
-    }),
+    }).then(normalizeKBArticle),
   updateKBArticle: (art: KBArticle) =>
     request<KBArticle>(`/api/kb_articles/${art.id}`, {
       method: "PUT",
       body: JSON.stringify(art),
-    }),
+    }).then(normalizeKBArticle),
   deleteKBArticle: (id: string) =>
     request<{ success: boolean }>(`/api/kb_articles/${id}`, {
       method: "DELETE",
@@ -273,24 +294,27 @@ export const api = {
   approveKBArticle: (id: string) =>
     request<KBArticle>(`/api/kb_articles/${id}/approve`, {
       method: "POST",
-    }),
+    }).then(normalizeKBArticle),
   likeKBArticle: (id: string) =>
     request<KBArticle>(`/api/kb_articles/${id}/like`, {
       method: "POST",
-    }),
+    }).then(normalizeKBArticle),
 
   // Experts APIs
-  getExperts: () => request<Expert[]>("/api/experts"),
+  getExperts: () =>
+    request<Expert[]>("/api/experts").then((list) =>
+      normalizeList(list, normalizeExpert),
+    ),
   createExpert: (expert: Expert) =>
     request<Expert>("/api/experts", {
       method: "POST",
       body: JSON.stringify(expert),
-    }),
+    }).then(normalizeExpert),
   updateExpert: (expert: Expert) =>
     request<Expert>(`/api/experts/${expert.id}`, {
       method: "PUT",
       body: JSON.stringify(expert),
-    }),
+    }).then(normalizeExpert),
   deleteExpert: (id: string) =>
     request<{ success: boolean }>(`/api/experts/${id}`, {
       method: "DELETE",

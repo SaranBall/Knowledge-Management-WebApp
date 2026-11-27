@@ -15,8 +15,9 @@
 | `01c1` | `run.ts --suite 01c1 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-1 (§D): `GET /api/departments`, C-05, `id`/`employeeId` ซ้ำ (E-2/E-1.2), F-01 (DELETE = Terminated), F-06, Reactivate · มีข้อตรวจเนื้อหา Response (`check`) — ผลรวมอยู่ใน `summary.json` → `checkFailures` |
 | `01c2` | `run.ts --suite 01c2 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-2 (§D): Employee Master บน DB — สิทธิ์, Admin Replace (ลำดับ/ไม่มี `row_id`/`sort_order`/`isDeptResolved`), Editor Merge (B-17 แถวแรก/แทนทั้งแถว/รหัสซ้ำในคำขอ/ไม่ลบแถว), Q-1 (`9001` = `"9001"`), Q-2 (แถวไม่ใช่ Object → 400), Replace `[]`, Concurrency 2 แบบ × 10 รอบ (TX-09) |
 | `01c3` | `run.ts --suite 01c3 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-3 (§D): เอกสาร + ACL บน DB — ACL Owner-first (FS-02), สิทธิ์ Viewer/Editor (หลัก→ย่อย), `parsedExcelSheets` ลำดับชีต (FS-06) + Array (Q-1), ชนิดข้อมูลผิด (Q-2), approve id ไม่มีจริง → `null`, view/download พร้อมกัน 20 คำขอ (TX-12), ไฟล์จริง: files/sign / `/uploads` / QP, ผูกไฟล์เดียวกันพร้อมกัน 5 คำขอ (TX-11), การจองไฟล์ถูกคืน, `ORPHANED_FILE`, PUT+DELETE พร้อมกัน 10 รอบ · **อัปโหลดไฟล์ทดสอบจริง** (ดู "ลบไฟล์ทดสอบของชุด 01c3") |
+| `01c4` | `run.ts --suite 01c4 <ชื่อรอบ>` | กรณีเพิ่มของ PERSIST-01C-4 (§D): ความรู้และการโต้ตอบ 7 ตารางบน DB — E-2 `DUPLICATE_ID` (experts / custom_resources), F-06 (PUT kb / experts ด้วย id อื่นใน Body), PUT แทนทั้งก้อน + ไม่พบ → Body, F-05 ค่าดิบของ custom_resources, Q-2 (Body เป็น Array → 400, ช่องผิดชนิด), approve / like / reply ไม่พบ → Body ว่าง, like พร้อมกัน 20 (TX-12), search_logs พร้อมกัน 20 id ไม่ซ้ำ (C-15), ปิด Gap พร้อมกัน 5 + Audit / `\u0000` → 500 ไม่มีทั้งคู่ (TX-08), ratings Orphan / KB, ลำดับ experts ASC และตารางอื่นใหม่สุดก่อน · ไม่อัปโหลดไฟล์ |
 
-ชุด `01c1` คาดพฤติกรรม**หลัง** 01C-1 — ถ้ารันกับโค้ดก่อน 01C-1 จะไม่ผ่านหลายข้อโดยเจตนา (ชุด `01c2` / `01c3` เช่นเดียวกันกับ 01C-2 / 01C-3)
+ชุด `01c1` คาดพฤติกรรม**หลัง** 01C-1 — ถ้ารันกับโค้ดก่อน 01C-1 จะไม่ผ่านหลายข้อโดยเจตนา (ชุด `01c2` / `01c3` / `01c4` เช่นเดียวกันกับ 01C-2 / 01C-3 / 01C-4)
 
 ### ลบไฟล์ทดสอบของชุด 01c3
 

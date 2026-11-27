@@ -1,12 +1,13 @@
 /**
  * PERSIST-01C-0 — API Regression harness (ตัวยิง)
  *
- * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3] <ชื่อรอบ>
+ * ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3|01c4] <ชื่อรอบ>
  *   main (ค่าเริ่มต้น) = ชุดหลัก 306 Request — ห้ามแก้ เพื่อให้ยังเทียบกับ baseline ได้
  *   01c1               = กรณีเพิ่มของ PERSIST-01C-1 (§D) — รันแยกรอบบนฐานที่ล้างแล้ว
  *   01c2               = กรณีเพิ่มของ PERSIST-01C-2 (§D, Employee Master) — รันแยกรอบบนฐานที่ล้างแล้ว
  *   01c3               = กรณีเพิ่มของ PERSIST-01C-3 (§D, เอกสาร + ACL + ไฟล์) — รันแยกรอบบนฐานที่ล้างแล้ว
  *                        อัปโหลดไฟล์ทดสอบจริง (ชื่อไฟล์อยู่ใน summary.json → uploadedTestFiles) — ดูวิธีลบใน README
+ *   01c4               = กรณีเพิ่มของ PERSIST-01C-4 (§D, ความรู้และการโต้ตอบ 7 ตาราง) — รันแยกรอบบนฐานที่ล้างแล้ว (ไม่อัปโหลดไฟล์)
  *
  * Environment (ตั้งใน Terminal เอง — ห้ามเขียนลงไฟล์):
  *   HARNESS_BASE_URL        ค่าเริ่มต้น http://localhost:3000
@@ -151,9 +152,9 @@ interface RecordFile {
   responseBody: unknown;
 }
 
-const SUITES = ["main", "01c1", "01c2", "01c3"] as const;
+const SUITES = ["main", "01c1", "01c2", "01c3", "01c4"] as const;
 type Suite = (typeof SUITES)[number];
-const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
+const USAGE = "ใช้: npx tsx scripts/api-regression/run.ts [--suite main|01c1|01c2|01c3|01c4] <ชื่อรอบ>  (a-z A-Z 0-9 . _ -)";
 
 function parseArgs(argv: string[]): { suite: Suite; runName: string } {
   let suite: string = "main";
@@ -1374,6 +1375,242 @@ async function scenario01c3() {
   await step("c3.final.documents_stats", "GET /api/documents/stats", "admin", `${DOCS}/stats`, undefined, 200);
 }
 
+// ---------------------------------------------------------------------------
+// ชุด 01c4 — PERSIST-01C-4 §D (kb_articles, experts, contact_requests, custom_resources, ratings,
+// search_logs, search_resolutions บน DB: E-2, F-05, F-06, TX-08, TX-12, C-15, Q-2 (ก))
+// Status/ผลที่คาด = พฤติกรรมหลัง 01C-4 (โค้ด Memory เดิมจะไม่ผ่าน E-2 / F-06 / Q-2 / C-15 / TX-08 \u0000 — ตั้งใจ)
+// ชุดนี้ไม่อัปโหลดไฟล์
+// ---------------------------------------------------------------------------
+
+async function scenario01c4() {
+  const KB = "/api/kb_articles";
+  const EXP = "/api/experts";
+  const CR = "/api/contact_requests";
+  const RES = "/api/custom_resources";
+  const RT = "/api/ratings";
+  const SL = "/api/search_logs";
+  const SR = "/api/search_resolutions";
+  const AUDIT = "/api/system_audit_logs";
+  const errOf = (r: Res) => (r.body && typeof r.body.error === "string" ? r.body.error : undefined);
+  const listOf = (r: Res): any[] => (Array.isArray(r.body) ? r.body : []);
+  const idsOf = (r: Res) => listOf(r).map((x) => x?.id);
+  const findIn = (r: Res, id: string) => listOf(r).find((x) => x?.id === id);
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const INVALID_PAYLOAD = { error: "INVALID_PAYLOAD" };
+  const DUPLICATE_ID = { error: "DUPLICATE_ID", message: "รหัส (id) นี้มีอยู่ในระบบแล้ว" };
+  const INTERNAL = { error: "INTERNAL_ERROR", message: "เกิดข้อผิดพลาดภายในระบบ" };
+  // step ที่ยอมรับ Status ได้หลายค่า (คำขอพร้อมกัน) — ตัดรายการ unexpected ของขั้นนั้นเมื่อ Status อยู่ในชุดที่ยอมรับ
+  const stepOneOf = async (name: string, route: string, actor: Actor, urlPath: string, body: unknown, allowed: number[]) => {
+    const r = await step(name, route, actor, urlPath, body, allowed[0]);
+    if (allowed.includes(r.status)) {
+      for (let i = unexpected.length - 1; i >= 0; i--) {
+        if (unexpected[i].name === name) unexpected.splice(i, 1);
+      }
+    }
+    return r;
+  };
+
+  // --- เริ่มต้น / ผู้ใช้ ---
+  const adminLogin = await login("admin", "c4.login.admin", ADMIN_ID, ADMIN_PASSWORD, 200);
+  if (adminLogin.status !== 200) throw new Error("ABORT: Admin login ไม่สำเร็จ — ตรวจ HARNESS_ADMIN_ID / HARNESS_ADMIN_PASSWORD");
+  const initialUsers = await step("c4.users.list.initial", "GET /api/users", "admin", "/api/users", undefined, 200);
+  if (!Array.isArray(initialUsers.body) || initialUsers.body.length !== 1) {
+    throw new Error("ABORT: ฐานไม่อยู่ในสถานะเริ่มต้นสะอาด (ผู้ใช้ไม่ใช่ 1 คน) — ล้างฐานแล้วเปิด Server ใหม่ แล้วรันด้วยชื่อรอบใหม่");
+  }
+  for (const [label, p] of [["kb", KB], ["experts", EXP], ["custom_resources", RES], ["ratings", RT], ["search_logs", SL]] as const) {
+    const r = await step(`c4.${label}.list.initial`, `GET ${p}`, "admin", p, undefined, 200);
+    if (listOf(r).length !== 0) throw new Error(`ABORT: ${label} ไม่ว่างตอนเริ่ม — ล้างฐานแล้วเปิด Server ใหม่`);
+  }
+  const mkUser = (emp: string, name: string, role: string, departmentId: string, password: string) => ({
+    name, employeeId: emp, departmentId, position: "ช่าง", role,
+    email: `${emp.toLowerCase()}@example.invalid`, phone: "000-000-0000", status: "Active", startDate: "2026-01-15", password,
+  });
+  await step("c4.users.create.editor", "POST /api/users", "admin", "/api/users", mkUser("HRN-C4-EDITOR", "C4 Editor", "Editor", "d-pd", PW.editor), 200);
+  const viewerRes = await step("c4.users.create.viewer", "POST /api/users", "admin", "/api/users", mkUser("HRN-C4-VIEWER", "C4 Viewer", "Viewer", "d-pd-dl", PW.viewer), 200);
+  const viewerId = idOf(viewerRes);
+  await login("editor", "c4.login.editor", "HRN-C4-EDITOR", PW.editor, 200);
+  await login("viewer", "c4.login.viewer", "HRN-C4-VIEWER", PW.viewer, 200);
+
+  const kbBody = (title: string, extra: Record<string, unknown> = {}) => ({
+    title, type: "Troubleshooting", problem: `${title} — ปัญหา`, solution: `${title} — วิธีแก้`,
+    cause: "สาเหตุ", tags: ["c4"], relatedWIs: ["WI-C4"], ...extra,
+  });
+  const expertBody = (name: string, extra: Record<string, unknown> = {}) => ({
+    name, position: "Engineer", departmentId: "d-en", skills: ["Laminator"], experienceYears: 7,
+    phone: "000-000-0000", email: "c4.expert@example.invalid", availability: "Available", ...extra,
+  });
+
+  // --- E-2: POST experts / custom_resources ด้วย id ที่มีแล้ว → 409 DUPLICATE_ID · ไม่ส่ง id → id ใหม่ ---
+  const exFixed = await step("c4.e2.experts.create.fixedId", "POST /api/experts", "admin", EXP, expertBody("C4 Expert Fixed", { id: "exp-c4-fixed" }), 200);
+  check("E-2 experts: สร้างด้วย id ของ Client ได้ id นั้น", exFixed.body?.id === "exp-c4-fixed");
+  const exDup = await step("c4.e2.experts.create.duplicateId", "POST /api/experts", "admin", EXP, expertBody("C4 Expert Dup", { id: "exp-c4-fixed" }), 409);
+  check("E-2 experts: id ซ้ำ → 409 DUPLICATE_ID (Body ตรง)", same(exDup.body, DUPLICATE_ID));
+  const exAuto = await step("c4.e2.experts.create.noId", "POST /api/experts", "admin", EXP, expertBody("C4 Expert Auto"), 200);
+  check("E-2 experts: ไม่ส่ง id → ได้ id ใหม่ (exp-…)",
+    typeof exAuto.body?.id === "string" && exAuto.body.id.startsWith("exp-") && exAuto.body.id !== "exp-c4-fixed");
+  const exList1 = await step("c4.e2.experts.list", "GET /api/experts", "admin", EXP, undefined, 200);
+  check("E-2 experts: GET ไม่มีแถวซ้ำ (exp-c4-fixed 1 แถว และชื่อเป็นของรายการแรก)",
+    listOf(exList1).filter((e) => e?.id === "exp-c4-fixed").length === 1 && findIn(exList1, "exp-c4-fixed")?.name === "C4 Expert Fixed");
+  check("experts เรียง ASC ตามลำดับที่สร้าง (Fixed ก่อน Auto)",
+    same(idsOf(exList1), ["exp-c4-fixed", exAuto.body?.id]));
+
+  const resBody = (title: string, extra: Record<string, unknown> = {}) => ({
+    title, content: "เนื้อหา", sourceType: "Text", addedBy: "Harness", createdAt: new Date().toISOString(), ...extra,
+  });
+  const rsFixed = await step("c4.e2.resources.create.fixedId", "POST /api/custom_resources", "admin", RES, resBody("C4 Res Fixed", { id: "res-c4-fixed" }), 200);
+  check("E-2 custom_resources: สร้างด้วย id ของ Client ได้ id นั้น", rsFixed.body?.id === "res-c4-fixed");
+  const rsDup = await step("c4.e2.resources.create.duplicateId", "POST /api/custom_resources", "admin", RES, resBody("C4 Res Dup", { id: "res-c4-fixed" }), 409);
+  check("E-2 custom_resources: id ซ้ำ → 409 DUPLICATE_ID (Body ตรง)", same(rsDup.body, DUPLICATE_ID));
+  const rsAuto = await step("c4.e2.resources.create.noId", "POST /api/custom_resources", "admin", RES, resBody("C4 Res Auto"), 200);
+  check("E-2 custom_resources: ไม่ส่ง id → ได้ id ใหม่ (res-…)",
+    typeof rsAuto.body?.id === "string" && rsAuto.body.id.startsWith("res-") && rsAuto.body.id !== "res-c4-fixed");
+
+  // --- F-05: custom_resources ค่าดิบ (ไม่ใช่ String / null / ช่องไม่รู้จัก / ไม่ส่ง addedBy) ---
+  const rsRaw = await step("c4.f05.resources.create.raw", "POST /api/custom_resources", "admin", RES,
+    { title: 5, content: null, sourceType: "URL", foo: { a: 1 } }, 200);
+  const rsRawId: string = typeof rsRaw.body?.id === "string" ? rsRaw.body.id : "missing";
+  const rsList = await step("c4.f05.resources.list", "GET /api/custom_resources", "admin", RES, undefined, 200);
+  const raw = findIn(rsList, rsRawId);
+  check("F-05: GET ได้ title: 5 (ตัวเลข), content: null, foo เดิม และไม่มี Key addedBy",
+    !!raw && raw.title === 5 && "content" in raw && raw.content === null && same(raw.foo, { a: 1 }) && raw.sourceType === "URL" && !("addedBy" in raw));
+  check("custom_resources ใหม่สุดก่อน (Raw, Auto, Fixed)", same(idsOf(rsList), [rsRawId, rsAuto.body?.id, "res-c4-fixed"]));
+
+  // --- Q-2: Body เป็น Array → 400 INVALID_PAYLOAD (4 เส้น) ---
+  const kbForPut = await step("c4.kb.create.admin", "POST /api/kb_articles", "admin", KB, kbBody("C4 KB Put"), 200);
+  const kbPutId: string = typeof kbForPut.body?.id === "string" ? kbForPut.body.id : "missing";
+  const q2Cases: Array<[string, string, string]> = [
+    ["experts.post", "POST /api/experts", EXP],
+    ["experts.put", "PUT /api/experts/:id", `${EXP}/exp-c4-fixed`],
+    ["kb.put", "PUT /api/kb_articles/:id", `${KB}/${kbPutId}`],
+    ["resources.post", "POST /api/custom_resources", RES],
+  ];
+  for (const [label, route, p] of q2Cases) {
+    const r = await step(`c4.q2.arrayBody.${label}`, route, "admin", p, [], 400);
+    check(`Q-2 ${label}: Body เป็น Array → 400 { error: "INVALID_PAYLOAD" }`, same(r.body, INVALID_PAYLOAD));
+  }
+  const exQ2 = await step("c4.q2.experts.create.wrongTypes", "POST /api/experts", "admin", EXP,
+    expertBody("C4 Expert Q2", { experienceYears: "x", skills: "a" }), 200);
+  const exQ2List = await step("c4.q2.experts.list", "GET /api/experts", "admin", EXP, undefined, 200);
+  const exQ2Row = findIn(exQ2List, exQ2.body?.id);
+  check("Q-2 experts: experienceYears \"x\" → ไม่มี Key · skills \"a\" → ไม่มี Key",
+    !!exQ2Row && !("experienceYears" in exQ2Row) && !("skills" in exQ2Row));
+
+  // --- F-06 + PUT แทนทั้งก้อน + PUT ไม่พบ ---
+  const kbPutBody = { ...kbBody("C4 KB Put (แก้)"), id: "kb-hijack-c4", status: "Approved", views: 0, likes: 0 }; // ไม่ส่ง author / createdAt
+  const kbPut = await step("c4.f06.kb.update.bodyId", "PUT /api/kb_articles/:id", "admin", `${KB}/${kbPutId}`, kbPutBody, 200);
+  const kbAfterPut = await step("c4.f06.kb.list", "GET /api/kb_articles", "admin", KB, undefined, 200);
+  const kbRow = findIn(kbAfterPut, kbPutId);
+  check("F-06 kb: GET ยังมี id เดิม และไม่มี id ใหม่จาก Body", !!kbRow && !findIn(kbAfterPut, "kb-hijack-c4"));
+  check("PUT kb แทนทั้งก้อน: ไม่ส่ง author / createdAt → ช่องนั้นหายจาก GET", !!kbRow && !("author" in kbRow) && !("createdAt" in kbRow) && kbRow.title === "C4 KB Put (แก้)");
+  check("PUT kb พบ → ตอบค่าที่อ่านกลับ (id เดิม)", kbPut.body?.id === kbPutId);
+  const kbCountBefore = listOf(kbAfterPut).length;
+  const kbMissingBody = { ...kbBody("C4 KB Missing"), id: "kb-0000000000000" };
+  const kbPutMissing = await step("c4.kb.update.notFound", "PUT /api/kb_articles/:id", "admin", `${KB}/kb-0000000000000`, kbMissingBody, 200);
+  check("PUT kb ไม่พบ → 200 + Body ที่ส่ง", same(kbPutMissing.body, kbMissingBody));
+  const kbAfterMissing = await step("c4.kb.list.afterNotFound", "GET /api/kb_articles", "admin", KB, undefined, 200);
+  check("PUT kb ไม่พบ → GET ไม่มีแถวใหม่", listOf(kbAfterMissing).length === kbCountBefore && !findIn(kbAfterMissing, "kb-0000000000000"));
+
+  const exPut = await step("c4.f06.experts.update.bodyId", "PUT /api/experts/:id", "admin", `${EXP}/exp-c4-fixed`,
+    expertBody("C4 Expert Fixed (แก้)", { id: "exp-hijack-c4" }), 200);
+  const exAfterPut = await step("c4.f06.experts.list", "GET /api/experts", "admin", EXP, undefined, 200);
+  check("F-06 experts: GET ยังมี id เดิม (ชื่อใหม่) และไม่มี id ใหม่จาก Body",
+    findIn(exAfterPut, "exp-c4-fixed")?.name === "C4 Expert Fixed (แก้)" && !findIn(exAfterPut, "exp-hijack-c4") && exPut.body?.id === "exp-c4-fixed");
+  const exMissingBody = expertBody("C4 Expert Missing", { id: "exp-0000000000000" });
+  const exPutMissing = await step("c4.experts.update.notFound", "PUT /api/experts/:id", "admin", `${EXP}/exp-0000000000000`, exMissingBody, 200);
+  check("PUT experts ไม่พบ → 200 + Body ที่ส่ง", same(exPutMissing.body, exMissingBody));
+  const exAfterMissing = await step("c4.experts.list.afterNotFound", "GET /api/experts", "admin", EXP, undefined, 200);
+  check("PUT experts ไม่พบ → GET ไม่มีแถวใหม่", listOf(exAfterMissing).length === listOf(exAfterPut).length && !findIn(exAfterMissing, "exp-0000000000000"));
+
+  // --- approve / like / reply id ไม่มีจริง → 200 Body ว่าง ---
+  const apNone = await step("c4.kb.approve.notFound", "POST /api/kb_articles/:id/approve", "admin", `${KB}/kb-0000000000000/approve`, undefined, 200);
+  check("approve id ไม่มีจริง → 200 Body ว่าง", apNone.status === 200 && apNone.kind === "empty");
+  const likeNone = await step("c4.kb.like.notFound", "POST /api/kb_articles/:id/like", "viewer", `${KB}/kb-0000000000000/like`, undefined, 200);
+  check("like id ไม่มีจริง → 200 Body ว่าง", likeNone.status === 200 && likeNone.kind === "empty");
+  const replyNone = await step("c4.contact.reply.notFound", "POST /api/contact_requests/:id/reply", "editor", `${CR}/cr-0000000000000/reply`, { replyMessage: "x" }, 200);
+  check("reply id ไม่มีจริง → 200 Body ว่าง", replyNone.status === 200 && replyNone.kind === "empty");
+
+  // --- contact_requests: ใหม่สุดก่อน · reply ที่ไม่ใช่ String (Q-2) ---
+  const crBody = (topic: string) => ({ userId: viewerId, expertId: "exp-c4-fixed", topic, message: `${topic} — รายละเอียด` });
+  const cr1 = await step("c4.contact.create.first", "POST /api/contact_requests", "viewer", CR, crBody("C4 คำถาม 1"), 200);
+  const cr2 = await step("c4.contact.create.second", "POST /api/contact_requests", "viewer", CR, crBody("C4 คำถาม 2"), 200);
+  const crList = await step("c4.contact.list.viewer", "GET /api/contact_requests", "viewer", CR, undefined, 200);
+  check("contact_requests ใหม่สุดก่อน", same(idsOf(crList), [cr2.body?.id, cr1.body?.id]));
+  const replyObj = await step("c4.q2.contact.reply.object", "POST /api/contact_requests/:id/reply", "editor", `${CR}/${cr1.body?.id}/reply`, { replyMessage: { a: 1 } }, 200);
+  check("Q-2 reply: replyMessage {a:1} → ข้อความ JSON และ status Replied",
+    replyObj.body?.replyMessage === '{"a":1}' && replyObj.body?.status === "Replied");
+
+  // --- kb ใหม่สุดก่อน + TX-12 like พร้อมกัน 20 ---
+  const kbLike = await step("c4.tx12.kb.create", "POST /api/kb_articles", "admin", KB, kbBody("C4 KB Like"), 200);
+  const kbLikeId: string = typeof kbLike.body?.id === "string" ? kbLike.body.id : "missing";
+  const kbOrder = await step("c4.kb.list.order", "GET /api/kb_articles", "admin", KB, undefined, 200);
+  check("kb_articles ใหม่สุดก่อน (KB Like ก่อน KB Put)", same(idsOf(kbOrder), [kbLikeId, kbPutId]));
+  const likes = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+    step(`c4.tx12.like.${String(i + 1).padStart(2, "0")}`, "POST /api/kb_articles/:id/like", "viewer", `${KB}/${kbLikeId}/like`, undefined, 200)));
+  const likeValues = likes.map((r) => r.body?.likes).sort((a, b) => a - b);
+  check("TX-12 like: ทุกคำขอ 200 และค่า likes ที่ตอบกลับเป็น 1..20 ไม่ซ้ำ",
+    likes.every((r) => r.status === 200) && same(likeValues, Array.from({ length: 20 }, (_, i) => i + 1)));
+  const kbAfterLikes = await step("c4.tx12.kb.list", "GET /api/kb_articles", "admin", KB, undefined, 200);
+  check("TX-12: likes = 20 พอดี", findIn(kbAfterLikes, kbLikeId)?.likes === 20);
+
+  // --- C-15: search_logs พร้อมกัน 20 คำขอ (คำค้นเดียวกัน) → id ไม่ซ้ำ ---
+  const C15 = "HRN-C4-C15-คำค้นพร้อมกัน";
+  const logs = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+    step(`c4.c15.searchLog.${String(i + 1).padStart(2, "0")}`, "POST /api/search_logs", "viewer", SL, { keyword: C15 }, 200)));
+  check("C-15: search_logs พร้อมกัน 20 คำขอ → 200 ทั้งหมด", logs.every((r) => r.status === 200));
+  const slList = await step("c4.c15.searchLogs.list", "GET /api/search_logs", "admin", SL, undefined, 200);
+  const c15Ids = listOf(slList).filter((l) => l?.keyword === C15).map((l) => l.id);
+  check("C-15: GET มี 20 แถวของคำค้นนี้ และ id ไม่ซ้ำ 20 รายการ", c15Ids.length === 20 && new Set(c15Ids).size === 20);
+
+  // --- TX-08: ปิด Gap เดียวกันพร้อมกัน 5 คำขอ → 200×1 / 409×4 และ Audit RESOLVE_GAP เพิ่ม 1 แถว ---
+  const GAP = "HRN-C4-GAP-ไม่มีผลลัพธ์";
+  await step("c4.tx08.gap.searchLog", "POST /api/search_logs", "viewer", SL, { keyword: GAP }, 200);
+  const auditCount = (r: Res, kw: string) =>
+    listOf(r).filter((a) => a?.action === "RESOLVE_GAP" && typeof a?.details === "string" && a.details.includes(kw)).length;
+  const auditBefore = await step("c4.tx08.audit.before", "GET /api/system_audit_logs", "admin", AUDIT, undefined, 200);
+  const resolves = await Promise.all(Array.from({ length: 5 }, (_, i) =>
+    stepOneOf(`c4.tx08.resolve.${i + 1}`, "POST /api/search_resolutions", "admin", SR,
+      { keyword: GAP, action: `C4 มาตรการ ${i + 1}`, assignedTo: "C4 Expert" }, [200, 409])));
+  check("TX-08: ปิด Gap เดียวกันพร้อมกัน 5 คำขอ → 200×1 และ 409 ALREADY_RESOLVED ×4",
+    resolves.filter((r) => r.status === 200).length === 1 &&
+      resolves.filter((r) => r.status === 409 && errOf(r) === "ALREADY_RESOLVED").length === 4);
+  const auditAfter = await step("c4.tx08.audit.after", "GET /api/system_audit_logs", "admin", AUDIT, undefined, 200);
+  check("TX-08: Audit RESOLVE_GAP ของ keyword นี้เพิ่ม 1 แถว", auditCount(auditAfter, GAP) - auditCount(auditBefore, GAP) === 1);
+  const srList = await step("c4.tx08.resolutions.list", "GET /api/search_resolutions", "admin", SR, undefined, 200);
+  check("TX-08: มี Resolution ของ keyword นี้ 1 แถว", listOf(srList).filter((s) => s?.keyword === GAP).length === 1);
+
+  // TX-08: action มี \u0000 → 500 INTERNAL_ERROR เท่านั้น และไม่มีทั้ง Resolution และ Audit ของ keyword นั้น
+  const NUL_GAP = "HRN-C4-NUL-GAP";
+  await step("c4.tx08.nul.searchLog", "POST /api/search_logs", "viewer", SL, { keyword: NUL_GAP }, 200);
+  const nul = await step("c4.tx08.nul.resolve", "POST /api/search_resolutions", "admin", SR, { keyword: NUL_GAP, action: "C4 \u0000 มาตรการ" }, 500);
+  check("TX-08 \\u0000: 500 และ Body = INTERNAL_ERROR เท่านั้น", nul.status === 500 && same(nul.body, INTERNAL));
+  const srAfterNul = await step("c4.tx08.nul.resolutions.list", "GET /api/search_resolutions", "admin", SR, undefined, 200);
+  const auditAfterNul = await step("c4.tx08.nul.audit.list", "GET /api/system_audit_logs", "admin", AUDIT, undefined, 200);
+  check("TX-08 \\u0000: ไม่มี Resolution และไม่มี Audit ของ keyword นั้น",
+    !listOf(srAfterNul).some((s) => s?.keyword === NUL_GAP) && auditCount(auditAfterNul, NUL_GAP) === 0);
+
+  // --- ratings: เอกสารที่ถูกลบภายหลัง (Orphan) → Admin เห็น / Viewer ไม่เห็น · Rating ของ KB → ทุก role ที่เห็น KB ---
+  const docRes = await step("c4.ratings.doc.create", "POST /api/documents", "admin", "/api/documents",
+    { title: "C4 doc for rating", description: "d", type: "WI", departmentId: "d-pd-dl", owner: "Harness", fileType: "PDF", revision: 1, createdAt: new Date().toISOString() }, 200);
+  const docId: string = typeof docRes.body?.id === "string" ? docRes.body.id : "missing";
+  const rDoc = await step("c4.ratings.create.doc", "POST /api/ratings", "viewer", RT, { userId: viewerId, docOrKBId: docId, rating: 4, comment: "C4 เอกสาร" }, 200);
+  const rKb = await step("c4.ratings.create.kb", "POST /api/ratings", "viewer", RT, { userId: viewerId, docOrKBId: kbLikeId, rating: 5, comment: "C4 KB" }, 200);
+  await step("c4.ratings.doc.delete", "DELETE /api/documents/:id", "admin", `/api/documents/${docId}`, undefined, 200);
+  const rtAdmin = await step("c4.ratings.list.admin", "GET /api/ratings", "admin", RT, undefined, 200);
+  const rtViewer = await step("c4.ratings.list.viewer", "GET /api/ratings", "viewer", RT, undefined, 200);
+  const rtEditor = await step("c4.ratings.list.editor", "GET /api/ratings", "editor", RT, undefined, 200);
+  check("ratings: Rating ของเอกสารที่ถูกลบ → Admin เห็น", !!findIn(rtAdmin, rDoc.body?.id));
+  check("ratings: Rating ของเอกสารที่ถูกลบ → Viewer / Editor ไม่เห็น", !findIn(rtViewer, rDoc.body?.id) && !findIn(rtEditor, rDoc.body?.id));
+  check("ratings: Rating ของ KB (Approved) → Admin / Editor / Viewer เห็น",
+    !!findIn(rtAdmin, rKb.body?.id) && !!findIn(rtEditor, rKb.body?.id) && !!findIn(rtViewer, rKb.body?.id));
+  check("ratings: docOrKBId ใน GET = id เป้าหมายเดิม", findIn(rtAdmin, rKb.body?.id)?.docOrKBId === kbLikeId && findIn(rtAdmin, rDoc.body?.id)?.docOrKBId === docId);
+  check("ratings ใหม่สุดก่อน (KB ก่อน เอกสาร)", same(idsOf(rtAdmin), [rKb.body?.id, rDoc.body?.id]));
+
+  // --- สถานะสุดท้าย ---
+  for (const [label, p] of [["kb", KB], ["experts", EXP], ["contact_requests", CR], ["custom_resources", RES], ["ratings", RT], ["search_logs", SL], ["search_resolutions", SR]] as const) {
+    await step(`c4.final.${label}`, `GET ${p}`, "admin", p, undefined, 200);
+  }
+}
+
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   console.log(`Harness ชุด "${SUITE}" รอบ "${runName}" → ${BASE_URL}`);
@@ -1382,7 +1619,8 @@ async function main() {
     if (SUITE === "main") await scenario();
     else if (SUITE === "01c1") await scenario01c1();
     else if (SUITE === "01c2") await scenario01c2();
-    else await scenario01c3();
+    else if (SUITE === "01c3") await scenario01c3();
+    else await scenario01c4();
   } catch (e: any) {
     aborted = String(e?.message || e);
     console.error(aborted);

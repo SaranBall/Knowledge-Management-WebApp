@@ -29,7 +29,8 @@ interface TechnicalKBProps {
   articles: KBArticle[];
   documents: DocumentItem[];
   experts: Expert[];
-  onAddArticle: (art: KBArticle) => void;
+  // 01C-4 (Q-A1 ข): คืนบทความที่ Server ตอบ (id จริง) เมื่อบันทึกสำเร็จ
+  onAddArticle: (art: KBArticle) => Promise<KBArticle | void>;
   onApproveArticle: (id: string) => void;
   onLikeArticle: (id: string) => void;
   onUpdateArticle: (art: KBArticle) => void;
@@ -113,9 +114,17 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    onAddArticle(preparedArticle);
+    const saving = onAddArticle(preparedArticle);
     setIsFormOpen(false);
     setSelectedArticleId(mockId);
+    // 01C-4: เมื่อ Server ตอบบทความ (id จริง) ให้ย้ายการเลือกไป id นั้น ถ้ายังเลือก id ชั่วคราวอยู่
+    Promise.resolve(saving)
+      .then((saved) => {
+        if (saved && saved.id) {
+          setSelectedArticleId((cur) => (cur === mockId ? saved.id : cur));
+        }
+      })
+      .catch(() => {});
 
     // reset form
     setNewArt({
@@ -160,13 +169,21 @@ export const TechnicalKB: React.FC<TechnicalKBProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    onAddArticle(preparedArticle);
+    const saving = onAddArticle(preparedArticle);
     setIsProposalOpen(false);
 
     // Auto-select or clear select depending on view permission of Viewer
     if (currentUser.role !== "Viewer") {
       setSelectedArticleId(mockId);
     }
+    // 01C-4: เมื่อ Server ตอบบทความ (id จริง) ให้ย้ายการเลือกไป id นั้น ถ้ายังเลือก id ชั่วคราวอยู่
+    Promise.resolve(saving)
+      .then((saved) => {
+        if (saved && saved.id) {
+          setSelectedArticleId((cur) => (cur === mockId ? saved.id : cur));
+        }
+      })
+      .catch(() => {});
 
     // reset proposal form
     setProposalData({
